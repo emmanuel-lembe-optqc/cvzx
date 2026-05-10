@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
 from math import pi
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
@@ -17,7 +17,9 @@ from mqc3.pb.mqc3_cloud.program.v1.circuit_pb2 import GaussianState as PbGaussia
 from mqc3.pb.mqc3_cloud.program.v1.circuit_pb2 import (
     HardwareConstrainedSqueezedState as PbHardwareConstrainedSqueezedState,
 )
-from mqc3.pb.mqc3_cloud.program.v1.circuit_pb2 import InitialState as PbInitialState
+from mqc3.pb.mqc3_cloud.program.v1.circuit_pb2 import InitialState
+
+PbInitialState = InitialState  # Alias for better readability
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -517,6 +519,17 @@ class HardwareConstrainedSqueezedState:
     """A squeezed state for hardware execution with a fixed squeezing level.
 
     Only the squeezing angle 'phi' is user-controllable due to hardware constraints.
+
+    The squeezing level (magnitude) is determined by the physical hardware
+    (e.g., pump power, OPO design) and cannot be changed at runtime.
+    This class represents the states that your actual photonic hardware can produce.
+
+    Attributes:
+        phi: Squeezing angle in radians. Determines the squeezing direction.
+             x-squeezed states correspond to phi=0 (amplitude squeezing).
+             p-squeezed states correspond to phi=π/2 (phase squeezing).
+        fixed_squeezing_db: The hardware's fixed squeezing level in decibels.
+                            This can be set per instance or use the class default.
     """
 
     phi: float = 0.0
@@ -527,15 +540,146 @@ class HardwareConstrainedSqueezedState:
     x-squeezed states correspond to :math:`\phi=0`, while p-squeezed states correspond to :math:`\phi=\pi/2`.
     """
 
-    def proto(self) -> PbHardwareConstrainedSqueezedState:  # noqa: D102
+    fixed_squeezing_db: float = 10.0  # 10 dB fixed squeezing (configurable per instance)
+
+    # Class-level hardware constant for default squeezing when not specified
+    DEFAULT_SQUEEZING_DB: ClassVar[float] = 10.0
+
+    def __post_init__(self) -> None:
+        """Validate the squeezing angle."""  # noqa: DOC501
+        if not (0.0 <= self.phi <= pi):
+            msg = f"Phi must be in [0, π], got {self.phi}"
+            raise ValueError(msg)
+        if self.fixed_squeezing_db < 0:
+            msg_0 = f"Squeezing level cannot be negative: {self.fixed_squeezing_db} dB"
+            raise ValueError(msg_0)
+
+    def _get_r_parameter(self) -> float:
+        """Convert squeezing level in dB to the squeezing parameter r.
+
+        Formula: squeezing (dB) = -10 * log10(e^{-2r})
+        Therefore: r = (squeezing_db / 10) * (ln(10) / 2)
+
+        Returns:
+            Squeezing parameter r (dimensionless)
+        """
+        return (self.fixed_squeezing_db / 10.0) * (np.log(10.0) / 2.0)
+
+    def to_bosonic_state(self) -> BosonicState:
+        """Convert this hardware-constrained squeezed state to MQC3 BosonicState.
+
+        Uses the hardware's fixed squeezing level and the user-provided angle.
+        Delegates to MQC3's native BosonicState.squeezed() factory method.
+
+        Returns:
+            BosonicState with single peak (pure Gaussian state) ready for MQC3.
+        """
+        r = self._get_r_parameter()
+        # MQC3's BosonicState.squeezed() expects (r, phi) where:
+        #   r is the squeezing parameter
+        #   phi is the squeezing angle in radians
+        return BosonicState.squeezed(r=r, phi=self.phi)
+
+    @classmethod
+    def from_gaussian_state(
+        cls, gaussian_state: GaussianState, fixed_squeezing_db: float | None = None
+    ) -> HardwareConstrainedSqueezedState:
+        """Convert a GaussianState back to HardwareConstrainedSqueezedState.
+
+        This is useful for extracting hardware parameters from simulation results.
+
+        Args:
+            gaussian_state: MQC3 GaussianState (must be a squeezed state)
+            fixed_squeezing_db: Hardware's fixed squeezing level (if None, inferred)
+
+        Returns:
+            HardwareConstrainedSqueezedState with extracted phi angle.
+        """
+        # Extract the covariance matrix
+        cov = gaussian_state.cov
+
+        # Find the eigenvector with smaller eigenvalue (squeezed quadrature)
+        eigvals, eigvecs = np.linalg.eigh(cov)
+        squeezed_idx = np.argmin(eigvals)
+        phi = np.arctan2(eigvecs[1, squeezed_idx], eigvecs[0, squeezed_idx])
+
+        # If fixed_squeezing_db not provided, infer from covariance
+        if fixed_squeezing_db is None:
+            # For a pure squeezed state: variance_min = (ħ/2) * e^{-2r}
+            variance_min = eigvals[squeezed_idx]
+            r = 0.5 * np.log((hbar / 2.0) / variance_min)
+            fixed_squeezing_db = 20.0 * r * np.log10(np.e)
+            # Clamp to reasonable values
+            fixed_squeezing_db = max(0.0, min(20.0, fixed_squeezing_db))
+
+        return cls(phi=float(phi), fixed_squeezing_db=fixed_squeezing_db)
+
+    @classmethod
+    def from_bosonic_state(
+        cls, bosonic_state: BosonicState, fixed_squeezing_db: float | None = None, peak_index: int = 0
+    ) -> HardwareConstrainedSqueezedState:
+        """Convert a BosonicState back to HardwareConstrainedSqueezedState.
+
+        This is the inverse of to_bosonic_state().
+
+        Args:
+            bosonic_state: MQC3 BosonicState (must have at least one peak)
+            fixed_squeezing_db: Hardware's fixed squeezing level (if None, inferred)
+            peak_index: Which peak to extract (default 0)
+
+        Returns:
+            HardwareConstrainedSqueezedState with extracted phi angle.
+
+        Raises:
+            ValueError: If peak_index is out of range.
+        """
+        if bosonic_state.n_peaks <= peak_index:
+            msg = f"Peak index {peak_index} out of range (n_peaks={bosonic_state.n_peaks})"
+            raise ValueError(msg)
+
+        gaussian_state = bosonic_state.get_gaussian_state(peak_index)
+        return cls.from_gaussian_state(gaussian_state, fixed_squeezing_db)
+
+    def proto(self) -> PbHardwareConstrainedSqueezedState:
+        """Convert to Protocol Buffer representation.
+
+        Returns:
+            PbHardwareConstrainedSqueezedState: The protocol buffer representation.
+        """
         return PbHardwareConstrainedSqueezedState(theta=pi / 2 - self.phi)
 
     @staticmethod
-    def construct_from_proto(proto: PbHardwareConstrainedSqueezedState) -> HardwareConstrainedSqueezedState:  # noqa: D102
+    def construct_from_proto(proto: PbHardwareConstrainedSqueezedState) -> HardwareConstrainedSqueezedState:
+        """Construct from Protocol Buffer representation.
+
+        Returns:
+            HardwareConstrainedSqueezedState: The constructed squeezed state.
+        """
         return HardwareConstrainedSqueezedState(phi=pi / 2 - proto.theta)
 
+    def get_squeezing_parameters(self) -> tuple[float, float]:
+        """Get the physical squeezing parameters.
 
-InitialState = BosonicState | HardwareConstrainedSqueezedState
+        Returns:
+            Tuple of (squeezing_level_dB, squeezing_angle_radians)
+        """
+        return (self.fixed_squeezing_db, self.phi)
+
+    def get_quadrature_variances(self) -> tuple[float, float]:
+        """Calculate the variances of the squeezed and anti-squeezed quadratures.
+
+        Returns:
+            Tuple of (min_variance, max_variance) with respect to hbar.
+            For a vacuum state, variance = hbar/2.
+        """
+        r = self._get_r_parameter()
+        var_min = (hbar / 2.0) * np.exp(-2 * r)
+        var_max = (hbar / 2.0) * np.exp(2 * r)
+        return (var_min, var_max)
+
+    def __repr__(self) -> str:
+        """Return a string representation of the squeezed state."""
+        return f"HardwareConstrainedSqueezedState(phi={self.phi:.3f} rad, squeezing={self.fixed_squeezing_db:.1f} dB)"
 
 
 def construct_proto_from_initial_state(initial_state: InitialState) -> PbInitialState:
