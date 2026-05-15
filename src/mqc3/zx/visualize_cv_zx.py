@@ -269,6 +269,7 @@ class DiagramVisualizer:
         # Draw each sub-diagram at its position
         sub_diagram_size = 1
         for i, sub_diagram in enumerate(diagram.diagrams):
+            print("i", i)
             if isinstance(sub_diagram, CompositionDiagram):
                 sub_diagram_size = len(sub_diagram.diagrams)
             d = start_x - i * (self.config.horizontal_spacing - 2 * self.config.node_radius) * sub_diagram_size
