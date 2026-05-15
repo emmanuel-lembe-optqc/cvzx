@@ -1407,7 +1407,7 @@ class QSpider(ProperDiagram):
         QSpider
             New QSpider with negated phase.
         """
-        return QSpider(phase=-self.phase, num_wires=self.num_wires)
+        return QSpider(phase=-self.phase, _num_inputs=self.num_inputs, _num_outputs=self.num_outputs)
 
     def __repr__(self) -> str:
         """Return string representation of the q-spider.
@@ -1418,8 +1418,8 @@ class QSpider(ProperDiagram):
             String showing phase function and number of wires.
         """
         if self.phase.is_zero():
-            return f"QSpider(wires={self.num_wires})"
-        return f"QSpider(f(x)={self.phase}, wires={self.num_wires})"
+            return f"QSpider(num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
+        return f"QSpider(f(x)={self.phase}, num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
 
 
 @dataclass
@@ -1454,7 +1454,7 @@ class PSpider(ProperDiagram):
         PSpider
             New PSpider with negated phase.
         """
-        return PSpider(phase=-self.phase, num_wires=self.num_wires)
+        return PSpider(phase=-self.phase, _num_inputs=self.num_inputs, _num_outputs=self.num_outputs)
 
     def __repr__(self) -> str:
         """Return string representation of the p-spider.
@@ -1465,8 +1465,8 @@ class PSpider(ProperDiagram):
             String showing phase function and number of wires.
         """
         if self.phase.is_zero():
-            return f"PSpider(wires={self.num_wires})"
-        return f"PSpider(f(x)={self.phase}, wires={self.num_wires})"
+            return f"PSpider(num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
+        return f"PSpider(f(x)={self.phase}, num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
 
 
 @dataclass

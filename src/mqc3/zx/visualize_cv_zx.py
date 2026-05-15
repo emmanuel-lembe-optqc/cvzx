@@ -57,7 +57,7 @@ class VisualizerConfig:
         Symbol mapping for spider types
     """
 
-    node_radius: float = 0.4
+    node_radius: float = 5
     wire_width: float = 1.5
     fontsize: float = 10.0
     arrow_length: float = 2 * node_radius
@@ -168,10 +168,11 @@ class DiagramVisualizer:
         # Determine spider type
         # if isinstance(diagram, (MacronodeSpider, NonGaussianSpider, QSpider, PSpider)):
         if isinstance(diagram, (QSpider, PSpider)):
+            print("Inside the Spiders", radius)
             if radius is None:
                 radius = self.config.node_radius
             arrow_length = 2 * radius
-            print("arrow length", arrow_length)
+            # print("arrow length", arrow_length)
             spider_type = self._get_spider_type(diagram)
             color = self.config.colors.get(spider_type, self.config.colors["default"])
 
@@ -199,7 +200,7 @@ class DiagramVisualizer:
             draw_out_wires = True
             if comp_idx is not None and comp_idx != -1:
                 draw_out_wires = False
-            print("Inputs of the spider", input_positions, draw_out_wires)
+            # print("Inputs of the spider", input_positions, draw_out_wires)
             # Draw input wires (left side)
             # print(comp_idx, color, draw_in_wires, draw_out_wires)
             if draw_in_wires:
@@ -245,9 +246,9 @@ class DiagramVisualizer:
                 ax.plot()
         elif isinstance(diagram, Swap):
             print("Inputs of the SWAP", input_positions)
-            output_positions = self._draw_swap(ax, x, y, comp_idx, tensor_idx, input_positions)
+            output_positions = self._draw_swap(ax, x, y, comp_idx, tensor_idx, input_positions, radius)
         elif isinstance(diagram, (Fourier, FourierInv, Fourier2)):
-            output_positions = self._draw_fourier(ax, x, y, diagram, comp_idx, tensor_idx, input_positions)
+            output_positions = self._draw_fourier(ax, x, y, diagram, comp_idx, tensor_idx, input_positions, radius)
         return output_positions
 
     def _draw_composition(
@@ -299,38 +300,70 @@ class DiagramVisualizer:
             if i == n - 1:
                 idx = comp_idx if comp_idx is not None else -1
             if isinstance(sub_diagram, CompositionDiagram):
-                sub_diagram_size = len(sub_diagram.diagrams)
-                # sub_sub_diagram_span = 18 * radius / (2 * comp_size + 1)
-                # sub_spacing = 2 * sub_sub_diagram_span / 3
-                # sub_radius = sub_sub_diagram_span / 6
-                # x2 = x + d - 3 * sub_radius + sub_sub_diagram_span / 2
-                # # sub_d = start_x - i * sub_spacing * (sub_sub_diagram_size)
-                # input_positions = self._draw_subdiagram(
-                #     ax,
-                #     sub_diagram,
-                #     x + d,
-                #     y,
-                #     comp_idx=idx,
-                #     input_positions=input_positions,
-                #     sub_diagram_span=sub_diagram_span,
-                #     spacing=spacing,
-                #     radius=radius,
-                # )
-            # else:
-            print("inside composition", sub_diagram_span, radius)
-            input_positions = self._draw_subdiagram(
-                ax,
-                sub_diagram,
-                x + d,
-                y,
-                comp_idx=idx,
-                input_positions=input_positions,
-                comp_size=comp_size,
-                sub_diagram_span=sub_diagram_span,
-                spacing=spacing,
-                radius=radius,
-            )
-        print("End composition", input_positions)
+                # If comp_size is not None we must resize
+                if comp_size is not None:
+                    comp_size = len(sub_diagram.diagrams)
+                    sub_sub_diagram_span = 18 * radius / (2 * comp_size + 1)
+                    sub_spacing = 2 * sub_sub_diagram_span / 3
+                    sub_radius = sub_sub_diagram_span / 6
+                    x2 = x + d
+                    x2 += 3 * radius - sub_sub_diagram_span / 2
+                    print("SUB RADIUS", sub_radius)
+                    input_positions = self._draw_subdiagram(
+                        ax,
+                        sub_diagram,
+                        x2,
+                        y,
+                        comp_idx=idx,
+                        input_positions=input_positions,
+                        comp_size=comp_size,
+                        sub_diagram_span=sub_sub_diagram_span,
+                        spacing=sub_spacing,
+                        radius=sub_radius,
+                    )
+                    # input_positions = self._draw_subdiagram(
+                    #     ax,
+                    #     sub_diagram,
+                    #     x + d,
+                    #     y,
+                    #     comp_idx=idx,
+                    #     input_positions=input_positions,
+                    #     comp_size=comp_size,
+                    #     sub_diagram_span=sub_diagram_span,
+                    #     spacing=spacing,
+                    #     radius=radius,
+                    # )
+                # if comp_size is not None, no need to resize
+                else:
+                    sub_diagram_size = len(sub_diagram.diagrams)
+                    # print("inside composition", sub_diagram_span, radius)
+                    input_positions = self._draw_subdiagram(
+                        ax,
+                        sub_diagram,
+                        x + d,
+                        y,
+                        comp_idx=idx,
+                        input_positions=input_positions,
+                        comp_size=comp_size,
+                        sub_diagram_span=sub_diagram_span,
+                        spacing=spacing,
+                        radius=radius,
+                    )
+            else:
+                # print("inside composition", sub_diagram_span, radius)
+                input_positions = self._draw_subdiagram(
+                    ax,
+                    sub_diagram,
+                    x + d,
+                    y,
+                    comp_idx=idx,
+                    input_positions=input_positions,
+                    comp_size=comp_size,
+                    sub_diagram_span=sub_diagram_span,
+                    spacing=spacing,
+                    radius=radius,
+                )
+        # print("End composition", input_positions)
         return input_positions
 
     def _draw_tensor(
@@ -341,6 +374,10 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         input_positions: list = [],
+        comp_size: int | None = None,
+        sub_diagram_span: float | None = None,
+        spacing: float | None = None,
+        radius: float | None = None,
     ) -> None:
         """Draw a tensor diagram (parallel)."""
         n = len(diagram.diagrams)
@@ -352,12 +389,14 @@ class DiagramVisualizer:
         start_y = 0
         output_positions = []
         j = 0
-        print("input positions to the tensor", input_positions)
-        comp_size = None
+        if radius is None:
+            radius = self.config.node_radius
+        print("Sub radius received", radius)
+        # print("input positions to the tensor", input_positions)
         for i, sub_diagram in enumerate(diagram.diagrams):
-            if isinstance(sub_diagram, CompositionDiagram):
+            if isinstance(sub_diagram, CompositionDiagram) and comp_size is None:
                 comp_size = len(sub_diagram.diagrams)
-            h = start_y - i * self.config.vertical_spacing
+            h = start_y - i * (2.2 * radius)
             # Draw sub-diagram with local coordinates
             output_positions += self._draw_subdiagram(
                 ax,
@@ -368,9 +407,12 @@ class DiagramVisualizer:
                 tensor_idx=i,
                 input_positions=input_positions[j : j + sub_diagram.num_inputs],
                 comp_size=comp_size,
+                sub_diagram_span=sub_diagram_span,
+                spacing=spacing,
+                radius=radius,
             )
             j = sub_diagram.num_inputs
-        print("Output positions from the tensor", output_positions)
+        # print("Output positions from the tensor", output_positions)
         return output_positions
 
     def _draw_contracted(self, ax: plt.Axes, diagram: ContractedDiagram) -> None:
@@ -526,7 +568,9 @@ class DiagramVisualizer:
                 ax, diagram, x, y, comp_idx, input_positions, comp_size, sub_diagram_span, spacing, radius
             )
         if isinstance(diagram, TensorDiagram):
-            return self._draw_tensor(ax, diagram, x, y, comp_idx, input_positions)
+            return self._draw_tensor(
+                ax, diagram, x, y, comp_idx, input_positions, comp_size, sub_diagram_span, spacing, radius
+            )
         # if isinstance(diagram, ContractedDiagram):
         #     return self._draw_contracted_at(ax, diagram, x, y, kept_inputs, kept_outputs)
         return [], []
@@ -539,12 +583,16 @@ class DiagramVisualizer:
         comp_idx: int | None = None,
         tensor_idx: int | None = None,
         input_positions: list = [],
+        radius: float | None = None,
     ) -> list[tuple]:
         """Draw a swap node."""
-        r = self.config.node_radius
+        print("Inside SWAP", radius)
+        if radius is None:
+            radius = self.config.node_radius
+        arrow_length = 2 * radius
         # Draw X shape
-        ax.plot([x - r, x + r], [y - r, y + r], "k-", linewidth=self.config.wire_width)
-        ax.plot([x - r, x + r], [y + r, y - r], "k-", linewidth=self.config.wire_width)
+        ax.plot([x - radius, x + radius], [y - radius, y + radius], "k-", linewidth=self.config.wire_width)
+        ax.plot([x - radius, x + radius], [y + radius, y - radius], "k-", linewidth=self.config.wire_width)
 
         # We will draw input and output wires depending of the block is part of
         # a composition diagram
@@ -556,13 +604,13 @@ class DiagramVisualizer:
         if draw_in_wires:
             if not input_positions:
                 input_positions = [
-                    (x + r + self.config.arrow_length, y + r),
-                    (x + r + self.config.arrow_length, y - r),
+                    (x + radius + arrow_length, y + radius),
+                    (x + radius + arrow_length, y - radius),
                 ]
             assert len(input_positions) == 2
             input1 = patches.FancyArrowPatch(
                 input_positions[0],
-                (x + r, y + r),
+                (x + radius, y + radius),
                 arrowstyle="->",
                 ec="black",
                 mutation_scale=20,
@@ -570,7 +618,7 @@ class DiagramVisualizer:
             )
             input2 = patches.FancyArrowPatch(
                 input_positions[1],
-                (x + r, y - r),
+                (x + radius, y - radius),
                 arrowstyle="->",
                 ec="black",
                 mutation_scale=20,
@@ -581,13 +629,13 @@ class DiagramVisualizer:
 
         # Draw Outputs
         output_positions = [
-            (x - r, y + r),
-            (x - r, y - r),
+            (x - radius, y + radius),
+            (x - radius, y - radius),
         ]
         if draw_out_wires:
             output1 = patches.FancyArrowPatch(
                 output_positions[0],
-                (x - r - self.config.arrow_length, y + r),
+                (x - radius - arrow_length, y + radius),
                 arrowstyle="->",
                 ec="black",
                 mutation_scale=20,
@@ -595,7 +643,7 @@ class DiagramVisualizer:
             )
             output2 = patches.FancyArrowPatch(
                 output_positions[1],
-                (x - r - self.config.arrow_length, y - r),
+                (x - radius - arrow_length, y - radius),
                 arrowstyle="->",
                 ec="black",
                 mutation_scale=20,
@@ -614,28 +662,31 @@ class DiagramVisualizer:
         comp_idx: int | None = None,
         tensor_idx: int | None = None,
         input_positions: list = [],
+        radius: float | None = None,
     ) -> list[tuple]:
         """Draw a Fourier node."""
-        r = self.config.node_radius
+        if radius is None:
+            radius = self.config.node_radius
+        arrow_length = 2 * radius
         symbol = "F"
         if isinstance(diagram, FourierInv):
             symbol = "F†"
-            ax.plot([x - r, x - r], [y - r, y + r], "k-", linewidth=self.config.wire_width)
-            ax.plot([x - r, x + r], [y + r, y], "k-", linewidth=self.config.wire_width)
-            ax.plot([x - r, x + r], [y - r, y], "k-", linewidth=self.config.wire_width)
-            ax.text(x, y, symbol, ha="center", va="center", fontsize=14 / r)
+            ax.plot([x - radius, x - radius], [y - radius, y + radius], "k-", linewidth=self.config.wire_width)
+            ax.plot([x - radius, x + radius], [y + radius, y], "k-", linewidth=self.config.wire_width)
+            ax.plot([x - radius, x + radius], [y - radius, y], "k-", linewidth=self.config.wire_width)
+            ax.text(x, y, symbol, ha="center", va="center", fontsize=14 * radius)
         elif isinstance(diagram, Fourier2):
             symbol = "F²"
-            ax.plot([x - r, x], [y, y + r], "k-", linewidth=self.config.wire_width)
-            ax.plot([x - r, x], [y, y - r], "k-", linewidth=self.config.wire_width)
-            ax.plot([x + r, x], [y, y - r], "k-", linewidth=self.config.wire_width)
-            ax.plot([x + r, x], [y, y + r], "k-", linewidth=self.config.wire_width)
-            ax.text(x, y, symbol, ha="center", va="center", fontsize=14 / r)
+            ax.plot([x - radius, x], [y, y + radius], "k-", linewidth=self.config.wire_width)
+            ax.plot([x - radius, x], [y, y - radius], "k-", linewidth=self.config.wire_width)
+            ax.plot([x + radius, x], [y, y - radius], "k-", linewidth=self.config.wire_width)
+            ax.plot([x + radius, x], [y, y + radius], "k-", linewidth=self.config.wire_width)
+            ax.text(x, y, symbol, ha="center", va="center", fontsize=14 * radius)
         else:
-            ax.plot([x + r, x + r], [y - r, y + r], "k-", linewidth=self.config.wire_width)
-            ax.plot([x + r, x - r], [y + r, y], "k-", linewidth=self.config.wire_width)
-            ax.plot([x + r, x - r], [y - r, y], "k-", linewidth=self.config.wire_width)
-            ax.text(x, y, symbol, ha="center", va="center", fontsize=14 / r)
+            ax.plot([x + radius, x + radius], [y - radius, y + radius], "k-", linewidth=self.config.wire_width)
+            ax.plot([x + radius, x - radius], [y + radius, y], "k-", linewidth=self.config.wire_width)
+            ax.plot([x + radius, x - radius], [y - radius, y], "k-", linewidth=self.config.wire_width)
+            ax.text(x, y, symbol, ha="center", va="center", fontsize=14 * radius)
 
         # We will draw input and output wires depending of the block is part of
         # a composition diagram
@@ -646,11 +697,11 @@ class DiagramVisualizer:
         # Draw inputs wires
         if draw_in_wires:
             if not input_positions:
-                input_positions = [(x + r + self.config.arrow_length, y)]
+                input_positions = [(x + radius + arrow_length, y)]
             assert len(input_positions) == 1
             input1 = patches.FancyArrowPatch(
                 input_positions[0],
-                (x + r, y),
+                (x + radius, y),
                 arrowstyle="->",
                 ec="black",
                 mutation_scale=20,
@@ -658,11 +709,11 @@ class DiagramVisualizer:
             )
             ax.add_patch(input1)
         # Draw output wires
-        output_positions = [(x - r - self.config.arrow_length, y)]
+        output_positions = [(x - radius, y)]
         if draw_out_wires:
             output1 = patches.FancyArrowPatch(
                 output_positions[0],
-                (x - r, y),
+                (x - radius - arrow_length, y),
                 arrowstyle="->",
                 ec="black",
                 mutation_scale=20,
@@ -789,19 +840,23 @@ if __name__ == "__main__":
     p = ZxPoly({1: 2, 2: 4})
     n = 1
     m = 1
-    a = PSpider(n, m, p)
-    b = QSpider(n, m, p)
+    a = Fourier()
+    b = Fourier2()
     c = QSpider(n, m, p)
     d = Swap()
     # e = d.compose(c)
     e = a.tensor(b)
     f = e.compose(d)
     g = d.compose(f)
+    g = d.compose(g)
     h = a.compose(b)
     h = h.compose(b)
-    i = a.tensor(h)
-    i = i.tensor(b)
-    i = i.tensor(h)
+    i = a.compose(b).tensor(g)
+    T = [type(elt) for elt in g.diagrams]
+    print(T)
+    # i = i.tensor()
+    # i = i.tensor(b)
+    # i = i.tensor(h)
 
     # print(isinstance(a, ProperDiagram))
     fig = visualize(i, "tensor")
