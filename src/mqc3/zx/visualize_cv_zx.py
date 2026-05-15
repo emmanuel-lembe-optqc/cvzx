@@ -798,6 +798,7 @@ if __name__ == "__main__":
     f = e.compose(d)
     g = d.compose(f)
     h = a.compose(b)
+    h = h.compose(b)
     i = a.tensor(h)
     i = i.tensor(b)
     i = i.tensor(h)
