@@ -161,20 +161,24 @@ class DiagramVisualizer:
         comp_idx: int | None = None,
         tensor_idx: int | None = None,
         input_positions: list = [],
+        radius: float | None = None,
     ) -> list[tuple]:
         """Draw a proper diagram (single node)."""
         output_positions = []
         # Determine spider type
         # if isinstance(diagram, (MacronodeSpider, NonGaussianSpider, QSpider, PSpider)):
         if isinstance(diagram, (QSpider, PSpider)):
-            r = self.config.node_radius
+            if radius is None:
+                radius = self.config.node_radius
+            arrow_length = 2 * radius
+            print("arrow length", arrow_length)
             spider_type = self._get_spider_type(diagram)
             color = self.config.colors.get(spider_type, self.config.colors["default"])
 
             # Draw node
-            pivot = (x - r, y - r)
-            width = 2 * r
-            height = 2 * r
+            pivot = (x - radius, y - radius)
+            width = 2 * radius
+            height = 2 * radius
             box = patches.Rectangle(pivot, width, height, facecolor=color)
             ax.add_patch(box)
 
@@ -207,8 +211,7 @@ class DiagramVisualizer:
                     # input_positions is empty only for the first element of a composition
                     # or a single proper diagram
                     input_positions = [
-                        (pivot[0] + width + self.config.arrow_length, pivot[1] + y_offset[i])
-                        for i in range(diagram.num_inputs)
+                        (pivot[0] + width + arrow_length, pivot[1] + y_offset[i]) for i in range(diagram.num_inputs)
                     ]
                 assert len(input_positions) == diagram.num_inputs
                 for i in range(diagram.num_inputs):
@@ -232,7 +235,7 @@ class DiagramVisualizer:
                 for i in range(diagram.num_outputs):
                     output_i = patches.FancyArrowPatch(
                         output_positions[i],
-                        (pivot[0] - self.config.arrow_length, pivot[1] + y_offset[i]),
+                        (pivot[0] - arrow_length, pivot[1] + y_offset[i]),
                         arrowstyle="->",
                         ec="black",
                         mutation_scale=20,
@@ -256,11 +259,14 @@ class DiagramVisualizer:
         comp_idx: int | None = None,
         input_positions: list = [],
         comp_size: int | None = None,
-    ) -> None:
+        sub_diagram_span: float | None = None,
+        spacing: float | None = None,
+        radius: float | None = None,
+    ) -> list[tuple] | None:
         """Draw a composition diagram (sequential)."""
         n = len(diagram.diagrams)
         if n == 0:
-            return
+            return None
 
         # Calculate positions for each sub-diagram
         # Composition is drawn left to right
@@ -268,16 +274,61 @@ class DiagramVisualizer:
         print("Inputs of the composition", input_positions)
         # Draw each sub-diagram at its position
         sub_diagram_size = 1
+        # comp_size is not None and sub_diagram_span is None means that we are inside
+        # a composition block which is part of a tensor product therefore we must
+        # compute sub_diagram_size, spacing and radius
+        # If comp_size is not None and sub_diagram_span is not None therefore we are
+        # inside a sub_composition diagram of a composition diagram of a tensor diagram
+        # Therefore we must not compute sub_diagram_size, spacing and radius because there
+        # are given to the sub_composition diagram by the composition diagram
+        if comp_size is not None and sub_diagram_span is None:
+            sub_diagram_span = 18 * self.config.node_radius / (2 * comp_size + 1)
+            spacing = 2 * sub_diagram_span / 3
+            radius = sub_diagram_span / 6
+            x += 3 * self.config.node_radius - sub_diagram_span / 2
+        # If comp_size is None, therefore we are inside a composition diagram which
+        # is not part of a tensor diagram. So no need to resize.
+        elif comp_size is None:
+            sub_diagram_span = 6 * self.config.node_radius
+            spacing = 2 * sub_diagram_span / 3
+            radius = self.config.node_radius
+        sub_diagram_size = 1
         for i, sub_diagram in enumerate(diagram.diagrams):
-            print("i", i)
-            if isinstance(sub_diagram, CompositionDiagram):
-                sub_diagram_size = len(sub_diagram.diagrams)
-            d = start_x - i * (self.config.horizontal_spacing - 2 * self.config.node_radius) * sub_diagram_size
+            d = start_x - i * spacing * sub_diagram_size
             idx = i
             if i == n - 1:
                 idx = comp_idx if comp_idx is not None else -1
+            if isinstance(sub_diagram, CompositionDiagram):
+                sub_diagram_size = len(sub_diagram.diagrams)
+                # sub_sub_diagram_span = 18 * radius / (2 * comp_size + 1)
+                # sub_spacing = 2 * sub_sub_diagram_span / 3
+                # sub_radius = sub_sub_diagram_span / 6
+                # x2 = x + d - 3 * sub_radius + sub_sub_diagram_span / 2
+                # # sub_d = start_x - i * sub_spacing * (sub_sub_diagram_size)
+                # input_positions = self._draw_subdiagram(
+                #     ax,
+                #     sub_diagram,
+                #     x + d,
+                #     y,
+                #     comp_idx=idx,
+                #     input_positions=input_positions,
+                #     sub_diagram_span=sub_diagram_span,
+                #     spacing=spacing,
+                #     radius=radius,
+                # )
+            # else:
+            print("inside composition", sub_diagram_span, radius)
             input_positions = self._draw_subdiagram(
-                ax, sub_diagram, x + d, y, comp_idx=idx, input_positions=input_positions
+                ax,
+                sub_diagram,
+                x + d,
+                y,
+                comp_idx=idx,
+                input_positions=input_positions,
+                comp_size=comp_size,
+                sub_diagram_span=sub_diagram_span,
+                spacing=spacing,
+                radius=radius,
             )
         print("End composition", input_positions)
         return input_positions
@@ -302,6 +353,7 @@ class DiagramVisualizer:
         output_positions = []
         j = 0
         print("input positions to the tensor", input_positions)
+        comp_size = None
         for i, sub_diagram in enumerate(diagram.diagrams):
             if isinstance(sub_diagram, CompositionDiagram):
                 comp_size = len(sub_diagram.diagrams)
@@ -315,7 +367,7 @@ class DiagramVisualizer:
                 comp_idx=comp_idx,
                 tensor_idx=i,
                 input_positions=input_positions[j : j + sub_diagram.num_inputs],
-                # comp_size,
+                comp_size=comp_size,
             )
             j = sub_diagram.num_inputs
         print("Output positions from the tensor", output_positions)
@@ -436,6 +488,9 @@ class DiagramVisualizer:
         tensor_idx: int | None = None,
         input_positions: list = [],
         comp_size: int | None = None,
+        sub_diagram_span: float | None = None,
+        spacing: float | None = None,
+        radius: float | None = None,
         kept_inputs: Optional[Sequence[int]] = None,
         kept_outputs: Optional[Sequence[int]] = None,
     ) -> tuple[list[float], list[float]]:
@@ -459,10 +514,17 @@ class DiagramVisualizer:
         tuple[list[float], list[float]]
             Lists of y-coordinates for input ports and output ports
         """
+        if comp_size is None:
+            print("I am here")
+            sub_diagram_span = self.config.horizontal_spacing
+            spacing = 2 * self.config.horizontal_spacing / 3
+            radius = self.config.node_radius
         if isinstance(diagram, ProperDiagram):
-            return self._draw_proper_diagram(ax, diagram, x, y, comp_idx, tensor_idx, input_positions)
+            return self._draw_proper_diagram(ax, diagram, x, y, comp_idx, tensor_idx, input_positions, radius)
         if isinstance(diagram, CompositionDiagram):
-            return self._draw_composition(ax, diagram, x, y, comp_idx, input_positions, comp_size)
+            return self._draw_composition(
+                ax, diagram, x, y, comp_idx, input_positions, comp_size, sub_diagram_span, spacing, radius
+            )
         if isinstance(diagram, TensorDiagram):
             return self._draw_tensor(ax, diagram, x, y, comp_idx, input_positions)
         # if isinstance(diagram, ContractedDiagram):
@@ -730,12 +792,16 @@ if __name__ == "__main__":
     a = PSpider(n, m, p)
     b = QSpider(n, m, p)
     c = QSpider(n, m, p)
-    # c = a.tensor(b)
     d = Swap()
     # e = d.compose(c)
     e = a.tensor(b)
     f = e.compose(d)
     g = d.compose(f)
+    h = a.compose(b)
+    i = a.tensor(h)
+    i = i.tensor(b)
+    i = i.tensor(h)
+
     # print(isinstance(a, ProperDiagram))
-    fig = visualize(g, "tensor")
+    fig = visualize(i, "tensor")
     fig.savefig("swap.png")
