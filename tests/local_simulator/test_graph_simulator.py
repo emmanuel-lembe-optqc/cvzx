@@ -1,6 +1,4 @@
 """
-Test suite for graph simulation features in _local_simulator.py.
-
 This test suite validates:
 1. Basic graph construction and execution
 2. QRL block simulation (squeezing strips)
@@ -11,8 +9,6 @@ This test suite validates:
 7. Graph to program conversion (_graph_to_program)
 8. Circuit to program conversion (_circuit_to_program)
 9. Shared execution logic (_run_program)
-
-Run with: pytest test_graph_simulator.py -v
 """
 
 from math import pi

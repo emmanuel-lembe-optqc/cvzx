@@ -1,6 +1,4 @@
 """
-Test suite for all graph operations defined in ops.py.
-
 This test suite validates:
 1. Wiring (swap and through)
 2. Measurement (various theta angles, readout, feedforward displacements)
@@ -15,8 +13,6 @@ This test suite validates:
 11. BeamSplitter (sqrt_r and theta_rel parameters)
 12. TwoModeShear (a and b parameters)
 13. Manual (theta_a, theta_b, theta_c, theta_d parameters)
-
-Run with: pytest test_graph_operations.py -v
 """
 
 from math import pi

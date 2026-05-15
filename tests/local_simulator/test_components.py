@@ -1,39 +1,36 @@
 """
-New test suite for enhanced components in _local_simulator.py.
-
-This test suite specifically validates the new components:
+This test suite specifically validates the components:
 1. ModeFlowTracker
 2. ModeLifecycleTracker
 3. GraphDependencyAnalyzer
 4. GraphSimulator
-
-Run with: pytest test_components.py -v
 """
 
-import numpy as np
-from math import pi
-import pytest
-import networkx as nx
-
-from mqc3.graph import GraphRepr
-from mqc3.graph.ops import (
-    Measurement as GraphMeasurement,
-    Initialization as GraphInitialization,
-    PhaseRotation as GraphPhaseRotation,
-    Squeezing as GraphSqueezing,
-    ControlledZ as GraphControlledZ,
-    Wiring as GraphWiring,
-)
 from mqc3.client._local_simulator import (
-    ModeFlowTracker,
-    ModeLifecycleTracker,
     GraphDependencyAnalyzer,
     GraphSimulator,
     GraphSimulatorConfig,
+    ModeFlowTracker,
+    ModeLifecycleTracker,
 )
-from mqc3.graph.constant import BLANK_MODE
 from mqc3.feedforward import feedforward
-
+from mqc3.graph import GraphRepr
+from mqc3.graph.constant import BLANK_MODE
+from mqc3.graph.ops import (
+    ControlledZ as GraphControlledZ,
+)
+from mqc3.graph.ops import (
+    Initialization as GraphInitialization,
+)
+from mqc3.graph.ops import (
+    Measurement as GraphMeasurement,
+)
+from mqc3.graph.ops import (
+    PhaseRotation as GraphPhaseRotation,
+)
+from mqc3.graph.ops import (
+    Wiring as GraphWiring,
+)
 
 # =============================================================================
 # ModeFlowTracker Tests
