@@ -889,75 +889,17 @@ class DiagramVisualizer:
             result = result[:17] + "..."
         return result
 
-    def _get_comp_diagram_size(self, diagram: CompositionDiagram) -> int:
-        """Get the exact number of atomic diagrams inside a composition diagram.
-
-        A composition diagram can contain nested composition diagrams, tensor diagrams,
-        and proper diagrams. This function recursively counts:
-            - ProperDiagram: counts as 1
-            - TensorDiagram: counts as 1 (blocks are packed vertically, but still one unit).
-            And even if a Composition diagram is inside this tensor diagram
-            - CompositionDiagram: sum of sizes of its sub-diagrams
-            - ContractedDiagram: counts as 1 (treated as atomic for size calculation)
-
-        Parameters
-        ----------
-        diagram : CompositionDiagram
-            The composition diagram to count.
-
-        Returns:
-        -------
-        int
-            Total number of atomic diagrams (ProperDiagram, TensorDiagram, ContractedDiagram)
-            inside the composition.
-
-        Examples:
-        --------
-        >>> # Single proper diagram
-        >>> comp = CompositionDiagram([QSpider(...)])
-        >>> size = _get_comp_diagram_size(comp)  # Returns 1
-
-        >>> # Nested composition
-        >>> inner = CompositionDiagram([QSpider(...), PSpider(...)])
-        >>> outer = CompositionDiagram([inner, Swap()])
-        >>> size = _get_comp_diagram_size(outer)  # Returns 3 (2 from inner + 1 swap)
-
-        >>> # Composition with tensor diagram
-        >>> tensor = TensorDiagram([QSpider(...), PSpider(...)])
-        >>> comp = CompositionDiagram([tensor, Swap()])
-        >>> size = _get_comp_diagram_size(comp)  # Returns 2 (tensor counts as 1, swap as 1)
-        """
-        total = 0
-
-        for sub_diagram in diagram.diagrams:
-            if isinstance(sub_diagram, ProperDiagram):
-                # Proper diagrams (QSpider, PSpider, Swap, Fourier, etc.) count as 1
-                total += 1
-
-            elif isinstance(sub_diagram, TensorDiagram):
-                # Tensor diagrams are atomic for composition size purposes
-                # Even though they contain multiple diagrams, they are packed vertically
-                # and treated as a single unit in the composition sequence
-                total += 1
-
-            elif isinstance(sub_diagram, CompositionDiagram):
-                # Recursively count nested compositions
-                total += self._get_comp_diagram_size(sub_diagram)
-
-            elif isinstance(sub_diagram, ContractedDiagram):
-                # Contracted diagrams are treated as atomic for size calculation
-                total += 1
-
-            elif isinstance(sub_diagram, ScalarDiagram):
-                # Scalar diagram counts as 1 (closed diagram)
-                total += 1
-
-            else:
-                # Unknown diagram type - raise warning and count as 1
-                warnings.warn(f"Unknown diagram type in composition: {type(sub_diagram)}")
-                total += 1
-
-        return total
+    def _get_spider_type(self, diagram: ProperDiagram) -> str:
+        """Get spider type string from diagram instance."""
+        if isinstance(diagram, QSpider):
+            return "q"
+        if isinstance(diagram, PSpider):
+            return "p"
+        if isinstance(diagram, Swap):
+            return "swap"
+        if isinstance(diagram, (Fourier, FourierInv, Fourier2)):
+            return "fourier"
+        return "default"
 
 
 def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None = None) -> plt.Figure:
@@ -979,3 +921,54 @@ def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None
     """
     visualizer = DiagramVisualizer(config)
     return visualizer.visualize(diagram, title)
+
+
+if __name__ == "__main__":
+    # Build proper diagrams
+    p = ZxPoly({1: 2, 2: 4})
+
+    a = Fourier()
+    b = Fourier2()
+    c = QSpider(1, 1, p)
+    d = Swap()
+
+    # Valid test cases (respecting input/output counts)
+
+    # 1. Single proper diagram
+    fig1 = visualize(c, "Single QSpider")
+    fig1.savefig("Single QSpider")
+
+    # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
+    comp1 = c.compose(a)  # Valid: 1→1
+    fig2 = visualize(comp1, "Composition: QSpider then Fourier")
+    fig2.savefig("Composition: QSpider then Fourier")
+
+    # 3. Tensor of two proper diagrams
+    tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
+    fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
+    fig3.savefig("Tensor: Fourier ⊗ Fourier2")
+
+    # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
+    # Fourier has 1 output, so tensor of two Fouriers has 2 outputs
+    two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
+    comp_swap = two_fouriers.compose(d)  # Valid: 2→2
+    fig4 = visualize(comp_swap, "Composition: (F ⊗ F) then Swap")
+    fig4.savefig("Composition: (F ⊗ F) then Swap")
+
+    # 5. Nested composition: (c ∘ a) ∘ b
+    nested_comp = c.compose(a).compose(b)
+    fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
+    fig5.savefig("Nested composition: (c ∘ a) ∘ b")
+
+    # 6. Tensor containing composition
+    tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
+    fig6 = visualize(tensor_with_comp, "Tensor containing composition")
+    fig6.savefig("Tensor containing composition")
+
+    # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
+    left = a.tensor(a)  # 2 outputs
+    middle = left.compose(d)  # 2 outputs after swap
+    right = a.tensor(a)  # 2 inputs
+    full = middle.compose(right)  # 2→2
+    fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
