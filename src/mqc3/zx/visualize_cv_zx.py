@@ -10,7 +10,6 @@ The visualizer uses matplotlib to draw diagrams in a way that respects
 the input/output wire ordering and connection indices.
 """
 
-import warnings
 from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
@@ -211,7 +210,7 @@ class DiagramVisualizer:
         elif isinstance(diagram, TensorDiagram):
             self._draw_tensor(ax, diagram)
         elif isinstance(diagram, ScalarDiagram):
-            self._draw_scalar(ax, diagram)
+            self._draw_scalar(ax)
         else:
             ax.text(
                 0.5, 0.5, f"Unknown diagram type: {type(diagram)}", ha="center", va="center", transform=ax.transAxes
@@ -310,7 +309,6 @@ class DiagramVisualizer:
                     input_positions = [
                         (pivot[0] + width + arrow_length, pivot[1] + y_offset[i]) for i in range(diagram.num_inputs)
                     ]
-                assert len(input_positions) == diagram.num_inputs
                 for i in range(diagram.num_inputs):
                     input_i = patches.FancyArrowPatch(
                         input_positions[i],
@@ -846,7 +844,7 @@ class DiagramVisualizer:
             ax.add_patch(output1)
         return output_positions
 
-    def _draw_scalar(self, ax: plt.Axes, diagram: ScalarDiagram) -> None:
+    def _draw_scalar(self, ax: plt.Axes) -> None:
         """Draw a scalar diagram (closed loop)."""
         ax.text(
             0.5,
@@ -875,22 +873,32 @@ class DiagramVisualizer:
         if phase.is_zero():
             return ""
         terms = []
+        max_size = 20
         for d, c in sorted(phase.coeffs.items()):
             if d == 0:
                 terms.append(f"{c:.2f}")
             elif d == 1:
                 terms.append(f"{c:.2f}x")
-            elif d == 2:
-                terms.append(f"{c:.2f}x²")
             else:
                 terms.append(f"{c:.2f}x^{d}")
         result = " + ".join(terms)
-        if len(result) > 20:
+        if len(result) > max_size:
             result = result[:17] + "..."
         return result
 
     def _get_spider_type(self, diagram: ProperDiagram) -> str:
-        """Get spider type string from diagram instance."""
+        """Get spider type string from diagram instance.
+
+        Parameters:
+        ----------
+            diagram: ProperDiagram
+                Input proper diagram.
+
+        Returns:
+        -------
+            str
+                Type of the input proper diagram.
+        """
         if isinstance(diagram, QSpider):
             return "q"
         if isinstance(diagram, PSpider):
