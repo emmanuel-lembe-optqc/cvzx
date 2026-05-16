@@ -72,7 +72,7 @@ class VisualizerConfig:
     Attributes:
     ----------
     node_radius : float
-        Radius of spider circles (in points or display units).
+        Each proper diagram is drawn inside a square of radius node_radius.
 
     vertical_factor : float
         Factor for vertical spacing between sub-diagrams in a tensor diagram.
@@ -432,7 +432,7 @@ class DiagramVisualizer:
             if isinstance(sub_diagram, CompositionDiagram):
                 # If comp_size is not None we must resize
                 if comp_size is not None:
-                    comp_size = len(sub_diagram.diagrams)
+                    comp_size = self.config.get_horizontal_space(sub_diagram)
                     sub_sub_diag_hor_span = 18 * radius / (2 * comp_size + 1)
                     sub_hor_spacing = 2 * sub_sub_diag_hor_span / 3
                     sub_radius = sub_sub_diag_hor_span / 6
@@ -548,10 +548,10 @@ class DiagramVisualizer:
             radius = self.config.node_radius
             vertical_spacing = self.config.vertical_spacing
         else:
-            vertical_spacing = 2.2 * radius
+            vertical_spacing = self.config.vertical_factor * radius
         for i, sub_diagram in enumerate(diagram.diagrams):
             if isinstance(sub_diagram, CompositionDiagram) and comp_size is None:
-                comp_size = len(sub_diagram.diagrams)
+                comp_size = self.config.get_horizontal_space(sub_diagram)
             h = start_y - i * vertical_spacing
             # Draw sub-diagram with local coordinates
             sub_input_positions = (
@@ -980,3 +980,18 @@ if __name__ == "__main__":
     full = middle.compose(right)  # 2→2
     fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
     fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+
+    # 8. Big Complex diagram
+    a = Fourier()
+    b = Fourier2()
+    c = QSpider(1, 1, p)
+    d = Swap()
+    e = a.tensor(b)
+    f = e.compose(d)
+    g = d.compose(f)
+    g = d.compose(g)
+    h = a.compose(b)
+    h = h.compose(b)
+    i = a.compose(b).tensor(g)
+    fig8 = visualize(i, "Complex Diagram")
+    fig8.savefig("Complex Diagram.png")
