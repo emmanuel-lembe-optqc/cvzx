@@ -366,6 +366,8 @@ class DiagramVisualizer:
         comp_size: int | None = None,
         hor_spacing: float | None = None,
         radius: float | None = None,
+        kept_inputs: list | None = None,
+        kept_outputs: list | None = None,
     ) -> list[tuple] | None:
         """Draw a composition diagram.
 
@@ -500,6 +502,8 @@ class DiagramVisualizer:
         comp_size: int | None = None,
         hor_spacing: float | None = None,
         radius: float | None = None,
+        kept_inputs: list | None = None,
+        kept_outputs: list | None = None,
     ) -> None:
         """Draw a tensor diagram (parallel).
 
@@ -570,10 +574,11 @@ class DiagramVisualizer:
                 comp_size = self.config.get_horizontal_space(sub_diagram)
             h = start_y - i * vertical_spacing
             # Draw sub-diagram with local coordinates
-            sub_input_positions = (
-                input_positions[j : j + sub_diagram.num_inputs] if input_positions is not None else None
-            )
-
+            sub_input_positions = None
+            if input_positions is not None:
+                sub_input_positions = input_positions[j : j + sub_diagram.num_inputs]
+                # We must reverse back the sub_input_positions
+                sub_input_positions.reverse()
             output_positions = (
                 self._draw_sub_diagram(
                     ax,
@@ -660,6 +665,8 @@ class DiagramVisualizer:
             radius = self.config.node_radius
         arrow_length = 2 * radius
         # Draw second diagram (D2)
+        if isinstance(diagram.second, CompositionDiagram) and comp_size is None:
+            comp_size = self.config.get_horizontal_space(diagram.second)
         num_d2_out_wires = len(diagram.kept_second_outputs) + len(diagram.J2)
         num_d2_input_wires = len(diagram.kept_second_inputs) + len(diagram.I2)
         assert num_d2_out_wires == num_d2_input_wires
@@ -668,6 +675,8 @@ class DiagramVisualizer:
         draw_kept_second_inputs = [num_d2_input_wires - i - 1 for i in diagram.kept_second_inputs]
         draw_kept_second_outputs = [num_d2_out_wires - i - 1 for i in diagram.kept_second_outputs]
         print("KEPT second inputs to draw", draw_kept_second_outputs)
+        # We do not need to reverse input_positions like in draw_tensor because
+        # We draw from bottom to top
         in_positions = input_positions[: len(draw_kept_second_inputs)] if input_positions is not None else None
         y2 = y - self.config.vertical_spacing
         x2 = x
@@ -685,6 +694,8 @@ class DiagramVisualizer:
         )
 
         # Draw first diagram (D1)
+        if isinstance(diagram.first, CompositionDiagram) and comp_size is None:
+            comp_size = self.config.get_horizontal_space(diagram.second)
         num_d1_out_wires = len(diagram.kept_first_outputs) + len(diagram.I1)
         num_d1_input_wires = len(diagram.kept_first_inputs) + len(diagram.J1)
         assert num_d1_out_wires == num_d1_input_wires
@@ -949,7 +960,17 @@ class DiagramVisualizer:
         if isinstance(diagram, TensorDiagram):
             return self._draw_tensor(ax, diagram, x, y, comp_idx, input_positions, comp_size, hor_spacing, radius)
         if isinstance(diagram, ContractedDiagram):
-            return self._draw_contracted(ax, diagram, x, y, comp_idx, input_positions, comp_size, hor_spacing, radius)
+            return self._draw_contracted(
+                ax,
+                diagram,
+                x,
+                y,
+                comp_idx,
+                input_positions,
+                comp_size,
+                hor_spacing,
+                radius,
+            )
         return [], []
 
     def _draw_swap(  # noqa: PLR0913, PLR0917
@@ -1265,59 +1286,61 @@ if __name__ == "__main__":
 
     # Valid test cases (respecting input/output counts)
 
-    # # 1. Single proper diagram
-    # fig1 = visualize(c, "Single QSpider")
-    # fig1.savefig("Single QSpider")
+    # 1. Single proper diagram
+    fig1 = visualize(c, "Single QSpider")
+    fig1.savefig("Single QSpider")
 
-    # # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
-    # comp1 = c.compose(a)  # Valid: 1→1
-    # fig2 = visualize(comp1, "Composition: QSpider then Fourier")
-    # fig2.savefig("Composition: QSpider then Fourier")
+    # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
+    comp1 = c.compose(a)  # Valid: 1→1
+    fig2 = visualize(comp1, "Composition: QSpider then Fourier")
+    fig2.savefig("Composition: QSpider then Fourier")
 
-    # # 3. Tensor of two proper diagrams
-    # tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
-    # fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
-    # fig3.savefig("Tensor: Fourier ⊗ Fourier2")
+    # 3. Tensor of two proper diagrams
+    tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
+    fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
+    fig3.savefig("Tensor: Fourier ⊗ Fourier2")
 
-    # # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
-    # # Fourier has 1 output, so tensor of two Fouriers has 2 outputs
-    # two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
-    # comp_swap = two_fouriers.compose(d)  # Valid: 2→2
-    # fig4 = visualize(comp_swap, "Composition: (F ⊗ F) then Swap")
-    # fig4.savefig("Composition: (F ⊗ F) then Swap")
+    # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
+    # Fourier has 1 output, so tensor of two Fouriers has 2 outputs
+    two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
+    comp_swap = two_fouriers.compose(d)  # Valid: 2→2
+    fig4 = visualize(comp_swap, "Composition: (F ⊗ F) then Swap")
+    fig4.savefig("Composition: (F ⊗ F) then Swap")
 
-    # # 5. Nested composition: (c ∘ a) ∘ b
-    # nested_comp = c.compose(a).compose(b)
-    # fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
-    # fig5.savefig("Nested composition: (c ∘ a) ∘ b")
+    # 5. Nested composition: (c ∘ a) ∘ b
+    nested_comp = c.compose(a).compose(b)
+    fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
+    fig5.savefig("Nested composition: (c ∘ a) ∘ b")
 
-    # # 6. Tensor containing composition
-    # tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
-    # fig6 = visualize(tensor_with_comp, "Tensor containing composition")
-    # fig6.savefig("Tensor containing composition")
+    # 6. Tensor containing composition
+    tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
+    fig6 = visualize(tensor_with_comp, "Tensor containing composition")
+    fig6.savefig("Tensor containing composition")
 
-    # # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
-    # left = a.tensor(a)  # 2 outputs
-    # middle = left.compose(d)  # 2 outputs after swap
-    # right = a.tensor(a)  # 2 inputs
-    # full = middle.compose(right)  # 2→2
-    # fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
-    # fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
+    left = a.tensor(a)  # 2 outputs
+    middle = left.compose(d)  # 2 outputs after swap
+    right = a.tensor(a)  # 2 inputs
+    full = middle.compose(right)  # 2→2
+    fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
 
-    # # 8. Big Complex diagram
-    # a = Fourier()
-    # b = Fourier2()
-    # c = QSpider(1, 1, p)
-    # d = Swap()
-    # e = a.tensor(b)
-    # f = e.compose(d)
-    # g = d.compose(f)
-    # g = d.compose(g)
-    # h = a.compose(b)
-    # h = h.compose(b)
-    # i = a.compose(b).tensor(g)
-    # fig8 = visualize(i, "Complex Diagram")
-    # fig8.savefig("Complex Diagram.png")
+    # 8. Big Complex diagram
+    a = Fourier()
+    b = Fourier2()
+    c = QSpider(1, 1, p)
+    d = Swap()
+    e = a.tensor(b)
+    e = e.tensor(b)
+    d2 = d.tensor(a)
+    f = e.compose(d2)
+    g = d2.compose(f)
+    g = d2.compose(g)
+    h = a.compose(b)
+    h = h.compose(b)
+    i = a.compose(b).tensor(g)
+    fig8 = visualize(i, "Complex Diagram")
+    fig8.savefig("Complex Diagram.png")
     a1 = QSpider(3, 3, p)
     b1 = PSpider(3, 3, p)
     e1 = QSpider(2, 2, p)
