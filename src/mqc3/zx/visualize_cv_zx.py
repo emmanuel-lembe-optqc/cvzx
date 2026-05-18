@@ -316,8 +316,8 @@ class DiagramVisualizer:
                     input_positions = [
                         (pivot[0] + width + arrow_length, pivot[1] + y_offset[i]) for i in range(diagram.num_inputs)
                     ]
-                print("INPUT POSTIONSSS", input_positions)
-                print(diagram.num_inputs)
+                # print("INPUT POSTIONSSS", input_positions)
+                # print(diagram.num_inputs)
                 for i in range(diagram.num_inputs):
                     if i in kept_inputs:
                         input_i = patches.FancyArrowPatch(
@@ -414,81 +414,57 @@ class DiagramVisualizer:
         if n == 0:
             return None
 
+        print("INPUT SPAN COMPOSITION", 6 * radius)
         # Draw each sub-diagram at its position
         # comp_size is not None and radius is None means that we are inside
         # a composition block which is part of a tensor product therefore we must
-        # resize the sub_diag_hor_span, spacing and radius
+        # resize the sub_hor_span, spacing and radius
         # If comp_size is not None and radius is not None therefore we are
         # inside a sub_composition diagram of a composition diagram of a tensor diagram
-        # Therefore we must not resize the sub_diag_hor_span, spacing and radius because there
+        # Therefore we must not resize the sub_hor_span, spacing and radius because there
         # are given to the sub_composition diagram by the composition diagram
-        if comp_size is not None and radius is None:
-            sub_diag_hor_span = 18 * self.config.node_radius / (2 * comp_size + 1)
-            hor_spacing = 2 * sub_diag_hor_span / 3
-            radius = sub_diag_hor_span / 6
-            x += 3 * self.config.node_radius - sub_diag_hor_span / 2
-        # If comp_size is None, therefore we are inside a composition diagram which
-        # is not part of a tensor diagram. So no need to resize.
-        elif comp_size is None:
-            sub_diag_hor_span = 6 * self.config.node_radius
-            hor_spacing = 2 * sub_diag_hor_span / 3
-            radius = self.config.node_radius
+        print(comp_size, comp_idx)
+        if comp_size is not None:
+            comp_size = len(diagram.diagrams)
+            print("COMPOSITION SIZE", comp_size)
+            # comp_size = self.config.get_horizontal_space(diagram)
+            # print("REAL COMPOSITION SIZE", self.config.get_horizontal_space(diagram))
+            # If comp_size is None, therefore we are inside a composition diagram which
+            # is not part of a tensor diagram. So no need to resize.
+            if comp_idx != -1 and comp_idx is not None:
+                print("Here")
+                sub_hor_span = 6 * radius / comp_size
+                # sub_hor_span = 20 * radius / (2 * comp_size + 1)
+            else:
+                print("Here Here")
+                sub_hor_span = 18 * radius / (2 * comp_size + 1)
+        else:
+            print("End")
+            sub_hor_span = 6 * radius
+        sub_radius = sub_hor_span / 6
+        sub_hor_spacing = 4 * sub_radius
+        sub_x = x + 3 * (radius - sub_radius)
+        print("SUB HORIZONTAL SAPN", sub_hor_span)
+        print("SUB X", sub_x)
         # Calculate positions for each sub-diagram
         # Composition is drawn left to right
         start_x = 0
-        sub_diagram_size = 1
         for i, sub_diagram in enumerate(diagram.diagrams):
-            d = start_x - i * hor_spacing * sub_diagram_size
+            d = start_x - i * sub_hor_spacing
             idx = i
             if i == n - 1:
                 idx = comp_idx if comp_idx is not None else -1
-            if isinstance(sub_diagram, CompositionDiagram):
-                # If comp_size is not None we must resize
-                if comp_size is not None:
-                    comp_size = self.config.get_horizontal_space(sub_diagram)
-                    sub_sub_diag_hor_span = 18 * radius / (2 * comp_size + 1)
-                    sub_hor_spacing = 2 * sub_sub_diag_hor_span / 3
-                    sub_radius = sub_sub_diag_hor_span / 6
-                    x2 = x + d
-                    x2 += 3 * radius - sub_sub_diag_hor_span / 2
-                    input_positions = self._draw_sub_diagram(
-                        ax,
-                        sub_diagram,
-                        x2,
-                        y,
-                        comp_idx=idx,
-                        input_positions=input_positions,
-                        comp_size=comp_size,
-                        hor_spacing=sub_hor_spacing,
-                        radius=sub_radius,
-                    )
-                # if comp_size is not None, no need to resize
-                else:
-                    # self.config.get_horizontal_space(CompositionDiagram)
-                    sub_diagram_size = self.config.get_horizontal_space(sub_diagram)
-                    input_positions = self._draw_sub_diagram(
-                        ax,
-                        sub_diagram,
-                        x + d,
-                        y,
-                        comp_idx=idx,
-                        input_positions=input_positions,
-                        comp_size=comp_size,
-                        hor_spacing=hor_spacing,
-                        radius=radius,
-                    )
-            else:
-                input_positions = self._draw_sub_diagram(
-                    ax,
-                    sub_diagram,
-                    x + d,
-                    y,
-                    comp_idx=idx,
-                    input_positions=input_positions,
-                    comp_size=comp_size,
-                    hor_spacing=hor_spacing,
-                    radius=radius,
-                )
+            input_positions = self._draw_sub_diagram(
+                ax,
+                sub_diagram,
+                sub_x + d,
+                y,
+                comp_idx=idx,
+                input_positions=input_positions,
+                comp_size=comp_size,
+                hor_spacing=sub_hor_spacing,
+                radius=sub_radius,
+            )
         return input_positions
 
     def _draw_tensor(  # noqa: PLR0913, PLR0917
@@ -567,11 +543,16 @@ class DiagramVisualizer:
         # input_positions are from the bottom to the top and since
         # we draw from top to bottom in draw_tensor we must reverse
         # input_positions
+        # print("INPUT RADIUS TENSOR", radius)
         if input_positions is not None:
             input_positions.reverse()
         for i, sub_diagram in enumerate(diagram.diagrams):
-            if isinstance(sub_diagram, CompositionDiagram) and comp_size is None:
-                comp_size = self.config.get_horizontal_space(sub_diagram)
+            if isinstance(sub_diagram, CompositionDiagram):
+                # It is not necessary to use self.config.get_horizontal_space
+                # At this level because the resize will happen inside the children
+                # sub diagrams
+                # comp_size = self.config.get_horizontal_space(sub_diagram)
+                comp_size = len(sub_diagram.diagrams)
             h = start_y - i * vertical_spacing
             # Draw sub-diagram with local coordinates
             sub_input_positions = None
@@ -579,6 +560,7 @@ class DiagramVisualizer:
                 sub_input_positions = input_positions[j : j + sub_diagram.num_inputs]
                 # We must reverse back the sub_input_positions
                 sub_input_positions.reverse()
+            # Find local_kept_inputs and local_kept_outputs
             output_positions = (
                 self._draw_sub_diagram(
                     ax,
@@ -670,11 +652,11 @@ class DiagramVisualizer:
         num_d2_out_wires = len(diagram.kept_second_outputs) + len(diagram.J2)
         num_d2_input_wires = len(diagram.kept_second_inputs) + len(diagram.I2)
         assert num_d2_out_wires == num_d2_input_wires
-        print("Here", num_d2_input_wires)
-        print("KEPT second inputs", diagram.kept_second_inputs)
+        # print("Here", num_d2_input_wires)
+        # print("KEPT second inputs", diagram.kept_second_inputs)
         draw_kept_second_inputs = [num_d2_input_wires - i - 1 for i in diagram.kept_second_inputs]
         draw_kept_second_outputs = [num_d2_out_wires - i - 1 for i in diagram.kept_second_outputs]
-        print("KEPT second inputs to draw", draw_kept_second_outputs)
+        # print("KEPT second inputs to draw", draw_kept_second_outputs)
         # We do not need to reverse input_positions like in draw_tensor because
         # We draw from bottom to top
         in_positions = input_positions[: len(draw_kept_second_inputs)] if input_positions is not None else None
@@ -888,7 +870,7 @@ class DiagramVisualizer:
         # We take outputs from bottom to top
         output_positions = [output_positions_2[i] for i in draw_kept_second_outputs]
         output_positions += [output_positions_1[i] for i in draw_kept_first_outputs]
-        print("OUTPUT POSITIONS", output_positions)
+        # print("OUTPUT POSITIONS", output_positions)
         return output_positions
 
     def _draw_sub_diagram(  # noqa: PLR0913, PLR0917
@@ -948,8 +930,8 @@ class DiagramVisualizer:
             next sub-diagram if there is any.
         """
         if comp_size is None or radius is None or hor_spacing is None:
-            sub_diag_hor_span = self.config.horizontal_spacing
-            hor_spacing = 2 * sub_diag_hor_span / 3
+            sub_hor_span = self.config.horizontal_spacing
+            hor_spacing = 2 * sub_hor_span / 3
             radius = self.config.node_radius
         if isinstance(diagram, ProperDiagram):
             return self._draw_proper_diagram(
@@ -1043,7 +1025,7 @@ class DiagramVisualizer:
                 mutation_scale=20,
                 linewidth=self.config.wire_width,
             )
-            print("input2", input_positions[0], input_positions[1], (x + radius, y + radius))
+            # print("input2", input_positions[0], input_positions[1], (x + radius, y + radius))
             input1 = patches.FancyArrowPatch(
                 input_positions[0],
                 (x + radius, y - radius),
@@ -1278,6 +1260,7 @@ def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None
 if __name__ == "__main__":
     # Build proper diagrams
     p = ZxPoly({1: 2, 2: 4})
+    q = ZxPoly({1: 2, 3: 4, 5: 7})
 
     a = Fourier()
     b = Fourier2()
@@ -1286,44 +1269,44 @@ if __name__ == "__main__":
 
     # Valid test cases (respecting input/output counts)
 
-    # 1. Single proper diagram
-    fig1 = visualize(c, "Single QSpider")
-    fig1.savefig("Single QSpider")
+    # # 1. Single proper diagram
+    # fig1 = visualize(c, "Single QSpider")
+    # fig1.savefig("Single QSpider")
 
-    # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
-    comp1 = c.compose(a)  # Valid: 1→1
-    fig2 = visualize(comp1, "Composition: QSpider then Fourier")
-    fig2.savefig("Composition: QSpider then Fourier")
+    # # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
+    # comp1 = c.compose(a)  # Valid: 1→1
+    # fig2 = visualize(comp1, "Composition: QSpider then Fourier")
+    # fig2.savefig("Composition: QSpider then Fourier")
 
-    # 3. Tensor of two proper diagrams
-    tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
-    fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
-    fig3.savefig("Tensor: Fourier ⊗ Fourier2")
+    # # 3. Tensor of two proper diagrams
+    # tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
+    # fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
+    # fig3.savefig("Tensor: Fourier ⊗ Fourier2")
 
-    # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
-    # Fourier has 1 output, so tensor of two Fouriers has 2 outputs
-    two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
-    comp_swap = two_fouriers.compose(d)  # Valid: 2→2
-    fig4 = visualize(comp_swap, "Composition: (F ⊗ F) then Swap")
-    fig4.savefig("Composition: (F ⊗ F) then Swap")
+    # # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
+    # # Fourier has 1 output, so tensor of two Fouriers has 2 outputs
+    # two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
+    # comp_swap = two_fouriers.compose(d)  # Valid: 2→2
+    # fig4 = visualize(comp_swap, "Composition: (F ⊗ F) then Swap")
+    # fig4.savefig("Composition: (F ⊗ F) then Swap")
 
-    # 5. Nested composition: (c ∘ a) ∘ b
-    nested_comp = c.compose(a).compose(b)
-    fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
-    fig5.savefig("Nested composition: (c ∘ a) ∘ b")
+    # # 5. Nested composition: (c ∘ a) ∘ b
+    # nested_comp = c.compose(a).compose(b)
+    # fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
+    # fig5.savefig("Nested composition: (c ∘ a) ∘ b")
 
-    # 6. Tensor containing composition
-    tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
-    fig6 = visualize(tensor_with_comp, "Tensor containing composition")
-    fig6.savefig("Tensor containing composition")
+    # # 6. Tensor containing composition
+    # tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
+    # fig6 = visualize(tensor_with_comp, "Tensor containing composition")
+    # fig6.savefig("Tensor containing composition")
 
-    # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
-    left = a.tensor(a)  # 2 outputs
-    middle = left.compose(d)  # 2 outputs after swap
-    right = a.tensor(a)  # 2 inputs
-    full = middle.compose(right)  # 2→2
-    fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
-    fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    # # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
+    # left = a.tensor(a)  # 2 outputs
+    # middle = left.compose(d)  # 2 outputs after swap
+    # right = a.tensor(a)  # 2 inputs
+    # full = middle.compose(right)  # 2→2
+    # fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    # fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
 
     # 8. Big Complex diagram
     a = Fourier()
@@ -1336,15 +1319,31 @@ if __name__ == "__main__":
     f = e.compose(d2)
     g = d2.compose(f)
     g = d2.compose(g)
+    a2 = QSpider(3, 3, p)
+    b2 = CompositionDiagram([
+        a2,
+        a2,
+        # a2,
+        # a2,
+        # a2,
+        # a2,
+    ])
+    # b2 = b2.compose(a2)
+    # b2 = b2.compose(a2)
+    g = g.compose(b2)
     h = a.compose(b)
     h = h.compose(b)
-    i = a.compose(b).tensor(g)
+    j = QSpider(4, 4, q)
+    k = j.tensor(g)
+    i = a.tensor(g)
+    T = [type(d) for d in i.diagrams]
+    # print(T)
     fig8 = visualize(i, "Complex Diagram")
     fig8.savefig("Complex Diagram.png")
-    a1 = QSpider(3, 3, p)
-    b1 = PSpider(3, 3, p)
-    e1 = QSpider(2, 2, p)
-    c1 = ContractedDiagram(a1, b1, [0, 1], [1, 2], [0, 2], [1, 2])
-    d1 = d.compose(c1)
-    fig = visualize(d1.compose(d), "Contracted Diagram")
-    fig.savefig("Contracted Diagram")
+    # a1 = QSpider(3, 3, p)
+    # b1 = PSpider(3, 3, p)
+    # e1 = QSpider(2, 2, p)
+    # c1 = ContractedDiagram(a1, b1, [0, 1], [1, 2], [0, 2], [1, 2])
+    # d1 = d.compose(c1)
+    # fig = visualize(d1.compose(d), "Contracted Diagram")
+    # fig.savefig("Contracted Diagram")
