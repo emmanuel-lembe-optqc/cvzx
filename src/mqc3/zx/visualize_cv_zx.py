@@ -316,12 +316,10 @@ class DiagramVisualizer:
                     input_positions = [
                         (pivot[0] + width + arrow_length, pivot[1] + y_offset[i]) for i in range(diagram.num_inputs)
                     ]
-                # print("INPUT POSTIONSSS", input_positions)
-                # print(diagram.num_inputs)
                 for i in range(diagram.num_inputs):
                     if i in kept_inputs:
                         input_i = patches.FancyArrowPatch(
-                            input_positions[kept_inputs.index(i)],
+                            input_positions[i],
                             (pivot[0] + width, pivot[1] + y_offset[i]),
                             arrowstyle="->",
                             ec="black",
@@ -363,8 +361,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         input_positions: list | None = None,
-        comp_size: int | None = None,
-        hor_spacing: float | None = None,
+        is_sub_comp: bool = False,
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
@@ -392,13 +389,8 @@ class DiagramVisualizer:
             the input wires from that sub-diagram to the current diagram.
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
-        comp_size: int | None
-            This variable is not None when a composition is part of a tensor
-            diagram. And in that case we need to resize this composition
-            diagram so that it fits in the horizontal spacing of the tensor
-            diagram. It is inside this function that it is changed to an int.
-        hor_spacing: float | None
-            Horizontal spacing between sub-diagrams inside a composition diagram.
+        is_sub_comp: bool
+            It is true when a composition is a sub-diagram.
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
@@ -414,38 +406,20 @@ class DiagramVisualizer:
         if n == 0:
             return None
 
-        print("INPUT SPAN COMPOSITION", 6 * radius)
+        if radius is None:
+            radius = self.config.node_radius
         # Draw each sub-diagram at its position
-        # comp_size is not None and radius is None means that we are inside
-        # a composition block which is part of a tensor product therefore we must
-        # resize the sub_hor_span, spacing and radius
-        # If comp_size is not None and radius is not None therefore we are
-        # inside a sub_composition diagram of a composition diagram of a tensor diagram
-        # Therefore we must not resize the sub_hor_span, spacing and radius because there
-        # are given to the sub_composition diagram by the composition diagram
-        print(comp_size, comp_idx)
-        if comp_size is not None:
-            comp_size = len(diagram.diagrams)
-            print("COMPOSITION SIZE", comp_size)
-            # comp_size = self.config.get_horizontal_space(diagram)
-            # print("REAL COMPOSITION SIZE", self.config.get_horizontal_space(diagram))
-            # If comp_size is None, therefore we are inside a composition diagram which
-            # is not part of a tensor diagram. So no need to resize.
-            if comp_idx != -1 and comp_idx is not None:
-                print("Here")
-                sub_hor_span = 6 * radius / comp_size
-                # sub_hor_span = 20 * radius / (2 * comp_size + 1)
-            else:
-                print("Here Here")
-                sub_hor_span = 18 * radius / (2 * comp_size + 1)
+        # If is_sub_comp is True means that we are inside a composition block
+        # which is part of a tensor product therefore we must resize the
+        # sub_hor_span, spacing and radius
+        if is_sub_comp:
+            cs = len(diagram.diagrams)
+            sub_hor_span = 6 * radius / cs if comp_idx != -1 and comp_idx is not None else 18 * radius / (2 * cs + 1)
         else:
-            print("End")
             sub_hor_span = 6 * radius
         sub_radius = sub_hor_span / 6
         sub_hor_spacing = 4 * sub_radius
         sub_x = x + 3 * (radius - sub_radius)
-        print("SUB HORIZONTAL SAPN", sub_hor_span)
-        print("SUB X", sub_x)
         # Calculate positions for each sub-diagram
         # Composition is drawn left to right
         start_x = 0
@@ -461,8 +435,7 @@ class DiagramVisualizer:
                 y,
                 comp_idx=idx,
                 input_positions=input_positions,
-                comp_size=comp_size,
-                hor_spacing=sub_hor_spacing,
+                is_sub_comp=is_sub_comp,
                 radius=sub_radius,
             )
         return input_positions
@@ -475,8 +448,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         input_positions: list | None = None,
-        comp_size: int | None = None,
-        hor_spacing: float | None = None,
+        is_sub_comp: bool = False,
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
@@ -504,17 +476,8 @@ class DiagramVisualizer:
             the input wires from that sub-diagram to the current diagram.
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
-        comp_size: int | None
-            This variable is not None when a composition is part of a tensor
-            diagram. And in that case we need to resize this composition
-            diagram so that it fits in the horizontal spacing of the tensor
-            diagram. It is inside this function that it is changed to an int.
-            It is an important argument because of a tensor diagram is a sub-diagram of a
-            composition diagram which
-        hor_spacing: float | None
-            Horizontal spacing between sub-diagrams inside a composition diagram.
-            It is not None when the tensor diagram is not part of a composition
-            diagram.
+        is_sub_comp: bool
+            It is true when a composition is a sub-diagram.
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
@@ -543,16 +506,10 @@ class DiagramVisualizer:
         # input_positions are from the bottom to the top and since
         # we draw from top to bottom in draw_tensor we must reverse
         # input_positions
-        # print("INPUT RADIUS TENSOR", radius)
         if input_positions is not None:
             input_positions.reverse()
         for i, sub_diagram in enumerate(diagram.diagrams):
-            if isinstance(sub_diagram, CompositionDiagram):
-                # It is not necessary to use self.config.get_horizontal_space
-                # At this level because the resize will happen inside the children
-                # sub diagrams
-                # comp_size = self.config.get_horizontal_space(sub_diagram)
-                comp_size = len(sub_diagram.diagrams)
+            is_sub_comp = isinstance(sub_diagram, CompositionDiagram)
             h = start_y - i * vertical_spacing
             # Draw sub-diagram with local coordinates
             sub_input_positions = None
@@ -569,8 +526,7 @@ class DiagramVisualizer:
                     y + h,
                     comp_idx=comp_idx,
                     input_positions=sub_input_positions,
-                    comp_size=comp_size,
-                    hor_spacing=hor_spacing,
+                    is_sub_comp=is_sub_comp,
                     radius=radius,
                 )
                 + output_positions
@@ -586,8 +542,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         input_positions: list | None = None,
-        comp_size: int | None = None,
-        hor_spacing: float | None = None,
+        is_sub_comp: bool = False,
         radius: float | None = None,
     ) -> list:
         """Draw a contracted diagram (feedback connections).
@@ -621,17 +576,8 @@ class DiagramVisualizer:
             the input wires from that sub-diagram to the current diagram.
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
-        comp_size: int | None
-            This variable is not None when a composition is part of a tensor
-            diagram. And in that case we need to resize this composition
-            diagram so that it fits in the horizontal spacing of the tensor
-            diagram. It is inside this function that it is changed to an int.
-            It is an important argument because of a tensor diagram is a sub-diagram of a
-            composition diagram which
-        hor_spacing: float | None
-            Horizontal spacing between sub-diagrams inside a composition diagram.
-            It is not None when the tensor diagram is not part of a composition
-            diagram.
+        is_sub_comp: bool
+            It is true when a composition is a sub-diagram.
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
@@ -647,16 +593,11 @@ class DiagramVisualizer:
             radius = self.config.node_radius
         arrow_length = 2 * radius
         # Draw second diagram (D2)
-        if isinstance(diagram.second, CompositionDiagram) and comp_size is None:
-            comp_size = self.config.get_horizontal_space(diagram.second)
+        is_sub_comp = isinstance(diagram.second, CompositionDiagram)
         num_d2_out_wires = len(diagram.kept_second_outputs) + len(diagram.J2)
         num_d2_input_wires = len(diagram.kept_second_inputs) + len(diagram.I2)
-        assert num_d2_out_wires == num_d2_input_wires
-        # print("Here", num_d2_input_wires)
-        # print("KEPT second inputs", diagram.kept_second_inputs)
         draw_kept_second_inputs = [num_d2_input_wires - i - 1 for i in diagram.kept_second_inputs]
         draw_kept_second_outputs = [num_d2_out_wires - i - 1 for i in diagram.kept_second_outputs]
-        # print("KEPT second inputs to draw", draw_kept_second_outputs)
         # We do not need to reverse input_positions like in draw_tensor because
         # We draw from bottom to top
         in_positions = input_positions[: len(draw_kept_second_inputs)] if input_positions is not None else None
@@ -669,18 +610,15 @@ class DiagramVisualizer:
             y2,
             comp_idx=comp_idx,
             input_positions=in_positions,
-            comp_size=comp_size,
-            hor_spacing=hor_spacing,
+            is_sub_comp=is_sub_comp,
             kept_inputs=draw_kept_second_inputs,
             kept_outputs=draw_kept_second_outputs,
         )
 
         # Draw first diagram (D1)
-        if isinstance(diagram.first, CompositionDiagram) and comp_size is None:
-            comp_size = self.config.get_horizontal_space(diagram.second)
+        is_sub_comp = isinstance(diagram.first, CompositionDiagram)
         num_d1_out_wires = len(diagram.kept_first_outputs) + len(diagram.I1)
         num_d1_input_wires = len(diagram.kept_first_inputs) + len(diagram.J1)
-        assert num_d1_out_wires == num_d1_input_wires
         # Wires are drawn from bottom to top
         draw_kept_first_inputs = [num_d1_input_wires - i - 1 for i in diagram.kept_first_inputs]
         draw_kept_first_outputs = [num_d1_out_wires - i - 1 for i in diagram.kept_first_outputs]
@@ -693,8 +631,7 @@ class DiagramVisualizer:
             y1,
             comp_idx=comp_idx,
             input_positions=in_positions,
-            comp_size=comp_size,
-            hor_spacing=hor_spacing,
+            is_sub_comp=is_sub_comp,
             radius=radius,
             kept_inputs=draw_kept_first_inputs,
             kept_outputs=draw_kept_first_outputs,
@@ -791,7 +728,6 @@ class DiagramVisualizer:
         # We must make sure these arrows are not aligned with
         # J1[k]. The variable delta will ensure it
         delta = (x_offset[1] - x_offset[0]) / (len(x_offset) - 1)
-        print(delta)
         x_offset.pop(0)
         x_offset.pop(-1)
         y_offset = list(np.linspace(0, box_dist / 2, len(diagram.I1) + 2))
@@ -870,7 +806,6 @@ class DiagramVisualizer:
         # We take outputs from bottom to top
         output_positions = [output_positions_2[i] for i in draw_kept_second_outputs]
         output_positions += [output_positions_1[i] for i in draw_kept_first_outputs]
-        # print("OUTPUT POSITIONS", output_positions)
         return output_positions
 
     def _draw_sub_diagram(  # noqa: PLR0913, PLR0917
@@ -881,8 +816,7 @@ class DiagramVisualizer:
         y: float,
         comp_idx: int | None = None,
         input_positions: list | None = None,
-        comp_size: int | None = None,
-        hor_spacing: float | None = None,
+        is_sub_comp: bool = False,
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
@@ -910,13 +844,11 @@ class DiagramVisualizer:
             the input wires from that sub-diagram to the current diagram.
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
-        comp_size: int | None
+        is_sub_comp: bool = False
             This variable is not None when a composition is part of a tensor
             diagram. And in that case we need to resize this composition
             diagram so that it fits in the horizontal spacing of the tensor
             diagram.
-        hor_spacing: float | None
-            Horizontal spacing between sub-diagrams inside a composition diagram.
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
@@ -929,18 +861,16 @@ class DiagramVisualizer:
             Lists of output indices that will serve as the input indices of the
             next sub-diagram if there is any.
         """
-        if comp_size is None or radius is None or hor_spacing is None:
-            sub_hor_span = self.config.horizontal_spacing
-            hor_spacing = 2 * sub_hor_span / 3
+        if radius is None:
             radius = self.config.node_radius
         if isinstance(diagram, ProperDiagram):
             return self._draw_proper_diagram(
                 ax, diagram, x, y, comp_idx, input_positions, radius, kept_inputs, kept_outputs
             )
         if isinstance(diagram, CompositionDiagram):
-            return self._draw_composition(ax, diagram, x, y, comp_idx, input_positions, comp_size, hor_spacing, radius)
+            return self._draw_composition(ax, diagram, x, y, comp_idx, input_positions, is_sub_comp, radius)
         if isinstance(diagram, TensorDiagram):
-            return self._draw_tensor(ax, diagram, x, y, comp_idx, input_positions, comp_size, hor_spacing, radius)
+            return self._draw_tensor(ax, diagram, x, y, comp_idx, input_positions, is_sub_comp, radius)
         if isinstance(diagram, ContractedDiagram):
             return self._draw_contracted(
                 ax,
@@ -949,8 +879,7 @@ class DiagramVisualizer:
                 y,
                 comp_idx,
                 input_positions,
-                comp_size,
-                hor_spacing,
+                is_sub_comp,
                 radius,
             )
         return [], []
@@ -1025,7 +954,6 @@ class DiagramVisualizer:
                 mutation_scale=20,
                 linewidth=self.config.wire_width,
             )
-            # print("input2", input_positions[0], input_positions[1], (x + radius, y + radius))
             input1 = patches.FancyArrowPatch(
                 input_positions[0],
                 (x + radius, y - radius),
@@ -1269,44 +1197,44 @@ if __name__ == "__main__":
 
     # Valid test cases (respecting input/output counts)
 
-    # # 1. Single proper diagram
-    # fig1 = visualize(c, "Single QSpider")
-    # fig1.savefig("Single QSpider")
+    # 1. Single proper diagram
+    fig1 = visualize(c, "Single QSpider")
+    fig1.savefig("Single QSpider")
 
-    # # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
-    # comp1 = c.compose(a)  # Valid: 1→1
-    # fig2 = visualize(comp1, "Composition: QSpider then Fourier")
-    # fig2.savefig("Composition: QSpider then Fourier")
+    # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
+    comp1 = c.compose(a)  # Valid: 1→1
+    fig2 = visualize(comp1, "Composition: QSpider then Fourier")
+    fig2.savefig("Composition: QSpider then Fourier")
 
-    # # 3. Tensor of two proper diagrams
-    # tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
-    # fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
-    # fig3.savefig("Tensor: Fourier ⊗ Fourier2")
+    # 3. Tensor of two proper diagrams
+    tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
+    fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
+    fig3.savefig("Tensor: Fourier ⊗ Fourier2")
 
-    # # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
-    # # Fourier has 1 output, so tensor of two Fouriers has 2 outputs
-    # two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
-    # comp_swap = two_fouriers.compose(d)  # Valid: 2→2
-    # fig4 = visualize(comp_swap, "Composition: (F ⊗ F) then Swap")
-    # fig4.savefig("Composition: (F ⊗ F) then Swap")
+    # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
+    # Fourier has 1 output, so tensor of two Fouriers has 2 outputs
+    two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
+    comp_swap = two_fouriers.compose(d)  # Valid: 2→2
+    fig4 = visualize(comp_swap, "Composition: (F ⊗ F) then Swap")
+    fig4.savefig("Composition: (F ⊗ F) then Swap")
 
-    # # 5. Nested composition: (c ∘ a) ∘ b
-    # nested_comp = c.compose(a).compose(b)
-    # fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
-    # fig5.savefig("Nested composition: (c ∘ a) ∘ b")
+    # 5. Nested composition: (c ∘ a) ∘ b
+    nested_comp = c.compose(a).compose(b)
+    fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
+    fig5.savefig("Nested composition: (c ∘ a) ∘ b")
 
-    # # 6. Tensor containing composition
-    # tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
-    # fig6 = visualize(tensor_with_comp, "Tensor containing composition")
-    # fig6.savefig("Tensor containing composition")
+    # 6. Tensor containing composition
+    tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
+    fig6 = visualize(tensor_with_comp, "Tensor containing composition")
+    fig6.savefig("Tensor containing composition")
 
-    # # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
-    # left = a.tensor(a)  # 2 outputs
-    # middle = left.compose(d)  # 2 outputs after swap
-    # right = a.tensor(a)  # 2 inputs
-    # full = middle.compose(right)  # 2→2
-    # fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
-    # fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
+    left = a.tensor(a)  # 2 outputs
+    middle = left.compose(d)  # 2 outputs after swap
+    right = a.tensor(a)  # 2 inputs
+    full = middle.compose(right)  # 2→2
+    fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
 
     # 8. Big Complex diagram
     a = Fourier()
@@ -1337,13 +1265,12 @@ if __name__ == "__main__":
     k = j.tensor(g)
     i = a.tensor(g)
     T = [type(d) for d in i.diagrams]
-    # print(T)
     fig8 = visualize(i, "Complex Diagram")
     fig8.savefig("Complex Diagram.png")
-    # a1 = QSpider(3, 3, p)
-    # b1 = PSpider(3, 3, p)
-    # e1 = QSpider(2, 2, p)
-    # c1 = ContractedDiagram(a1, b1, [0, 1], [1, 2], [0, 2], [1, 2])
+    a1 = QSpider(3, 3, p)
+    b1 = PSpider(3, 3, p)
+    e1 = QSpider(2, 2, p)
+    c1 = ContractedDiagram(a1, b1, [0, 1], [1, 2], [0, 2], [1, 2])
     # d1 = d.compose(c1)
-    # fig = visualize(d1.compose(d), "Contracted Diagram")
-    # fig.savefig("Contracted Diagram")
+    fig = visualize(c1, "Contracted Diagram")
+    fig.savefig("Contracted Diagram")
