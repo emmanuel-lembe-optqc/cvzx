@@ -319,6 +319,7 @@ class DiagramVisualizer:
                 for i in range(diagram.num_inputs):
                     if i in kept_inputs:
                         input_i = patches.FancyArrowPatch(
+                            # TODO Handle the case when input_positions is not None
                             input_positions[i],
                             (pivot[0] + width, pivot[1] + y_offset[i]),
                             arrowstyle="->",
@@ -338,6 +339,7 @@ class DiagramVisualizer:
                 for i in range(diagram.num_outputs):
                     if i in kept_outputs:
                         output_i = patches.FancyArrowPatch(
+                            # TODO Handle the case when output_positions is not None
                             output_positions[i],
                             (pivot[0] - arrow_length, pivot[1] + y_offset[i]),
                             arrowstyle="->",
