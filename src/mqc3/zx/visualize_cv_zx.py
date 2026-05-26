@@ -318,9 +318,14 @@ class DiagramVisualizer:
                     ]
                 for i in range(diagram.num_inputs):
                     if i in kept_inputs:
+                        input_pos = (
+                            input_positions[i]
+                            if (comp_idx is None or comp_idx == 0)
+                            else input_positions[kept_inputs.index(i)]
+                        )
                         input_i = patches.FancyArrowPatch(
                             # TODO Handle the case when input_positions is not None
-                            input_positions[i],
+                            input_pos,
                             (pivot[0] + width, pivot[1] + y_offset[i]),
                             arrowstyle="->",
                             ec="black",
@@ -599,7 +604,9 @@ class DiagramVisualizer:
         num_d2_out_wires = len(diagram.kept_second_outputs) + len(diagram.J2)
         num_d2_input_wires = len(diagram.kept_second_inputs) + len(diagram.I2)
         draw_kept_second_inputs = [num_d2_input_wires - i - 1 for i in diagram.kept_second_inputs]
+        draw_kept_second_inputs.sort()
         draw_kept_second_outputs = [num_d2_out_wires - i - 1 for i in diagram.kept_second_outputs]
+        draw_kept_second_outputs.sort()
         # We do not need to reverse input_positions like in draw_tensor because
         # We draw from bottom to top
         in_positions = input_positions[: len(draw_kept_second_inputs)] if input_positions is not None else None
@@ -623,7 +630,9 @@ class DiagramVisualizer:
         num_d1_input_wires = len(diagram.kept_first_inputs) + len(diagram.J1)
         # Wires are drawn from bottom to top
         draw_kept_first_inputs = [num_d1_input_wires - i - 1 for i in diagram.kept_first_inputs]
+        draw_kept_first_inputs.sort()
         draw_kept_first_outputs = [num_d1_out_wires - i - 1 for i in diagram.kept_first_outputs]
+        draw_kept_first_outputs.sort()
         in_positions = input_positions[len(draw_kept_second_inputs) :] if input_positions is not None else None
         x1, y1 = x, y
         output_positions_1 = self._draw_sub_diagram(
@@ -1185,94 +1194,3 @@ def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None
     """
     visualizer = DiagramVisualizer(config)
     return visualizer.visualize(diagram, title)
-
-
-if __name__ == "__main__":
-    # Build proper diagrams
-    p = ZxPoly({1: 2, 2: 4})
-    q = ZxPoly({1: 2, 3: 4, 5: 7})
-
-    a = Fourier()
-    b = Fourier2()
-    c = QSpider(1, 1, p)
-    d = Swap()
-
-    # Valid test cases (respecting input/output counts)
-
-    # 1. Single proper diagram
-    fig1 = visualize(c, "Single QSpider")
-    fig1.savefig("Single QSpider")
-
-    # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
-    comp1 = c.compose(a)  # Valid: 1→1
-    fig2 = visualize(comp1, "Composition: QSpider then Fourier")
-    fig2.savefig("Composition: QSpider then Fourier")
-
-    # 3. Tensor of two proper diagrams
-    tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
-    fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
-    fig3.savefig("Tensor: Fourier ⊗ Fourier2")
-
-    # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
-    # Fourier has 1 output, so tensor of two Fouriers has 2 outputs
-    two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
-    comp_swap = two_fouriers.compose(d)  # Valid: 2→2
-    fig4 = visualize(comp_swap, "Composition: (F ⊗ F) then Swap")
-    fig4.savefig("Composition: (F ⊗ F) then Swap")
-
-    # 5. Nested composition: (c ∘ a) ∘ b
-    nested_comp = c.compose(a).compose(b)
-    fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
-    fig5.savefig("Nested composition: (c ∘ a) ∘ b")
-
-    # 6. Tensor containing composition
-    tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
-    fig6 = visualize(tensor_with_comp, "Tensor containing composition")
-    fig6.savefig("Tensor containing composition")
-
-    # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
-    left = a.tensor(a)  # 2 outputs
-    middle = left.compose(d)  # 2 outputs after swap
-    right = a.tensor(a)  # 2 inputs
-    full = middle.compose(right)  # 2→2
-    fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
-    fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
-
-    # 8. Big Complex diagram
-    a = Fourier()
-    b = Fourier2()
-    c = QSpider(1, 1, p)
-    d = Swap()
-    e = a.tensor(b)
-    e = e.tensor(b)
-    d2 = d.tensor(a)
-    f = e.compose(d2)
-    g = d2.compose(f)
-    g = d2.compose(g)
-    a2 = QSpider(3, 3, p)
-    b2 = CompositionDiagram([
-        a2,
-        a2,
-        # a2,
-        # a2,
-        # a2,
-        # a2,
-    ])
-    # b2 = b2.compose(a2)
-    # b2 = b2.compose(a2)
-    g = g.compose(b2)
-    h = a.compose(b)
-    h = h.compose(b)
-    j = QSpider(4, 4, q)
-    k = j.tensor(g)
-    i = a.tensor(g)
-    T = [type(d) for d in i.diagrams]
-    fig8 = visualize(i, "Complex Diagram")
-    fig8.savefig("Complex Diagram.png")
-    a1 = QSpider(3, 3, p)
-    b1 = PSpider(3, 3, p)
-    e1 = QSpider(2, 2, p)
-    c1 = ContractedDiagram(a1, b1, [0, 1], [1, 2], [0, 2], [1, 2])
-    # d1 = d.compose(c1)
-    fig = visualize(c1, "Contracted Diagram")
-    fig.savefig("Contracted Diagram")
