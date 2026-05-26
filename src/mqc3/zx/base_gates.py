@@ -813,6 +813,7 @@ class ContractedDiagram(Diagram):
                 msg_4 = f"J2 index {idx} out of range for second diagram outputs [0, {self.second.num_outputs})"
                 raise ValueError(msg_4)
 
+        # TODO Prevent a situation where there is either no inputs or outputs
         # Determine which inputs/outputs remain external
         # Inputs: all inputs from first diagram EXCEPT those in J1
         #         plus all inputs from second diagram EXCEPT those in I2
