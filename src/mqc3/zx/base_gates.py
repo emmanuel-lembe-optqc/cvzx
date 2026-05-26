@@ -608,6 +608,9 @@ class ProperDiagram(Diagram):
         TensorDiagram
             Tensor product of self and other.
         """
+        if isinstance(other, TensorDiagram):
+            diagrams = list(other.diagrams)
+            return TensorDiagram([self, *diagrams])
         return TensorDiagram([self, other])
 
     def compose(self, other: Diagram) -> Diagram:
@@ -623,6 +626,9 @@ class ProperDiagram(Diagram):
         CompositionDiagram
             Composition other ∘ self.
         """
+        if isinstance(other, CompositionDiagram):
+            diagrams = list(other.diagrams)
+            return CompositionDiagram([*diagrams, self])
         return CompositionDiagram([other, self])
 
     def is_proper(self) -> bool:
@@ -835,7 +841,10 @@ class ContractedDiagram(Diagram):
         TensorDiagram
             New tensor diagram with self.diagrams + [other].
         """
-        return TensorDiagram([*list(self.diagrams), other])
+        if isinstance(other, TensorDiagram):
+            diagrams = list(other.diagrams)
+            return TensorDiagram([self, *diagrams])
+        return TensorDiagram([self, other])
 
     def compose(self, other: Diagram) -> Diagram:
         """Compose tensor diagram with another diagram.
@@ -850,6 +859,9 @@ class ContractedDiagram(Diagram):
         CompositionDiagram
             Composition other ∘ self.
         """
+        if isinstance(other, CompositionDiagram):
+            diagrams = list(other.diagrams)
+            return CompositionDiagram([*diagrams, self])
         return CompositionDiagram([other, self])
 
     def conjugate(self) -> Diagram:
@@ -1225,6 +1237,9 @@ class CompositionDiagram(Diagram):
         CompositionDiagram
             New composition diagram with self.diagrams + [other].
         """
+        if isinstance(other, CompositionDiagram):
+            diagrams = list(other.diagrams)
+            return CompositionDiagram([*diagrams, *list(self.diagrams)])
         return CompositionDiagram([other, *list(self.diagrams)])
 
     def conjugate(self) -> Diagram:

@@ -324,7 +324,6 @@ class DiagramVisualizer:
                             else input_positions[kept_inputs.index(i)]
                         )
                         input_i = patches.FancyArrowPatch(
-                            # TODO Handle the case when input_positions is not None
                             input_pos,
                             (pivot[0] + width, pivot[1] + y_offset[i]),
                             arrowstyle="->",
@@ -344,7 +343,6 @@ class DiagramVisualizer:
                 for i in range(diagram.num_outputs):
                     if i in kept_outputs:
                         output_i = patches.FancyArrowPatch(
-                            # TODO Handle the case when output_positions is not None
                             output_positions[i],
                             (pivot[0] - arrow_length, pivot[1] + y_offset[i]),
                             arrowstyle="->",
@@ -515,9 +513,12 @@ class DiagramVisualizer:
         # input_positions
         if input_positions is not None:
             input_positions.reverse()
+        contract_shift = 0
         for i, sub_diagram in enumerate(diagram.diagrams):
             is_sub_comp = isinstance(sub_diagram, CompositionDiagram)
-            h = start_y - i * vertical_spacing
+            h = start_y - i * vertical_spacing - contract_shift
+            if isinstance(sub_diagram, ContractedDiagram):
+                contract_shift = vertical_spacing
             # Draw sub-diagram with local coordinates
             sub_input_positions = None
             if input_positions is not None:
