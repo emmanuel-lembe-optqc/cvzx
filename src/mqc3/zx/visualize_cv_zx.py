@@ -10,6 +10,8 @@ The visualizer uses matplotlib to draw diagrams in a way that respects
 the input/output wire ordering and connection indices.
 """
 
+import random as r
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
@@ -228,11 +230,12 @@ class DiagramVisualizer:
         x: float = 0,
         y: float = 0,
         comp_idx: int | None = None,
+        sub_comp_idx: int | None = None,
         input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
-    ) -> tuple[list[tuple], list[tuple] | None, float]:
+    ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a proper diagram (single node).
 
         Parameters:
@@ -266,10 +269,12 @@ class DiagramVisualizer:
         list[tuple[float]]
             Lists of output indices that will serve as the input indices of the
             next diagram if there is any.
-        list[tuple[float]]
-            Lists of input indices
-        float
-            radius
+        list[tuple[float]] | None
+            Lists of proper input indices, i.e. different from input indices
+            received from a sub-diagram.
+        float | list[float]
+            radius of either the proper diagram, of the first diagram of a
+            composition diagram or the list of radius of a tensor diagram.
         """
         output_positions = []
         # Determine spider type
@@ -303,10 +308,13 @@ class DiagramVisualizer:
             # a composition diagram
             draw_in_wires = True
             draw_out_wires = True
-            if comp_idx is not None and comp_idx != -1:
+            if (  # noqa: PLR0916
+                comp_idx is not None and comp_idx != -1
+            ) or ((comp_idx == -1 or comp_idx is None) and (sub_comp_idx is not None and sub_comp_idx != -1)):
                 draw_out_wires = False
             if kept_inputs is None:
                 kept_inputs = range(diagram.num_inputs)
+            if kept_outputs is None:
                 kept_outputs = range(diagram.num_outputs)
             # Draw input wires (left side)
             y_offset = list(np.linspace(0, height, diagram.num_inputs + 2))
@@ -323,14 +331,21 @@ class DiagramVisualizer:
                     input_positions = init_input_positions
                 for i in range(diagram.num_inputs):
                     if i in kept_inputs:
-                        input_pos = (
-                            input_positions[i]
-                            if (comp_idx is None or comp_idx == 0)
-                            else input_positions[kept_inputs.index(i)]
-                        )
+                        if sub_comp_idx is not None:
+                            input_pos = (
+                                input_positions[i]
+                                if (sub_comp_idx == 0 and (comp_idx is None or comp_idx == 0))
+                                else input_positions[kept_inputs.index(i)]
+                            )
+                        else:
+                            input_pos = (
+                                input_positions[i]
+                                if (comp_idx is None or comp_idx == 0)
+                                else input_positions[kept_inputs.index(i)]
+                            )
                         input_i = patches.FancyArrowPatch(
                             input_pos,
-                            (pivot[0] + width, pivot[1] + y_offset[i]),
+                            (pivot[0] + arrow_length, pivot[1] + y_offset[i]),
                             arrowstyle="->",
                             ec="black",
                             mutation_scale=20,
@@ -359,27 +374,28 @@ class DiagramVisualizer:
                 ax.plot()
         elif isinstance(diagram, Swap):
             output_positions, init_input_positions, radius = self._draw_swap(
-                ax, x, y, comp_idx, input_positions, radius
-            )
+                ax, x, y, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
+            )  # TODO: add the kept_input management
         elif isinstance(diagram, (Fourier, FourierInv, Fourier2)):
             output_positions, init_input_positions, radius = self._draw_fourier(
-                ax, x, y, diagram, comp_idx, input_positions, radius
-            )
+                ax, x, y, diagram, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
+            )  # TODO: update the sub_comp_idx and add the kept_input management
         return output_positions, init_input_positions, radius
 
-    def _draw_composition(  # noqa: PLR0913, PLR0917
+    def _draw_composition(  # noqa: PLR0913, PLR0914, PLR0917
         self,
         ax: plt.Axes,
         diagram: CompositionDiagram,
         x: float = 0,
         y: float = 0,
         comp_idx: int | None = None,
-        input_positions: list | None = None,
+        sub_comp_idx: int | None = None,
         is_sub_comp: bool = False,
+        input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
-    ) -> tuple[list[tuple], list[tuple] | None, float]:
+    ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a composition diagram.
 
         Parameters:
@@ -415,10 +431,12 @@ class DiagramVisualizer:
         list[tuple[float]]
             Lists of output indices that will serve as the input indices of the
             next diagram if there is any.
-        list[tuple[float]]
-            Lists of input indices
-        float
-            radius
+        list[tuple[float]] | None
+            Lists of proper input indices, i.e. different from input indices
+            received from a sub-diagram.
+        float | list[float]
+            radius of either the proper diagram, of the first diagram of a
+            composition diagram or the list of radius of a tensor diagram.
         """
         n = len(diagram.diagrams)
         if n == 0:
@@ -429,6 +447,7 @@ class DiagramVisualizer:
         if kept_inputs is None:
             kept_inputs = range(diagram.num_inputs)
             kept_outputs = range(diagram.num_outputs)
+        output_radius = radius
         # Draw each sub-diagram at its position
         # If is_sub_comp is True means that we are inside a composition block
         # which is part of a tensor product therefore we must resize the
@@ -449,13 +468,20 @@ class DiagramVisualizer:
         for i, sub_diagram in enumerate(diagram.diagrams):
             d = start_x - i * sub_hor_spacing
             idx = i
+            if is_sub_comp:
+                sub_comp_idx = idx
+            else:
+                comp_idx = idx
             if i == 0:
                 sent_kept_inputs = kept_inputs
                 sent_kept_outputs = range(diagram.num_outputs)
             elif i == n - 1:
                 sent_kept_inputs = range(diagram.num_inputs)
                 sent_kept_outputs = kept_outputs
-                idx = comp_idx if comp_idx is not None else -1
+                if is_sub_comp:
+                    sub_comp_idx = -1
+                else:
+                    comp_idx = -1
             else:
                 sent_kept_inputs = range(diagram.num_inputs)
                 sent_kept_outputs = range(diagram.num_outputs)
@@ -464,9 +490,10 @@ class DiagramVisualizer:
                 sub_diagram,
                 sub_x + d,
                 y,
-                comp_idx=idx,
-                input_positions=output_positions,
+                comp_idx=comp_idx,
+                sub_comp_idx=sub_comp_idx,
                 is_sub_comp=is_sub_comp,
+                input_positions=output_positions,
                 radius=sub_radius,
                 kept_inputs=sent_kept_inputs,
                 kept_outputs=sent_kept_outputs,
@@ -475,7 +502,8 @@ class DiagramVisualizer:
             # the input positions of its first sub-diagram
             if i == 0:
                 init_input_positions = init_input_pos
-        return output_positions, init_input_positions, radius
+                output_radius = radius
+        return output_positions, init_input_positions, output_radius
 
     def _draw_tensor(  # noqa: PLR0913, PLR0917
         self,
@@ -484,12 +512,13 @@ class DiagramVisualizer:
         x: float = 0,
         y: float = 0,
         comp_idx: int | None = None,
-        input_positions: list | None = None,
+        sub_comp_idx: int | None = None,
         is_sub_comp: bool = False,
+        input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
-    ) -> tuple[list[tuple], list[tuple] | None, float]:
+    ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a tensor diagram (parallel).
 
         Parameters:
@@ -507,14 +536,14 @@ class DiagramVisualizer:
             value we draw input or output wires. In a composition, we don't
             need to draw the input/output wires of all sub-diagrams. This
             variable allows to monitor it.
+        is_sub_comp: bool
+            It is true when a composition is a sub-diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
             the input wires from that sub-diagram to the current diagram.
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
-        is_sub_comp: bool
-            It is true when a composition is a sub-diagram.
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
@@ -525,10 +554,12 @@ class DiagramVisualizer:
         list[tuple[float]]
             Lists of output indices that will serve as the input indices of the
             next diagram if there is any.
-        list[tuple[float]]
-            Lists of input indices
-        float
-            radius
+        list[tuple[float]] | None
+            Lists of proper input indices, i.e. different from input indices
+            received from a sub-diagram.
+        float | list[float]
+            radius of either the proper diagram, of the first diagram of a
+            composition diagram or the list of radius of a tensor diagram.
         """
         n = len(diagram.diagrams)
         if n == 0:
@@ -536,9 +567,11 @@ class DiagramVisualizer:
 
         # Calculate positions for each sub-diagram
         # Tensor is drawn top to bottom
-        start_y = 0
         output_positions = []
-        j = 0
+        init_input_positions = []
+        output_radius = []
+        inp_ind = 0
+        out_ind = 0
         if radius is None:
             radius = self.config.node_radius
             vertical_spacing = self.config.vertical_spacing
@@ -549,18 +582,43 @@ class DiagramVisualizer:
         # input_positions
         if input_positions is not None:
             input_positions.reverse()
+        if kept_inputs is not None:
+            num_inputs = diagram.num_inputs
+            kept_inputs = [num_inputs - i - 1 for i in kept_inputs]
+            kept_inputs.sort()
+            num_outputs = diagram.num_outputs
+            kept_outputs = [num_outputs - i - 1 for i in kept_outputs]
+            kept_outputs.sort()
         contract_shift = 0
-        for i, sub_diagram in enumerate(diagram.diagrams):
+        h = vertical_spacing
+        for sub_diagram in diagram.diagrams:
             is_sub_comp = isinstance(sub_diagram, CompositionDiagram)
-            h = start_y - i * vertical_spacing - contract_shift
-            if isinstance(sub_diagram, ContractedDiagram):
-                contract_shift = vertical_spacing
+            if contract_shift != 0:
+                h -= contract_shift
+            else:
+                h -= vertical_spacing
             # Draw sub-diagram with local coordinates
             sub_input_positions = None
+            sub_kept_inputs = None
+            sub_kept_outputs = None
             if input_positions is not None:
-                sub_input_positions = input_positions[j : j + sub_diagram.num_inputs]
-                # We must reverse back the sub_input_positions
+                sub_input_positions = input_positions[inp_ind : inp_ind + sub_diagram.num_inputs]
+                # We must reverse back sub_input_positions
                 sub_input_positions.reverse()
+            if kept_inputs is not None:
+                sub_kept_inputs = []
+                for ind in range(inp_ind, inp_ind + sub_diagram.num_inputs):
+                    if ind in kept_inputs:
+                        sub_kept_inputs.append(ind - inp_ind)
+                sub_kept_outputs = []
+                for ind in range(out_ind, out_ind + sub_diagram.num_outputs):
+                    if ind in kept_outputs:
+                        sub_kept_outputs.append(ind - out_ind)
+                # We must reverse back the lits above
+                sub_kept_inputs = [sub_diagram.num_inputs - p - 1 for p in sub_kept_inputs]
+                sub_kept_outputs = [sub_diagram.num_outputs - p - 1 for p in sub_kept_outputs]
+                sub_kept_inputs.sort()
+                sub_kept_outputs.sort()
             # Find local_kept_inputs and local_kept_outputs
             output_pos, init_input_pos, radius = self._draw_sub_diagram(
                 ax,
@@ -568,13 +626,25 @@ class DiagramVisualizer:
                 x,
                 y + h,
                 comp_idx=comp_idx,
-                input_positions=sub_input_positions,
+                sub_comp_idx=sub_comp_idx,
                 is_sub_comp=is_sub_comp,
+                input_positions=sub_input_positions,
                 radius=radius,
+                kept_outputs=sub_kept_outputs,
+                kept_inputs=sub_kept_inputs,
             )
+            if isinstance(sub_diagram, ContractedDiagram):
+                contract_shift = radius[1]
+                radius = radius[0]
+            else:
+                contract_shift = 0
+            print(y, h)
             output_positions = output_pos + output_positions
-            j += sub_diagram.num_inputs
-        return output_positions, init_input_pos, radius
+            init_input_positions = init_input_pos + init_input_positions
+            output_radius = [radius, *output_radius]
+            inp_ind += sub_diagram.num_inputs
+            out_ind += sub_diagram.num_outputs
+        return output_positions, init_input_positions, output_radius
 
     def _draw_contracted(  # noqa: PLR0913, PLR0914, PLR0915, PLR0917
         self,
@@ -583,10 +653,11 @@ class DiagramVisualizer:
         x: float = 0,
         y: float = 0,
         comp_idx: int | None = None,
+        sub_comp_idx: int | None = None,
+        is_sub_comp: int | None = None,
         input_positions: list | None = None,
-        is_sub_comp: bool = False,
         radius: float | None = None,
-    ) -> tuple[list[tuple], list[tuple] | None, float]:
+    ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a contracted diagram (feedback connections).
 
         Special care is needed because:
@@ -612,14 +683,14 @@ class DiagramVisualizer:
             value we draw input or output wires. In a composition, we don't
             need to draw the input/output wires of all sub-diagrams. This
             variable allows to monitor it.
+        is_sub_comp: bool
+            It is true when a composition is a sub-diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
             the input wires from that sub-diagram to the current diagram.
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
-        is_sub_comp: bool
-            It is true when a composition is a sub-diagram.
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
@@ -630,10 +701,15 @@ class DiagramVisualizer:
         list[tuple[float]]
             Lists of output indices that will serve as the input indices of the
             next diagram if there is any.
-        list[tuple[float]]
-            Lists of input indices
-        float
-            radius
+        list[tuple[float]] | None
+            Lists of proper input indices, i.e. different from input indices
+            received from a sub-diagram.
+        tuple[float, float]
+            radius of either the proper diagram, of the first diagram of a
+            composition diagram or the list of radius of a tensor diagram.
+            And the shift of the contracted diagram. This shift will allow
+            to draw a contracted diagram properly when it is inside a tensor
+            diagram
         """
         if radius is None:
             radius = self.config.node_radius
@@ -648,16 +724,25 @@ class DiagramVisualizer:
         # We do not need to reverse input_positions like in draw_tensor because
         # We draw from bottom to top
         sec_in_positions = input_positions[: len(draw_kept_second_inputs)] if input_positions is not None else None
-        y2 = y - self.config.vertical_spacing
+        y_shift1 = 0
+        y_shift2 = 0
+        if isinstance(diagram.second, TensorDiagram):
+            y_shift2 += (len(diagram.second.diagrams) - 1) * (self.config.vertical_spacing)
+        if isinstance(diagram.first, TensorDiagram):
+            y_shift1 += (len(diagram.first.diagrams) - 1) * (self.config.vertical_spacing)
+        spacing = 2 * self.config.vertical_spacing
+        y2 = y - spacing - y_shift1
         x2 = x
-        output_positions_2, input_positions_2, radius_2 = self._draw_sub_diagram(
+        output_positions_2, input_positions_2, output_radius_2 = self._draw_sub_diagram(
             ax,
             diagram.second,
             x2,
             y2,
             comp_idx=comp_idx,
-            input_positions=sec_in_positions,
+            sub_comp_idx=sub_comp_idx,
             is_sub_comp=is_sub_comp,
+            input_positions=sec_in_positions,
+            radius=radius,
             kept_inputs=draw_kept_second_inputs,
             kept_outputs=draw_kept_second_outputs,
         )
@@ -673,200 +758,328 @@ class DiagramVisualizer:
         draw_kept_first_outputs.sort()
         fir_in_positions = input_positions[len(draw_kept_second_inputs) :] if input_positions is not None else None
         x1, y1 = x, y
-        output_positions_1, input_positions_1, radius_1 = self._draw_sub_diagram(
+        output_positions_1, input_positions_1, output_radius_1 = self._draw_sub_diagram(
             ax,
             diagram.first,
             x1,
             y1,
             comp_idx=comp_idx,
-            input_positions=fir_in_positions,
+            sub_comp_idx=sub_comp_idx,
             is_sub_comp=is_sub_comp,
+            input_positions=fir_in_positions,
             radius=radius,
             kept_inputs=draw_kept_first_inputs,
             kept_outputs=draw_kept_first_outputs,
         )
         color_in = self.config.colors["contraction_in"]
         color_out = self.config.colors["contraction_out"]
+        if isinstance(output_radius_2, (int, float)):
+            output_radius_2 = [output_radius_2]
+        if isinstance(output_radius_1, (int, float)):
+            output_radius_1 = [output_radius_1]
+        # We must make sure there is no equal output radiuses
+        new_output_radius_2 = reorganise(output_radius_2)
+        new_output_radius_1 = reorganise(output_radius_1)
+        J_dict = {diagram.J2[i]: diagram.J1[i] for i in range(len(diagram.J1))}
+        I_dict = {diagram.I1[i]: diagram.I2[i] for i in range(len(diagram.I2))}
         # Let's compute the distance between D1 and D2
-        step_1 = radius_1 if len(output_positions_1) == 1 else output_positions_1[1][1] - output_positions_1[0][1]
-        step_2 = radius_2 if len(output_positions_2) == 1 else output_positions_2[1][1] - output_positions_2[0][1]
-        y_1 = output_positions_1[0][1] - step_1
-        y_2 = output_positions_2[-1][1] + step_2
-        box_dist = y_1 - y_2
+        box_dist = spacing - 2 * radius
         # Draw feedback connections (J2 → J1)
         # J2: indices of outputs from second diagram
         # J1: indices of inputs from first diagram
         # Connection order: J2[k] connects to J1[k]
         # First we draw incoming arrows J2[k]s of D2
-        x_offset_2 = list(np.linspace(0, 2 * radius_2, len(diagram.J2) + 2))
-        x_offset_2.pop(0)
-        x_offset_2.pop(-1)
-        in_size = len(diagram.J2)
-        for i in range(in_size):
-            # We draw from down to top
-            sec_point_i = output_positions_2[num_d2_out_wires - diagram.J2[i] - 1]
-            ax.plot(
-                [sec_point_i[0], sec_point_i[0] - x_offset_2[i]],
-                [sec_point_i[1], sec_point_i[1]],
-                linewidth=self.config.wire_width,
-                color=color_in,
-            )
-            sec_arrow_i_1 = patches.FancyArrowPatch(
-                (sec_point_i[0] - x_offset_2[i], sec_point_i[1]),
-                (sec_point_i[0] - x_offset_2[i], y2 + radius_2),
-                arrowstyle="->",
-                ec=color_in,
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            ax.add_patch(sec_arrow_i_1)
+        second_diagrams = (
+            deepcopy(diagram.second.diagrams) if isinstance(diagram.second, TensorDiagram) else [diagram.second]
+        )
+        second_diagrams.reverse()
+        k = 0
+        J2_info = {}  # noqa: N806
+        for j, sub_diagram in enumerate(second_diagrams):
+            x_offset_2_i = list(np.linspace(0, 2 * new_output_radius_2[j], sub_diagram.num_outputs + 2))
+            x_offset_2_i.pop(0)
+            x_offset_2_i.pop(1)
+            sub_output_positions_2 = output_positions_2[k : k + sub_diagram.num_outputs]
+            sub_J2 = []  # noqa: N806
+            sub_J2_dict = {}  # noqa: N806
+            # This is to allow the arrow to appear when when there is a Swap
+            padding = isinstance(sub_diagram, Swap)
+            padding_coef = 0.4
+            for ind in range(k, k + sub_diagram.num_outputs):
+                if num_d2_out_wires - ind - 1 in diagram.J2:
+                    sub_J2.append(ind - k)
+                    sub_J2_dict[ind - k] = num_d2_out_wires - ind - 1
+            # We draw from bottom to top
+            x_offset_2_i.reverse()
+            J2_points = {}  # noqa: N806
+            for i in sub_J2:
+                # We draw from down to top
+                sec_point_i = sub_output_positions_2[i]
+                ax.plot(
+                    [sec_point_i[0], sec_point_i[0] - x_offset_2_i[i]],
+                    [sec_point_i[1], sec_point_i[1]],
+                    linewidth=self.config.wire_width,
+                    color=color_in,
+                )
+                sec_arrow_i_1 = patches.FancyArrowPatch(
+                    (sec_point_i[0] - x_offset_2_i[i], sec_point_i[1]),
+                    (sec_point_i[0] - x_offset_2_i[i], y2 + output_radius_2[j] * (1 + padding_coef * padding)),
+                    arrowstyle="->",
+                    ec=color_in,
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                ax.add_patch(sec_arrow_i_1)
+                J2_points[i] = (
+                    sec_point_i[0] - x_offset_2_i[i],
+                    y2 + output_radius_2[j] * (1 + padding_coef * padding),
+                )
+            J2_info[j] = (sub_J2, sub_J2_dict, J2_points)
+            k += sub_diagram.num_outputs
 
         # Then the receptors arrows J1[k]s of D1
         # We will draw from the last element of J1 to the first
-        x_offset_1 = list(np.linspace(0, 2 * radius_1, len(diagram.J2) + 2))
-        x_offset_1.pop(0)
-        x_offset_1.pop(-1)
-        J1 = diagram.J1[::-1]
-        for i in range(in_size):
-            # We draw from down to top
-            fir_point_i = input_positions_1[num_d1_input_wires - J1[i] - 1]
-            # We move fir_point_i to the end of the arrow
-            fir_point_i = (fir_point_i[0] - 2 * radius_1, fir_point_i[1])
-            ax.plot(
-                [fir_point_i[0] + x_offset_1[i], fir_point_i[0] + x_offset_1[i]],
-                [y1 - radius_1, fir_point_i[1]],
-                linewidth=self.config.wire_width,
-                color=color_in,
-            )
-            fir_arrow_i_1 = patches.FancyArrowPatch(
-                (fir_point_i[0] + x_offset_1[i], fir_point_i[1]),
-                (fir_point_i[0], fir_point_i[1]),
-                arrowstyle="->",
-                ec=color_in,
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            ax.add_patch(fir_arrow_i_1)
+        first_diagrams = (
+            deepcopy(diagram.first.diagrams) if isinstance(diagram.first, TensorDiagram) else [diagram.first]
+        )
+        first_diagrams.reverse()
+        k = 0
+        J1_info = {}  # noqa: N806
+        J1_sub_diag_mapping = {}  # noqa: N806
+        for j, sub_diagram in enumerate(first_diagrams):
+            x_offset_1_i = list(np.linspace(0, 2 * new_output_radius_1[j], sub_diagram.num_inputs + 2))
+            x_offset_1_i.pop(0)
+            x_offset_1_i.pop(1)
+            sub_input_positions_1 = input_positions_1[k : k + sub_diagram.num_inputs]
+            sub_J1 = []  # noqa: N806
+            sub_J1_dict = {}  # noqa: N806
+            sub_J1_dict_inv = {}  # noqa: N806
+            for ind in range(k, k + sub_diagram.num_inputs):
+                if num_d1_input_wires - ind - 1 in diagram.J1:
+                    sub_J1.append(ind - k)
+                    sub_J1_dict[ind - k] = num_d1_input_wires - ind - 1
+                    sub_J1_dict_inv[num_d1_input_wires - ind - 1] = ind - k
+                    J1_sub_diag_mapping[num_d1_input_wires - ind - 1] = j
+            # We draw from bottom to top
+            J1_points = {}  # noqa: N806
+            padding = isinstance(sub_diagram, Swap)
+            padding_coef = 0.4
+            for i in sub_J1:
+                # We draw from down to top
+                fir_point_i = sub_input_positions_1[i]
+                # We move fir_point_i to the end of the arrow
+                fir_point_i = (fir_point_i[0] - 2 * output_radius_1[j], fir_point_i[1])
+                ax.plot(
+                    [fir_point_i[0] + x_offset_1_i[i], fir_point_i[0] + x_offset_1_i[i]],
+                    [
+                        y1
+                        - self.config.vertical_spacing * (len(first_diagrams) - 1)
+                        - output_radius_1[-1] * (1 + padding_coef * padding),
+                        fir_point_i[1],
+                    ],
+                    linewidth=self.config.wire_width,
+                    color=color_in,
+                )
+                J1_points[i] = (fir_point_i[0] + x_offset_1_i[i], fir_point_i[1])
+                fir_arrow_i_1 = patches.FancyArrowPatch(
+                    (fir_point_i[0] + x_offset_1_i[i], fir_point_i[1]),
+                    (fir_point_i[0], fir_point_i[1]),
+                    arrowstyle="->",
+                    ec=color_in,
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                ax.add_patch(fir_arrow_i_1)
+            J1_info[j] = (sub_J1, (sub_J1_dict, sub_J1_dict_inv), J1_points)
+            k += sub_diagram.num_inputs
+
         # Now we link the arrows J1[k], J2[k]
-        y_offset = list(np.linspace(0, box_dist / 2, len(diagram.J2) + 2))
-        y_offset.pop(0)
-        y_offset.pop(-1)
-        for i in range(in_size):
-            sec_point_i = output_positions_2[num_d2_out_wires - diagram.J2[i] - 1]
-            end_sec_arrow_i = (sec_point_i[0] - x_offset_2[i], y2 + radius_2)
-            ax.plot(
-                [end_sec_arrow_i[0], end_sec_arrow_i[0]],
-                [end_sec_arrow_i[1], end_sec_arrow_i[1] + y_offset[i]],
-                linewidth=self.config.wire_width,
-                color=color_in,
-            )
-            # We must make sure to link the correct indices of J1 and J2
-            fir_point_i = input_positions_1[num_d1_input_wires - diagram.J1[i] - 1]
-            # We move fir_point_i to the end of the arrow
-            fir_point_i = (fir_point_i[0] - 2 * radius_1, fir_point_i[1])
-            ax.plot(
-                [end_sec_arrow_i[0], fir_point_i[0] + x_offset_1[in_size - i - 1]],
-                [end_sec_arrow_i[1] + y_offset[i], end_sec_arrow_i[1] + y_offset[i]],
-                linewidth=self.config.wire_width,
-                color=color_in,
-            )
-            ax.plot(
-                [fir_point_i[0] + x_offset_1[in_size - i - 1], fir_point_i[0] + x_offset_1[in_size - i - 1]],
-                [end_sec_arrow_i[1] + y_offset[i], y1 - radius_1],
-                linewidth=self.config.wire_width,
-                color=color_in,
-            )
+        y_offset_J = list(np.linspace(0, box_dist / 2, len(diagram.J2) + 2))
+        y_offset_J.pop(0)
+        y_offset_J.pop(-1)
+        for j, sub_diagram in enumerate(second_diagrams):
+            sub_J2 = J2_info[j][0]
+            sub_J2_dict = J2_info[j][1]
+            J2_points = J2_info[j][2]
+            for i in sub_J2:
+                # We draw from down to top
+                starting_point = J2_points[i]
+                ax.plot(
+                    [starting_point[0], starting_point[0]],
+                    [starting_point[1], starting_point[1] + y_offset_J[diagram.J2.index(sub_J2_dict[i])]],
+                    linewidth=self.config.wire_width,
+                    color=color_in,
+                )
+                fir_sub_diag_ind = J1_sub_diag_mapping[J_dict[sub_J2_dict[i]]]
+                sub_J1_info = J1_info[fir_sub_diag_ind]
+                sub_J1_ind = sub_J1_info[1][1][J_dict[sub_J2_dict[i]]]
+                end_point = sub_J1_info[2][sub_J1_ind]
+                ax.plot(
+                    [starting_point[0], end_point[0]],
+                    [
+                        starting_point[1] + y_offset_J[diagram.J2.index(sub_J2_dict[i])],
+                        starting_point[1] + y_offset_J[diagram.J2.index(sub_J2_dict[i])],
+                    ],
+                    linewidth=self.config.wire_width,
+                    color=color_in,
+                )
+                ax.plot(
+                    [end_point[0], end_point[0]],
+                    [starting_point[1] + y_offset_J[diagram.J2.index(sub_J2_dict[i])], end_point[1]],
+                    linewidth=self.config.wire_width,
+                    color=color_in,
+                )
+            k += sub_diagram.num_inputs
+
         # Draw forward connections (I1 → I2)
         # I1: indices of outputs from first diagram
         # I2: indices of inputs from second diagram
         # Connection order: I1[k] connects to I2[k]
         # I must recompute x_offset and y_offset
-        x_offset_1 = list(np.linspace(0, 2 * radius_1, len(diagram.I1) + 2))
-        x_offset_1.pop(0)
-        x_offset_1.pop(-1)
-        y_offset = list(np.linspace(0, box_dist / 2, len(diagram.I1) + 2))
-        y_offset.pop(0)
-        y_offset.pop(-1)
-        # First we draw arrows I1[k]
-        out_size = len(diagram.I1)
-        I1 = diagram.I1[::-1]
-        for i in range(out_size):
-            fir_point_i = output_positions_1[num_d1_out_wires - I1[i] - 1]
-            ax.plot(
-                [fir_point_i[0], fir_point_i[0] - x_offset_1[i]],
-                [fir_point_i[1], fir_point_i[1]],
-                linewidth=self.config.wire_width,
-                color=color_out,
-            )
-            fir_arrow_i_2 = patches.FancyArrowPatch(
-                (fir_point_i[0] - x_offset_1[i], fir_point_i[1]),
-                (fir_point_i[0] - x_offset_1[i], y1 - radius_1),
-                arrowstyle="->",
-                ec=color_out,
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            ax.add_patch(fir_arrow_i_2)
+        I1_info = {}  # noqa: N806
+        I1_sub_diag_mapping = {}  # noqa: N806
+        k = 0
+        for j, sub_diagram in enumerate(first_diagrams):
+            x_offset_1_i = list(np.linspace(0, 2 * new_output_radius_1[j], sub_diagram.num_outputs + 2))
+            x_offset_1_i.pop(0)
+            x_offset_1_i.pop(1)
+            sub_output_positions_1 = output_positions_1[k : k + sub_diagram.num_outputs]
+            sub_I1 = []  # noqa: N806
+            sub_I1_dict = {}  # noqa: N806
+            for ind in range(k, k + sub_diagram.num_outputs):
+                if num_d1_out_wires - ind - 1 in diagram.I1:
+                    sub_I1.append(ind - k)
+                    sub_I1_dict[ind - k] = num_d1_out_wires - ind - 1
+                    I1_sub_diag_mapping[num_d1_out_wires - ind - 1] = j
+            # This is to allow the arrow to appear when when there is a Swap
+            padding = isinstance(sub_diagram, Swap)
+            padding_coef = 0.4
+            # We draw from bottom to top
+            I1_points = {}  # noqa: N806
+            for i in sub_I1:
+                # We draw from down to top
+                fir_point_i = sub_output_positions_1[i]
+                ax.plot(
+                    [fir_point_i[0], fir_point_i[0] - x_offset_1_i[i]],
+                    [fir_point_i[1], fir_point_i[1]],
+                    linewidth=self.config.wire_width,
+                    color=color_out,
+                )
+                fir_arrow_i_1 = patches.FancyArrowPatch(
+                    (fir_point_i[0] - x_offset_1_i[i], fir_point_i[1]),
+                    (
+                        fir_point_i[0] - x_offset_1_i[i],
+                        y1
+                        - self.config.vertical_spacing * (len(first_diagrams) - 1)
+                        - output_radius_1[-1] * (1 + padding_coef * padding),
+                    ),
+                    arrowstyle="->",
+                    ec=color_out,
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                I1_points[i] = (
+                    fir_point_i[0] - x_offset_1_i[i],
+                    y1
+                    - self.config.vertical_spacing * (len(first_diagrams) - 1)
+                    - output_radius_1[-1] * (1 + padding_coef * padding),
+                )
+                ax.add_patch(fir_arrow_i_1)
+            I1_info[j] = (sub_I1, sub_I1_dict, I1_points)
+            k += sub_diagram.num_outputs
         # Then we draw arrows I2[k]
-        x_offset_2 = list(np.linspace(0, 2 * radius_2, len(diagram.I1) + 2))
-        # We must make sure these arrows are not aligned with
-        # J1[k]. The variable delta will ensure it
-        delta_2 = (x_offset_2[1] - x_offset_2[0]) / (len(x_offset_2) - 1)
-        x_offset_2.pop(0)
-        x_offset_2.pop(-1)
-        for i in range(out_size):
-            # We draw from down to top
-            sec_point_i = input_positions_2[num_d2_input_wires - diagram.I2[i] - 1]
-            # We move sec_point_i to the end of the arrow
-            sec_point_i = (sec_point_i[0] - 2 * radius_2, sec_point_i[1])
-            ax.plot(
-                [sec_point_i[0] + x_offset_2[i] + delta_2, sec_point_i[0] + x_offset_2[i] + delta_2],
-                [y2 + radius_2, sec_point_i[1]],
-                linewidth=self.config.wire_width,
-                color=color_out,
-            )
-            sec_arrow_i_2 = patches.FancyArrowPatch(
-                (sec_point_i[0] + x_offset_2[i] + delta_2, sec_point_i[1]),
-                (sec_point_i[0], sec_point_i[1]),
-                arrowstyle="->",
-                ec=color_out,
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            ax.add_patch(sec_arrow_i_2)
+        I2_info = {}  # noqa: N806
+        I2_sub_diag_mapping = {}  # noqa: N806
+        k = 0
+        for j, sub_diagram in enumerate(second_diagrams):
+            x_offset_2_i = list(np.linspace(0, 2 * new_output_radius_2[j], sub_diagram.num_inputs + 2))
+            x_offset_2_i.pop(0)
+            x_offset_2_i.pop(1)
+            sub_input_positions_2 = input_positions_2[k : k + sub_diagram.num_inputs]
+            sub_I2 = []  # noqa: N806
+            sub_I2_dict = {}  # noqa: N806
+            sub_I2_dict_inv = {}  # noqa: N806
+            for ind in range(k, k + sub_diagram.num_inputs):
+                if num_d2_input_wires - ind - 1 in diagram.I2:
+                    sub_I2.append(ind - k)
+                    sub_I2_dict[ind - k] = num_d2_input_wires - ind - 1
+                    sub_I2_dict_inv[num_d2_input_wires - ind - 1] = ind - k
+                    I2_sub_diag_mapping[num_d2_input_wires - ind - 1] = j
+            padding = isinstance(sub_diagram, Swap)
+            padding_coef = 0.4
+            # We draw from bottom to top
+            I2_points = {}  # noqa: N806
+            for i in sub_I2:
+                # We draw from down to top
+                sec_point_i = sub_input_positions_2[i]
+                # We move sec_point_i to the end of the arrow
+                sec_point_i = (sec_point_i[0] - 2 * output_radius_2[j], sec_point_i[1])
+                ax.plot(
+                    [sec_point_i[0] + x_offset_2_i[i], sec_point_i[0] + x_offset_2_i[i]],
+                    [
+                        y2 + output_radius_2[j] * (1 + padding_coef * padding),
+                        sec_point_i[1],
+                    ],
+                    linewidth=self.config.wire_width,
+                    color=color_out,
+                )
+                I2_points[i] = (sec_point_i[0] + x_offset_2_i[i], sec_point_i[1])
+                sec_arrow_i_2 = patches.FancyArrowPatch(
+                    (sec_point_i[0] + x_offset_2_i[i], sec_point_i[1]),
+                    (sec_point_i[0], sec_point_i[1]),
+                    arrowstyle="->",
+                    ec=color_out,
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                ax.add_patch(sec_arrow_i_2)
+            I2_info[j] = (sub_I2, (sub_I2_dict, sub_I2_dict_inv), I2_points)
+            k += sub_diagram.num_inputs
         # Then we link arrows I1[k] , I2[k]
-        for i in range(out_size):
-            fir_point_i = output_positions_1[num_d1_out_wires - I1[i] - 1]
-            end_fir_arrow_i = (fir_point_i[0] - x_offset_1[i], y1 - radius_1)
-            ax.plot(
-                [end_fir_arrow_i[0], end_fir_arrow_i[0]],
-                [end_fir_arrow_i[1], end_fir_arrow_i[1] - y_offset[i]],
-                linewidth=self.config.wire_width,
-                color=color_out,
-            )
-            sec_point_i = input_positions_2[num_d2_input_wires - diagram.I2[i] - 1]
-            # We move sec_point_i to the end of the arrow
-            sec_point_i = (sec_point_i[0] - 2 * radius_2, sec_point_i[1])
-            # We must make sure to link the correct indices of J1 and J2
-            ax.plot(
-                [end_fir_arrow_i[0], sec_point_i[0] + x_offset_2[out_size - i - 1] + delta_2],
-                [end_fir_arrow_i[1] - y_offset[i], end_fir_arrow_i[1] - y_offset[i]],
-                linewidth=self.config.wire_width,
-                color=color_out,
-            )
-            ax.plot(
-                [
-                    sec_point_i[0] + x_offset_2[out_size - i - 1] + delta_2,
-                    sec_point_i[0] + x_offset_2[out_size - i - 1] + delta_2,
-                ],
-                [end_fir_arrow_i[1] - y_offset[i], y2 + radius_2],
-                linewidth=self.config.wire_width,
-                color=color_out,
-            )
+        y_offset_I = list(np.linspace(0, box_dist / 2, len(diagram.I1) + 2))
+        y_offset_I.pop(0)
+        y_offset_I.pop(-1)
+        k = 0
+        for j, sub_diagram in enumerate(first_diagrams):
+            sub_I1 = I1_info[j][0]
+            sub_I1_dict = I1_info[j][1]
+            I1_points = I1_info[j][2]
+            for i in sub_I1:
+                # We draw from down to top
+                starting_point = I1_points[i]
+                ax.plot(
+                    [starting_point[0], starting_point[0]],
+                    [starting_point[1], starting_point[1] - y_offset_I[diagram.I1.index(sub_I1_dict[i])]],
+                    linewidth=self.config.wire_width,
+                    color=color_out,
+                )
+                sec_sub_diag_ind = I2_sub_diag_mapping[I_dict[sub_I1_dict[i]]]
+                sub_I2_info = I2_info[sec_sub_diag_ind]
+                sub_I2_ind = sub_I2_info[1][1][I_dict[sub_I1_dict[i]]]
+                end_point = sub_I2_info[2][sub_I2_ind]
+                ax.plot(
+                    [starting_point[0], end_point[0]],
+                    [
+                        starting_point[1] - y_offset_I[diagram.I1.index(sub_I1_dict[i])],
+                        starting_point[1] - y_offset_I[diagram.I1.index(sub_I1_dict[i])],
+                    ],
+                    linewidth=self.config.wire_width,
+                    color=color_out,
+                )
+                ax.plot(
+                    [end_point[0], end_point[0]],
+                    [starting_point[1] - y_offset_I[diagram.I1.index(sub_I1_dict[i])], end_point[1]],
+                    linewidth=self.config.wire_width,
+                    color=color_out,
+                )
+            k += sub_diagram.num_inputs
         # We take outputs from bottom to top
         output_positions = [output_positions_2[i] for i in draw_kept_second_outputs]
         output_positions += [output_positions_1[i] for i in draw_kept_first_outputs]
-        return output_positions, input_positions, radius
+        # We also return the initial input positions
+        init_input_positions = [input_positions_2[i] for i in draw_kept_second_inputs]
+        init_input_positions += [input_positions_1[i] for i in draw_kept_first_inputs]
+        return output_positions, init_input_positions, (radius, y_shift1 + y_shift2 + 1.5 * spacing)
 
     def _draw_sub_diagram(  # noqa: PLR0913, PLR0917
         self,
@@ -875,12 +1088,13 @@ class DiagramVisualizer:
         x: float,
         y: float,
         comp_idx: int | None = None,
-        input_positions: list | None = None,
+        sub_comp_idx: int | None = None,
         is_sub_comp: bool = False,
+        input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
-    ) -> tuple[list[float], list[float]]:
+    ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a sub-diagram at specified coordinates and return port positions.
 
         Parameters:
@@ -898,17 +1112,17 @@ class DiagramVisualizer:
             value we draw input or output wires. In a composition, we don't
             need to draw the input/output wires of all sub-diagrams. This
             variable allows to monitor it.
+        is_sub_comp: bool = False
+            This variable is not None when a composition is part of a tensor
+            diagram. And in that case we need to resize this composition
+            diagram so that it fits in the horizontal spacing of the tensor
+            diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
             the input wires from that sub-diagram to the current diagram.
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
-        is_sub_comp: bool = False
-            This variable is not None when a composition is part of a tensor
-            diagram. And in that case we need to resize this composition
-            diagram so that it fits in the horizontal spacing of the tensor
-            diagram.
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
@@ -920,23 +1134,47 @@ class DiagramVisualizer:
         list[tuple[float]]
             Lists of output indices that will serve as the input indices of the
             next diagram if there is any.
-        list[tuple[float]]
-            Lists of input indices
-        float
-            radius
+        list[tuple[float]] | None
+            Lists of proper input indices, i.e. different from input indices
+            received from a sub-diagram.
+        float | list[float]
+            radius of either the proper diagram, of the first diagram of a
+            composition diagram or the list of radius of a tensor diagram.
         """
         if radius is None:
             radius = self.config.node_radius
         if isinstance(diagram, ProperDiagram):
             return self._draw_proper_diagram(
-                ax, diagram, x, y, comp_idx, input_positions, radius, kept_inputs, kept_outputs
+                ax, diagram, x, y, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
             )
         if isinstance(diagram, CompositionDiagram):
             return self._draw_composition(
-                ax, diagram, x, y, comp_idx, input_positions, is_sub_comp, radius, kept_inputs, kept_outputs
+                ax,
+                diagram,
+                x,
+                y,
+                comp_idx,
+                sub_comp_idx,
+                is_sub_comp,
+                input_positions,
+                radius,
+                kept_inputs,
+                kept_outputs,
             )
         if isinstance(diagram, TensorDiagram):
-            return self._draw_tensor(ax, diagram, x, y, comp_idx, input_positions, is_sub_comp, radius)
+            return self._draw_tensor(
+                ax,
+                diagram,
+                x,
+                y,
+                comp_idx,
+                sub_comp_idx,
+                is_sub_comp,
+                input_positions,
+                radius,
+                kept_inputs,
+                kept_outputs,
+            )
         if isinstance(diagram, ContractedDiagram):
             return self._draw_contracted(
                 ax,
@@ -944,8 +1182,9 @@ class DiagramVisualizer:
                 x,
                 y,
                 comp_idx,
-                input_positions,
+                sub_comp_idx,
                 is_sub_comp,
+                input_positions,
                 radius,
             )
         return [], [], radius
@@ -956,9 +1195,12 @@ class DiagramVisualizer:
         x: float,
         y: float,
         comp_idx: int | None = None,
+        sub_comp_idx: int | None = None,
         input_positions: list | None = None,
         radius: float | None = None,
-    ) -> tuple[list[tuple], list[tuple] | None, float]:
+        kept_inputs: list | None = None,
+        kept_outputs: list | None = None,
+    ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a swap node.
 
         Parameters:
@@ -992,10 +1234,12 @@ class DiagramVisualizer:
         list[tuple[float]]
             Lists of output indices that will serve as the input indices of the
             next diagram if there is any.
-        list[tuple[float]]
-            Lists of input indices
-        float
-            radius
+        list[tuple[float]] | None
+            Lists of proper input indices, i.e. different from input indices
+            received from a sub-diagram.
+        float | list[float]
+            radius of either the proper diagram, of the first diagram of a
+            composition diagram or the list of radius of a tensor diagram.
         """
         if radius is None:
             radius = self.config.node_radius
@@ -1007,8 +1251,14 @@ class DiagramVisualizer:
         # a composition diagram
         draw_in_wires = True
         draw_out_wires = True
-        if comp_idx is not None and comp_idx != -1:
+        if (  # noqa: PLR0916
+            comp_idx is not None and comp_idx != -1
+        ) or ((comp_idx == -1 or comp_idx is None) and (sub_comp_idx is not None and sub_comp_idx != -1)):
             draw_out_wires = False
+        if kept_inputs is None:
+            kept_inputs = [0, 1]
+        if kept_outputs is None:
+            kept_outputs = [0, 1]
         # Draw inputs arrows
         init_input_positions = [
             (x + radius + arrow_length, y - radius),
@@ -1016,25 +1266,29 @@ class DiagramVisualizer:
         ]
         if draw_in_wires:
             if input_positions is None:
+                # input_positions is empty only for the first element of a composition
+                # or a single Swap diagram
                 input_positions = init_input_positions
-            input2 = patches.FancyArrowPatch(
-                input_positions[1],
-                (x + radius, y + radius),
-                arrowstyle="->",
-                ec="black",
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            input1 = patches.FancyArrowPatch(
-                input_positions[0],
-                (x + radius, y - radius),
-                arrowstyle="->",
-                ec="black",
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            ax.add_patch(input1)
-            ax.add_patch(input2)
+            if 0 in kept_inputs:
+                input1 = patches.FancyArrowPatch(
+                    input_positions[0],
+                    (x + radius, y - radius),
+                    arrowstyle="->",
+                    ec="black",
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                ax.add_patch(input1)
+            if 1 in kept_inputs:
+                input2 = patches.FancyArrowPatch(
+                    input_positions[1],
+                    (x + radius, y + radius),
+                    arrowstyle="->",
+                    ec="black",
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                ax.add_patch(input2)
 
         # Draw Outputs
         # We return outputs from bottom to top
@@ -1043,24 +1297,26 @@ class DiagramVisualizer:
             (x - radius, y + radius),
         ]
         if draw_out_wires:
-            output1 = patches.FancyArrowPatch(
-                output_positions[0],
-                (x - radius - arrow_length, y - radius),
-                arrowstyle="->",
-                ec="black",
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            output2 = patches.FancyArrowPatch(
-                output_positions[1],
-                (x - radius - arrow_length, y + radius),
-                arrowstyle="->",
-                ec="black",
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            ax.add_patch(output1)
-            ax.add_patch(output2)
+            if 0 in kept_outputs:
+                output1 = patches.FancyArrowPatch(
+                    output_positions[0],
+                    (x - radius - arrow_length, y - radius),
+                    arrowstyle="->",
+                    ec="black",
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                ax.add_patch(output1)
+            if 1 in kept_outputs:
+                output2 = patches.FancyArrowPatch(
+                    output_positions[1],
+                    (x - radius - arrow_length, y + radius),
+                    arrowstyle="->",
+                    ec="black",
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                ax.add_patch(output2)
         return output_positions, init_input_positions, radius
 
     def _draw_fourier(  # noqa: PLR0913, PLR0917
@@ -1070,9 +1326,12 @@ class DiagramVisualizer:
         y: float,
         diagram: Diagram,
         comp_idx: int | None = None,
+        sub_comp_idx: int | None = None,
         input_positions: list | None = None,
         radius: float | None = None,
-    ) -> tuple[list[tuple], list[tuple] | None, float]:
+        kept_inputs: list | None = None,
+        kept_outputs: list | None = None,
+    ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a Fourier node.
 
         Parameters:
@@ -1106,10 +1365,12 @@ class DiagramVisualizer:
         list[tuple[float]]
             Lists of output indices that will serve as the input indices of the
             next diagram if there is any.
-        list[tuple[float]]
-            Lists of input indices
-        float
-            radius
+        list[tuple[float]] | None
+            Lists of proper input indices, i.e. different from input indices
+            received from a sub-diagram.
+        float | list[float]
+            radius of either the proper diagram, of the first diagram of a
+            composition diagram or the list of radius of a tensor diagram.
         """
         if radius is None:
             radius = self.config.node_radius
@@ -1139,25 +1400,32 @@ class DiagramVisualizer:
         # a composition diagram
         draw_in_wires = True
         draw_out_wires = True
-        if comp_idx is not None and comp_idx != -1:
+        if (  # noqa: PLR0916
+            comp_idx is not None and comp_idx != -1
+        ) or ((comp_idx == -1 or comp_idx is None) and (sub_comp_idx is not None and sub_comp_idx != -1)):
             draw_out_wires = False
+        if kept_inputs is None:
+            kept_inputs = [0]
+        if kept_outputs is None:
+            kept_outputs = [0]
         # Draw inputs wires
         init_input_positions = [(x + radius + arrow_length, y)]
         if draw_in_wires:
             if input_positions is None:
                 input_positions = init_input_positions
-            input1 = patches.FancyArrowPatch(
-                input_positions[0],
-                (x + radius, y),
-                arrowstyle="->",
-                ec="black",
-                mutation_scale=20,
-                linewidth=self.config.wire_width,
-            )
-            ax.add_patch(input1)
+            if 0 in kept_inputs:
+                input1 = patches.FancyArrowPatch(
+                    input_positions[0],
+                    (x + radius, y),
+                    arrowstyle="->",
+                    ec="black",
+                    mutation_scale=20,
+                    linewidth=self.config.wire_width,
+                )
+                ax.add_patch(input1)
         # Draw output wires
         output_positions = [(x - radius, y)]
-        if draw_out_wires:
+        if draw_out_wires and 0 in kept_outputs:
             output1 = patches.FancyArrowPatch(
                 output_positions[0],
                 (x - radius - arrow_length, y),
@@ -1254,3 +1522,198 @@ def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None
     """
     visualizer = DiagramVisualizer(config)
     return visualizer.visualize(diagram, title)
+
+
+def reorganise(radiuses: list):
+    min_val = min(radiuses)
+    max_val = max(radiuses)
+    val = r.randint(2, 10)
+    if min_val == max_val:
+        max_val *= (val + 1) / (val + 2)
+        min_val = ((val - 1) / val) * max_val
+    else:
+        max_val *= (val + 1) / (val + 2)
+    output = list(np.linspace(min_val, max_val, len(radiuses) + 1))
+    output.pop(0)
+    return output
+
+
+if __name__ == "__main__":
+    # Build proper diagrams
+    p = ZxPoly({1: 2, 2: 4})
+    q = ZxPoly({1: 2, 3: 4, 5: 7})
+
+    a = Fourier()
+    b = Fourier2()
+    c = FourierInv()
+    d_1 = QSpider(1, 1, p)
+    d_11 = QSpider(3, 2, p)
+    d_12 = QSpider(4, 3, p)
+    d_13 = QSpider(5, 5, p)
+    d_2 = PSpider(1, 1, q)
+    d_21 = PSpider(3, 2, p)
+    d_22 = PSpider(3, 4, p)
+    d_23 = PSpider(5, 5, p)
+    e_1 = Swap()
+
+    # Valid test cases (respecting input/output counts)
+
+    # # 1. Single proper diagram
+    # fig1 = visualize(a, "Fourier")
+    # fig1_1 = visualize(b, "Fourier2")
+    # fig1_2 = visualize(c, "Inverse Fourier")
+    # fig1_3 = visualize(d_1, "Single QSpider 1")
+    # fig1_31 = visualize(d_11, "Single QSpider 2")
+    # fig1_32 = visualize(d_12, "Single QSpider 3")
+    # fig1_33 = visualize(d_13, "Single QSpider 4")
+    # fig1_4 = visualize(d_2, "Single PSpider 1")
+    # fig1_41 = visualize(d_21, "Single PSpider 2")
+    # fig1_42 = visualize(d_22, "Single PSpider 3")
+    # fig1_43 = visualize(d_23, "Single PSpider 4")
+    # fig1_5 = visualize(e_1, "Swap")
+    # fig1.savefig("Fourier")
+    # fig1_1.savefig("Fourier2")
+    # fig1_2.savefig("Inverse Fourier")
+    # fig1_3.savefig("Single QSpider 1")
+    # fig1_31.savefig("Single QSpider 2")
+    # fig1_32.savefig("Single QSpider 3")
+    # fig1_33.savefig("Single QSpider 4")
+    # fig1_4.savefig("Single PSpider 1")
+    # fig1_41.savefig("Single PSpider 2")
+    # fig1_42.savefig("Single PSpider 3")
+    # fig1_43.savefig("Single PSpider 4")
+    # fig1_5.savefig("Swap")
+
+    # # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
+    comp1 = d_1.compose(a)  # Valid: 1→1
+    # fig2 = visualize(comp1, "Composition: Fourier then QSpider")
+    # fig2.savefig("Composition: Fourier then QSpider")
+
+    # # 2.1 Complex composition
+    # comp2 = b.compose(comp1)
+    # comp2 = c.compose(comp2)
+    # comp2 = d_2.compose(comp2)
+    # fig2_1 = visualize(comp2, "Complex Composition")
+    # fig2_1.savefig("Complex Composition")
+
+    # # 3. Tensor of two proper diagrams
+    # tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
+    # fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
+    # fig3.savefig("Tensor: Fourier ⊗ Fourier2")
+
+    # # 3.1 Complex tensor product
+    # tensor2 = e_1.tensor(tensor1)
+    # tensor2 = d_22.tensor(tensor2)
+    # tensor2 = d_13.tensor(tensor2)
+    # fig3_1 = visualize(tensor2, "Complex Tensor Diagram")
+    # fig3_1.savefig("Complex Tensor Diagram")
+
+    # # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
+    # two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
+    # comp_swap = two_fouriers.compose(e_1)  # Valid: 2→2
+    # fig4 = visualize(comp_swap, "Composition: Swap then (F ⊗ F)")
+    # fig4.savefig("Composition: Swap then (F ⊗ F)")
+
+    # 5. Nested composition: (c ∘ a) ∘ b
+    # nested_comp = d_1.compose(a).compose(b)
+    # fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
+    # fig5.savefig("Nested composition: (c ∘ a) ∘ b")
+
+    # 6. Tensor containing composition
+    tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
+    fig6 = visualize(tensor_with_comp, "Tensor containing composition")
+    fig6.savefig("Tensor containing composition")
+
+    # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
+    left = a.tensor(a)  # 2 outputs
+    middle = left.compose(e_1)  # 2 outputs after swap
+    right = a.tensor(a)  # 2 inputs
+    full = middle.compose(right)  # 2→2
+    fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+
+    # # 8. Big Complex diagram
+    e = a.tensor(b)
+    e = e.tensor(b)
+    d2 = e_1.tensor(a)
+    f = e.compose(d2)
+    g = d2.compose(f)
+    g = d2.compose(g)
+    a2 = QSpider(3, 3, p)
+    b2 = CompositionDiagram([
+        a2,
+        a2,
+    ])
+    b2 = b2.compose(a2)
+    b2 = b2.compose(a2)
+    g = g.compose(b2)
+    h = a.compose(b)
+    h = h.compose(b)
+    j = QSpider(4, 4, q)
+    k = j.tensor(g)
+    i = a.tensor(g)
+    # fig8 = visualize(i, "Complex Diagram")
+    # fig8.savefig("Complex Diagram.png")
+
+    # 9. Proper Contracted diagram
+    c1 = ContractedDiagram(d_13, d_23, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
+    c1_1 = ContractedDiagram(e_1, c, [0], [0], [], [])
+    c1_2 = ContractedDiagram(d_12, e_1, [1], [1], [0, 2], [0, 1])
+    c1_3 = ContractedDiagram(b, d_21, [0], [1], [0], [0])
+    # fig9 = visualize(c1, "Proper Contracted Diagram")
+    # fig9_1 = visualize(c1_1, "Proper Contracted Diagram: Swap and Inv Fourier")
+    # fig9_2 = visualize(c1_2, "Proper Contracted Diagram: QSpider and Swap")
+    # fig9_3 = visualize(c1_3, "Proper Contracted Diagram: Fourier2 and PSpider")
+    # fig9.savefig("Proper Contracted Diagram")
+    # fig9_1.savefig("Proper Contracted Diagram: Swap and Inv Fourier")
+    # fig9_2.savefig("Proper Contracted Diagram: QSpider and Swap")
+    # fig9_3.savefig("Proper Contracted Diagram: Fourier2 and PSpider")
+
+    # 10. Proper Contracted diagram inside a Composition Diagram
+    e_2 = e_1.tensor(a)
+    e_2 = e_2.tensor(b)
+    d1 = c1.compose(e_2)
+    d1 = e_2.compose(d1)
+    e_3 = b.tensor(c)
+    # fig10 = visualize(d1, "Proper Contracted Diagram inside a Composition Diagram 1")
+    # fig10_1 = visualize(c1_1.compose(e_3), "Proper Contracted Diagram inside a Composition Diagram 2")
+    # fig10_2 = visualize(e_3.compose(c1_2), "Proper Contracted Diagram inside a Composition Diagram 3")
+    # fig10_3 = visualize(a.compose(c1_3.compose(e_3)), "Proper Contracted Diagram inside a Composition Diagram 3")
+    # fig10.savefig("Proper Contracted Diagram inside a Composition Diagram 1")
+    # fig10_1.savefig("Proper Contracted Diagram inside a Composition Diagram 2")
+    # fig10_2.savefig("Proper Contracted Diagram inside a Composition Diagram 3")
+    # fig10_3.savefig("Proper Contracted Diagram inside a Composition Diagram 4")
+
+    # 11. Proper Contracted diagram inside a Tensor Diagram
+    d_14 = QSpider(5, 5, 20 * (p + q))
+    d1 = c1.tensor(d_14)
+    d1 = d_23.tensor(d1)
+    d1 = c1_1.tensor(d1)
+    # fig11 = visualize(d1, "Proper Contracted Diagram inside a Tensor Diagram")
+    # fig11.savefig("Proper Contracted Diagram inside a Tensor Diagram")
+
+    # 12. Contracted diagram composed of Composition Diagram(s)
+    c2 = d_13.compose(d_23)
+    c2 = d_14.compose(c2)
+    d2 = ContractedDiagram(c2, d_13, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
+    d3 = ContractedDiagram(d_13, c2, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
+    # fig12_1 = visualize(d2, "Contracted diagram composed of Composition Diagrams 1")
+    # fig12_1.savefig("Contracted diagram composed of Composition Diagrams 1")
+    # fig12_2 = visualize(d3, "Contracted diagram composed of Composition Diagrams 2")
+    # fig12_2.savefig("Contracted diagram composed of Composition Diagrams 2")
+
+    # 13. Contracted diagram composed of Tensor Diagram(s)
+    c2 = d_13.tensor(e_1)
+    c3 = d_22.tensor(a)
+    c3 = c3.tensor(b)
+    c3 = c3.tensor(c)
+    c4 = d_12.tensor(a)
+    d2 = ContractedDiagram(c2, c3, [0, 1, 4, 6], [1, 2, 3, 4], [0, 1, 2, 5], [0, 1, 2, 5])
+    d3 = ContractedDiagram(d_13, c2, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
+    d4 = ContractedDiagram(c3, c4, [0, 1, 2, 6], [0, 1, 2, 4], [4, 5], [1, 3])
+    # fig13_1 = visualize(d2, "Contracted diagram composed of Tensor Diagrams 1")
+    # fig13_1.savefig("Contracted diagram composed of Tensor Diagrams 1")
+    # fig13_2 = visualize(d3, "Contracted diagram composed of Tensor Diagrams 2")
+    # fig13_2.savefig("Contracted diagram composed of Tensor Diagrams 2")
+    # fig13_3 = visualize(d4, "Contracted diagram composed of Tensor Diagrams 3")
+    # fig13_3.savefig("Contracted diagram composed of Tensor Diagrams 3")
