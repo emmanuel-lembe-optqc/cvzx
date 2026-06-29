@@ -289,7 +289,6 @@ class DiagramVisualizer:
         """
         output_positions = []
         # Determine spider type
-        # if isinstance(diagram, (MacronodeSpider, NonGaussianSpider, QSpider, PSpider)):
         if isinstance(diagram, (QSpider, PSpider)):
             if radius is None:
                 radius = self.config.node_radius
@@ -305,20 +304,19 @@ class DiagramVisualizer:
             ax.add_patch(box)
 
             # Draw phase if present
-            if hasattr(diagram, "phase") and diagram.phase and not diagram.phase.is_zero():
-                phase_str = self._format_phase(diagram.phase)
+            phase_str = self._format_phase(diagram.phase)
 
-                # Wrap text
-                phase_str = textwrap.fill(phase_str, width=int(width))
-                ax.text(
-                    x,
-                    y,
-                    phase_str,
-                    ha="center",
-                    va="center",
-                    fontsize=self.config.fontsize,
-                    clip_on=True,
-                )
+            # Wrap text
+            phase_str = textwrap.fill(phase_str, width=int(width))
+            ax.text(
+                x,
+                y,
+                phase_str,
+                ha="center",
+                va="center",
+                fontsize=self.config.fontsize,
+                clip_on=True,
+            )
             # We will draw input and output wires depending of the block is part of
             # a composition diagram
             draw_in_wires = True
@@ -390,11 +388,11 @@ class DiagramVisualizer:
         elif isinstance(diagram, Swap):
             output_positions, init_input_positions, radius = self._draw_swap(
                 ax, x, y, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
-            )  # TODO: add the kept_input management
+            )
         elif isinstance(diagram, (Fourier, FourierInv, Fourier2)):
             output_positions, init_input_positions, radius = self._draw_fourier(
                 ax, x, y, diagram, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
-            )  # TODO: update the sub_comp_idx and add the kept_input management
+            )
         return output_positions, init_input_positions, radius
 
     def _draw_composition(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0917
