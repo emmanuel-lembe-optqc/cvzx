@@ -1312,7 +1312,7 @@ class ScalarDiagram(Diagram):
     """Closed diagram representing a scalar (no inputs/outputs).
 
     This represents the result of contracting all modes, which yields
-    a complex scalar (potentially infinite in idealised CV theory).
+    a complex scalar.
     """
 
     _num_inputs: int = field(default=0, init=False)

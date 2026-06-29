@@ -223,7 +223,7 @@ class DiagramVisualizer:
         plt.tight_layout()
         return fig
 
-    def _draw_proper_diagram(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0917
+    def _draw_proper_diagram(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0915, PLR0917
         self,
         ax: plt.Axes,
         diagram: ProperDiagram,
@@ -249,10 +249,12 @@ class DiagramVisualizer:
         y: float
             Second coordinate of the diagram
         comp_idx: int | None = None
-            Index of a sub-diagram inside a composition. Depending on its
-            value we draw input or output wires. In a composition, we don't
-            need to draw the input/output wires of all sub-diagrams. This
-            variable allows to monitor it.
+            Index of a sub-diagram inside a composition. In a composition,
+            we don't need to draw the input/output wires of all sub-diagrams.
+        sub_comp_idx: int | None = None
+            Index of a proper diagram inside a sub-composition diagram. Along with
+            the comp_idx, their value determine whether to draw input and/or output
+            wires on the proper diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
@@ -274,7 +276,7 @@ class DiagramVisualizer:
             received from a sub-diagram.
         float | list[float]
             radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radius of a tensor diagram.
+            composition diagram or the list of radiuses of a tensor diagram.
         """
         output_positions = []
         # Determine spider type
@@ -382,7 +384,7 @@ class DiagramVisualizer:
             )  # TODO: update the sub_comp_idx and add the kept_input management
         return output_positions, init_input_positions, radius
 
-    def _draw_composition(  # noqa: PLR0913, PLR0914, PLR0917
+    def _draw_composition(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0917
         self,
         ax: plt.Axes,
         diagram: CompositionDiagram,
@@ -390,7 +392,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
-        is_sub_comp: bool = False,
+        is_sub_comp: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
@@ -409,10 +411,12 @@ class DiagramVisualizer:
         y: float
             Second coordinate of the diagram
         comp_idx: int | None = None
-            Index of a sub-diagram inside a composition. Depending on its
-            value we draw input or output wires. In a composition, we don't
-            need to draw the input/output wires of all sub-diagrams. This
-            variable allows to monitor it.
+            Index of a sub-diagram inside a composition. In a composition,
+            we don't need to draw the input/output wires of all sub-diagrams.
+        sub_comp_idx: int | None = None
+            Index of a proper diagram inside a sub-composition diagram. Along with
+            the comp_idx, their value determine whether to draw input and/or output
+            wires on the proper diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
@@ -436,7 +440,7 @@ class DiagramVisualizer:
             received from a sub-diagram.
         float | list[float]
             radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radius of a tensor diagram.
+            composition diagram or the list of radiuses of a tensor diagram.
         """
         n = len(diagram.diagrams)
         if n == 0:
@@ -505,7 +509,7 @@ class DiagramVisualizer:
                 output_radius = radius
         return output_positions, init_input_positions, output_radius
 
-    def _draw_tensor(  # noqa: PLR0913, PLR0917
+    def _draw_tensor(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0915, PLR0917
         self,
         ax: plt.Axes,
         diagram: TensorDiagram,
@@ -513,7 +517,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
-        is_sub_comp: bool = False,
+        is_sub_comp: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
@@ -532,10 +536,12 @@ class DiagramVisualizer:
         y: float
             Second coordinate of the diagram
         comp_idx: int | None = None
-            Index of a sub-diagram inside a composition. Depending on its
-            value we draw input or output wires. In a composition, we don't
-            need to draw the input/output wires of all sub-diagrams. This
-            variable allows to monitor it.
+            Index of a sub-diagram inside a composition. In a composition,
+            we don't need to draw the input/output wires of all sub-diagrams.
+        sub_comp_idx: int | None = None
+            Index of a proper diagram inside a sub-composition diagram. Along with
+            the comp_idx, their value determine whether to draw input and/or output
+            wires on the proper diagram.
         is_sub_comp: bool
             It is true when a composition is a sub-diagram.
         input_positions: list | None
@@ -559,7 +565,7 @@ class DiagramVisualizer:
             received from a sub-diagram.
         float | list[float]
             radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radius of a tensor diagram.
+            composition diagram or the list of radiuses of a tensor diagram.
         """
         n = len(diagram.diagrams)
         if n == 0:
@@ -638,7 +644,6 @@ class DiagramVisualizer:
                 radius = radius[0]
             else:
                 contract_shift = 0
-            print(y, h)
             output_positions = output_pos + output_positions
             init_input_positions = init_input_pos + init_input_positions
             output_radius = [radius, *output_radius]
@@ -646,7 +651,7 @@ class DiagramVisualizer:
             out_ind += sub_diagram.num_outputs
         return output_positions, init_input_positions, output_radius
 
-    def _draw_contracted(  # noqa: PLR0913, PLR0914, PLR0915, PLR0917
+    def _draw_contracted(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0915, PLR0917
         self,
         ax: plt.Axes,
         diagram: ContractedDiagram,
@@ -679,10 +684,12 @@ class DiagramVisualizer:
         y: float
             Second coordinate of the diagram
         comp_idx: int | None = None
-            Index of a sub-diagram inside a composition. Depending on its
-            value we draw input or output wires. In a composition, we don't
-            need to draw the input/output wires of all sub-diagrams. This
-            variable allows to monitor it.
+            Index of a sub-diagram inside a composition. In a composition,
+            we don't need to draw the input/output wires of all sub-diagrams.
+        sub_comp_idx: int | None = None
+            Index of a proper diagram inside a sub-composition diagram. Along with
+            the comp_idx, their value determine whether to draw input and/or output
+            wires on the proper diagram.
         is_sub_comp: bool
             It is true when a composition is a sub-diagram.
         input_positions: list | None
@@ -706,7 +713,7 @@ class DiagramVisualizer:
             received from a sub-diagram.
         tuple[float, float]
             radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radius of a tensor diagram.
+            composition diagram or the list of radiuses of a tensor diagram.
             And the shift of the contracted diagram. This shift will allow
             to draw a contracted diagram properly when it is inside a tensor
             diagram
@@ -778,8 +785,8 @@ class DiagramVisualizer:
         if isinstance(output_radius_1, (int, float)):
             output_radius_1 = [output_radius_1]
         # We must make sure there is no equal output radiuses
-        new_output_radius_2 = reorganise(output_radius_2)
-        new_output_radius_1 = reorganise(output_radius_1)
+        new_output_radius_2 = normalize_radiuses(output_radius_2)
+        new_output_radius_1 = normalize_radiuses(output_radius_1)
         J_dict = {diagram.J2[i]: diagram.J1[i] for i in range(len(diagram.J1))}
         I_dict = {diagram.I1[i]: diagram.I2[i] for i in range(len(diagram.I2))}
         # Let's compute the distance between D1 and D2
@@ -1089,7 +1096,7 @@ class DiagramVisualizer:
         y: float,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
-        is_sub_comp: bool = False,
+        is_sub_comp: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
@@ -1108,10 +1115,12 @@ class DiagramVisualizer:
         y: float
             Second coordinate of the sub-diagram
         comp_idx: int | None = None
-            Index of a sub-diagram inside a composition. Depending on its
-            value we draw input or output wires. In a composition, we don't
-            need to draw the input/output wires of all sub-diagrams. This
-            variable allows to monitor it.
+            Index of a sub-diagram inside a composition. In a composition,
+            we don't need to draw the input/output wires of all sub-diagrams.
+        sub_comp_idx: int | None = None
+            Index of a proper diagram inside a sub-composition diagram. Along with
+            the comp_idx, their value determine whether to draw input and/or output
+            wires on the proper diagram.
         is_sub_comp: bool = False
             This variable is not None when a composition is part of a tensor
             diagram. And in that case we need to resize this composition
@@ -1139,7 +1148,7 @@ class DiagramVisualizer:
             received from a sub-diagram.
         float | list[float]
             radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radius of a tensor diagram.
+            composition diagram or the list of radiuses of a tensor diagram.
         """
         if radius is None:
             radius = self.config.node_radius
@@ -1189,7 +1198,7 @@ class DiagramVisualizer:
             )
         return [], [], radius
 
-    def _draw_swap(  # noqa: PLR0913, PLR0917
+    def _draw_swap(  # noqa: C901, PLR0913, PLR0917
         self,
         ax: plt.Axes,
         x: float,
@@ -1214,10 +1223,12 @@ class DiagramVisualizer:
         y: float
             Second coordinate of the diagram
         comp_idx: int | None = None
-            Index of a sub-diagram inside a composition. Depending on its
-            value we draw input or output wires. In a composition, we don't
-            need to draw the input/output wires of all sub-diagrams. This
-            variable allows to monitor it.
+            Index of a sub-diagram inside a composition. In a composition,
+            we don't need to draw the input/output wires of all sub-diagrams.
+        sub_comp_idx: int | None = None
+            Index of a proper diagram inside a sub-composition diagram. Along with
+            the comp_idx, their value determine whether to draw input and/or output
+            wires on the proper diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
@@ -1239,7 +1250,7 @@ class DiagramVisualizer:
             received from a sub-diagram.
         float | list[float]
             radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radius of a tensor diagram.
+            composition diagram or the list of radiuses of a tensor diagram.
         """
         if radius is None:
             radius = self.config.node_radius
@@ -1319,7 +1330,7 @@ class DiagramVisualizer:
                 ax.add_patch(output2)
         return output_positions, init_input_positions, radius
 
-    def _draw_fourier(  # noqa: PLR0913, PLR0917
+    def _draw_fourier(  # noqa: C901, PLR0913, PLR0917
         self,
         ax: plt.Axes,
         x: float,
@@ -1345,10 +1356,12 @@ class DiagramVisualizer:
         y: float
             Second coordinate of the diagram
         comp_idx: int | None = None
-            Index of a sub-diagram inside a composition. Depending on its
-            value we draw input or output wires. In a composition, we don't
-            need to draw the input/output wires of all sub-diagrams. This
-            variable allows to monitor it.
+            Index of a sub-diagram inside a composition. In a composition,
+            we don't need to draw the input/output wires of all sub-diagrams.
+        sub_comp_idx: int | None = None
+            Index of a proper diagram inside a sub-composition diagram. Along with
+            the comp_idx, their value determine whether to draw input and/or output
+            wires on the proper diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
@@ -1370,7 +1383,7 @@ class DiagramVisualizer:
             received from a sub-diagram.
         float | list[float]
             radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radius of a tensor diagram.
+            composition diagram or the list of radiuses of a tensor diagram.
         """
         if radius is None:
             radius = self.config.node_radius
@@ -1524,7 +1537,24 @@ def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None
     return visualizer.visualize(diagram, title)
 
 
-def reorganise(radiuses: list):
+def normalize_radiuses(radiuses: list[float]) -> list[float]:
+    """Normalize list of radiuses.
+
+    The list of radiuses corresponds to sub-diagrams of a tensor diagram
+    which is part of a contracted diagram. The normalization allows to
+    avoid line superpositions when connecting outputs/inputs of D1 to
+    inputs/outputs of D2 of the contracted diagram.
+
+    Parameters:
+    ----------
+    radiuses: list[float]
+        List of input radiuses.
+
+    Returns:
+    -------
+    list[float]
+        List of radiuses normalized.
+    """
     min_val = min(radiuses)
     max_val = max(radiuses)
     val = r.randint(2, 10)
