@@ -11,6 +11,7 @@ the input/output wire ordering and connection indices.
 """
 
 import random as r
+import textwrap
 from copy import deepcopy
 from dataclasses import dataclass, field
 
@@ -306,13 +307,17 @@ class DiagramVisualizer:
             # Draw phase if present
             if hasattr(diagram, "phase") and diagram.phase and not diagram.phase.is_zero():
                 phase_str = self._format_phase(diagram.phase)
+
+                # Wrap text
+                phase_str = textwrap.fill(phase_str, width=int(width))
                 ax.text(
                     x,
                     y,
                     phase_str,
                     ha="center",
-                    va="top",
+                    va="center",
                     fontsize=self.config.fontsize,
+                    clip_on=True,
                 )
             # We will draw input and output wires depending of the block is part of
             # a composition diagram
@@ -1531,11 +1536,20 @@ class DiagramVisualizer:
         max_size = 20
         for d, c in sorted(phase.coeffs.items()):
             if d == 0:
-                terms.append(f"{c:.2f}")
+                if isinstance(c, float):
+                    terms.append(f"{c:.2f}")
+                else:
+                    terms.append(f"{c}")
             elif d == 1:
-                terms.append(f"{c:.2f}x")
-            else:
-                terms.append(f"{c:.2f}x^{d}")
+                if isinstance(c, float):
+                    terms.append(f"{c:.2f}x")
+                else:
+                    terms.append(f"{c}x")
+            else:  # noqa: PLR5501
+                if isinstance(c, float):
+                    terms.append(f"{c:.2f}x^{d}")
+                else:
+                    terms.append(f"{c}x^{d}")
         result = " + ".join(terms)
         if len(result) > max_size:
             result = result[:17] + "..."
