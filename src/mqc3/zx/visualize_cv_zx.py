@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import patches
+from matplotlib.figure import Figure
 
 from mqc3.zx.base_gates import (
     CompositionDiagram,
@@ -248,10 +249,10 @@ class DiagramVisualizer:
             First coordinate of the diagram
         y: float
             Second coordinate of the diagram
-        comp_idx: int | None = None
+        comp_idx: int | None
             Index of a sub-diagram inside a composition. In a composition,
             we don't need to draw the input/output wires of all sub-diagrams.
-        sub_comp_idx: int | None = None
+        sub_comp_idx: int | None
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
@@ -264,7 +265,14 @@ class DiagramVisualizer:
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
-            the unit variable of the diagram.
+            the unit variable of the diagram. It is initialized as None because
+            one can not have access to self in argument definition.
+        kept_inputs: list | None
+            List of indices of input wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
+        kept_outputs: list | None
+            List of indices of output wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -410,10 +418,10 @@ class DiagramVisualizer:
             First coordinate of the diagram
         y: float
             Second coordinate of the diagram
-        comp_idx: int | None = None
+        comp_idx: int | None
             Index of a sub-diagram inside a composition. In a composition,
             we don't need to draw the input/output wires of all sub-diagrams.
-        sub_comp_idx: int | None = None
+        sub_comp_idx: int | None
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
@@ -428,7 +436,14 @@ class DiagramVisualizer:
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
-            the unit variable of the diagram.
+            the unit variable of the diagram. It is initialized as None because
+            one can not have access to self in argument definition.
+        kept_inputs: list | None
+            List of indices of input wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
+        kept_outputs: list | None
+            List of indices of output wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -535,10 +550,10 @@ class DiagramVisualizer:
             First coordinate of the diagram
         y: float
             Second coordinate of the diagram
-        comp_idx: int | None = None
+        comp_idx: int | None
             Index of a sub-diagram inside a composition. In a composition,
             we don't need to draw the input/output wires of all sub-diagrams.
-        sub_comp_idx: int | None = None
+        sub_comp_idx: int | None
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
@@ -553,7 +568,14 @@ class DiagramVisualizer:
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
-            the unit variable of the diagram.
+            the unit variable of the diagram. It is initialized as None because
+            one can not have access to self in argument definition.
+        kept_inputs: list | None
+            List of indices of input wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
+        kept_outputs: list | None
+            List of indices of output wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -659,7 +681,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
-        is_sub_comp: int | None = None,
+        is_sub_comp: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
     ) -> tuple[list[float], list[float] | None, float | list[float]]:
@@ -683,10 +705,10 @@ class DiagramVisualizer:
             First coordinate of the diagram
         y: float
             Second coordinate of the diagram
-        comp_idx: int | None = None
+        comp_idx: int | None
             Index of a sub-diagram inside a composition. In a composition,
             we don't need to draw the input/output wires of all sub-diagrams.
-        sub_comp_idx: int | None = None
+        sub_comp_idx: int | None
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
@@ -701,7 +723,14 @@ class DiagramVisualizer:
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
-            the unit variable of the diagram.
+            the unit variable of the diagram. It is initialized as None because
+            one can not have access to self in argument definition.
+        kept_inputs: list | None
+            List of indices of input wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
+        kept_outputs: list | None
+            List of indices of output wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -1114,14 +1143,14 @@ class DiagramVisualizer:
             First coordinate of the sub-diagram
         y: float
             Second coordinate of the sub-diagram
-        comp_idx: int | None = None
+        comp_idx: int | None
             Index of a sub-diagram inside a composition. In a composition,
             we don't need to draw the input/output wires of all sub-diagrams.
-        sub_comp_idx: int | None = None
+        sub_comp_idx: int | None
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
-        is_sub_comp: bool = False
+        is_sub_comp: bool
             This variable is not None when a composition is part of a tensor
             diagram. And in that case we need to resize this composition
             diagram so that it fits in the horizontal spacing of the tensor
@@ -1135,8 +1164,14 @@ class DiagramVisualizer:
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
-            the unit variable of the diagram.
-        ...
+            the unit variable of the diagram. It is initialized as None because
+            one can not have access to self in argument definition.
+        kept_inputs: list | None
+            List of indices of input wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
+        kept_outputs: list | None
+            List of indices of output wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -1222,10 +1257,10 @@ class DiagramVisualizer:
             First coordinate of the diagram
         y: float
             Second coordinate of the diagram
-        comp_idx: int | None = None
+        comp_idx: int | None
             Index of a sub-diagram inside a composition. In a composition,
             we don't need to draw the input/output wires of all sub-diagrams.
-        sub_comp_idx: int | None = None
+        sub_comp_idx: int | None
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
@@ -1238,7 +1273,14 @@ class DiagramVisualizer:
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
-            the unit variable of the diagram.
+            the unit variable of the diagram. It is initialized as None because
+            one can not have access to self in argument definition.
+        kept_inputs: list | None
+            List of indices of input wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
+        kept_outputs: list | None
+            List of indices of output wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -1355,10 +1397,10 @@ class DiagramVisualizer:
             First coordinate of the diagram
         y: float
             Second coordinate of the diagram
-        comp_idx: int | None = None
+        comp_idx: int | None
             Index of a sub-diagram inside a composition. In a composition,
             we don't need to draw the input/output wires of all sub-diagrams.
-        sub_comp_idx: int | None = None
+        sub_comp_idx: int | None
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
@@ -1371,7 +1413,14 @@ class DiagramVisualizer:
         radius: float | None
             This is the variable used to find any other meaningful parameter:
             arrow_length, horizontal span and the horizontal spacing. So it is
-            the unit variable of the diagram.
+            the unit variable of the diagram. It is initialized as None because
+            one can not have access to self in argument definition.
+        kept_inputs: list | None
+            List of indices of input wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
+        kept_outputs: list | None
+            List of indices of output wires not involved in a partial trace. This
+            parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -1568,6 +1617,26 @@ def normalize_radiuses(radiuses: list[float]) -> list[float]:
     return output
 
 
+def save_and_close(diagram, filename, title=None) -> Figure:
+    """Visualize, save, and close a diagram.
+
+    Parameters:
+    ----------
+    diagram: The diagram object to visualize
+    filename (str): The filename to save the figure to
+        title (str, optional): The title for the visualization
+
+    Returns:
+    -------
+    matplotlib.figure.Figure:
+        The figure object that was created
+    """
+    fig = visualize(diagram, title)
+    fig.savefig(filename, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return fig
+
+
 if __name__ == "__main__":
     # Build proper diagrams
     p = ZxPoly({1: 2, 2: 4})
@@ -1586,83 +1655,61 @@ if __name__ == "__main__":
     d_23 = PSpider(5, 5, p)
     e_1 = Swap()
 
-    # Valid test cases (respecting input/output counts)
+    # 1. Single proper diagram
+    save_and_close(a, "Fourier.png", "Fourier")
+    save_and_close(b, "Fourier2.png", "Fourier2")
+    save_and_close(c, "Inverse_Fourier.png", "Inverse Fourier")
+    save_and_close(d_1, "Single_QSpider_1.png", "Single QSpider 1")
+    save_and_close(d_11, "Single_QSpider_2.png", "Single QSpider 2")
+    save_and_close(d_12, "Single_QSpider_3.png", "Single QSpider 3")
+    save_and_close(d_13, "Single_QSpider_4.png", "Single QSpider 4")
+    save_and_close(d_2, "Single_PSpider_1.png", "Single PSpider 1")
+    save_and_close(d_21, "Single_PSpider_2.png", "Single PSpider 2")
+    save_and_close(d_22, "Single_PSpider_3.png", "Single PSpider 3")
+    save_and_close(d_23, "Single_PSpider_4.png", "Single PSpider 4")
+    save_and_close(e_1, "Swap.png", "Swap")
 
-    # # 1. Single proper diagram
-    # fig1 = visualize(a, "Fourier")
-    # fig1_1 = visualize(b, "Fourier2")
-    # fig1_2 = visualize(c, "Inverse Fourier")
-    # fig1_3 = visualize(d_1, "Single QSpider 1")
-    # fig1_31 = visualize(d_11, "Single QSpider 2")
-    # fig1_32 = visualize(d_12, "Single QSpider 3")
-    # fig1_33 = visualize(d_13, "Single QSpider 4")
-    # fig1_4 = visualize(d_2, "Single PSpider 1")
-    # fig1_41 = visualize(d_21, "Single PSpider 2")
-    # fig1_42 = visualize(d_22, "Single PSpider 3")
-    # fig1_43 = visualize(d_23, "Single PSpider 4")
-    # fig1_5 = visualize(e_1, "Swap")
-    # fig1.savefig("Fourier")
-    # fig1_1.savefig("Fourier2")
-    # fig1_2.savefig("Inverse Fourier")
-    # fig1_3.savefig("Single QSpider 1")
-    # fig1_31.savefig("Single QSpider 2")
-    # fig1_32.savefig("Single QSpider 3")
-    # fig1_33.savefig("Single QSpider 4")
-    # fig1_4.savefig("Single PSpider 1")
-    # fig1_41.savefig("Single PSpider 2")
-    # fig1_42.savefig("Single PSpider 3")
-    # fig1_43.savefig("Single PSpider 4")
-    # fig1_5.savefig("Swap")
-
-    # # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
+    # 2. Simple composition: QSpider (1 output) followed by Fourier (1 input)
     comp1 = d_1.compose(a)  # Valid: 1→1
-    # fig2 = visualize(comp1, "Composition: Fourier then QSpider")
-    # fig2.savefig("Composition: Fourier then QSpider")
+    save_and_close(comp1, "Composition_Fourier_then_QSpider.png", "Composition: Fourier then QSpider")
 
-    # # 2.1 Complex composition
-    # comp2 = b.compose(comp1)
-    # comp2 = c.compose(comp2)
-    # comp2 = d_2.compose(comp2)
-    # fig2_1 = visualize(comp2, "Complex Composition")
-    # fig2_1.savefig("Complex Composition")
+    # 2.1 Complex composition
+    comp2 = b.compose(comp1)
+    comp2 = c.compose(comp2)
+    comp2 = d_2.compose(comp2)
+    save_and_close(comp2, "Complex_Composition.png", "Complex Composition")
 
-    # # 3. Tensor of two proper diagrams
-    # tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
-    # fig3 = visualize(tensor1, "Tensor: Fourier ⊗ Fourier2")
-    # fig3.savefig("Tensor: Fourier ⊗ Fourier2")
+    # 3. Tensor of two proper diagrams
+    tensor1 = a.tensor(b)  # Fourier ⊗ Fourier2
+    save_and_close(tensor1, "Tensor_Fourier_tensor_Fourier2.png", "Tensor: Fourier ⊗ Fourier2")
 
-    # # 3.1 Complex tensor product
-    # tensor2 = e_1.tensor(tensor1)
-    # tensor2 = d_22.tensor(tensor2)
-    # tensor2 = d_13.tensor(tensor2)
-    # fig3_1 = visualize(tensor2, "Complex Tensor Diagram")
-    # fig3_1.savefig("Complex Tensor Diagram")
+    # 3.1 Complex tensor product
+    tensor2 = e_1.tensor(tensor1)
+    tensor2 = d_22.tensor(tensor2)
+    tensor2 = d_13.tensor(tensor2)
+    save_and_close(tensor2, "Complex_Tensor_Diagram.png", "Complex Tensor Diagram")
 
-    # # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
-    # two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
-    # comp_swap = two_fouriers.compose(e_1)  # Valid: 2→2
-    # fig4 = visualize(comp_swap, "Composition: Swap then (F ⊗ F)")
-    # fig4.savefig("Composition: Swap then (F ⊗ F)")
+    # 4. Composition of tensor with swap: need 2 outputs → 2 inputs
+    two_fouriers = a.tensor(a)  # Fourier ⊗ Fourier (2 outputs)
+    comp_swap = two_fouriers.compose(e_1)  # Valid: 2→2
+    save_and_close(comp_swap, "Composition_Swap_then_F_tensor_F.png", "Composition: Swap then (F ⊗ F)")
 
     # 5. Nested composition: (c ∘ a) ∘ b
-    # nested_comp = d_1.compose(a).compose(b)
-    # fig5 = visualize(nested_comp, "Nested composition: (c ∘ a) ∘ b")
-    # fig5.savefig("Nested composition: (c ∘ a) ∘ b")
+    nested_comp = d_1.compose(a).compose(b)
+    save_and_close(nested_comp, "Nested_composition_c_then_a_then_b.png", "Nested composition: (c ∘ a) ∘ b")
 
     # 6. Tensor containing composition
     tensor_with_comp = a.tensor(comp1)  # F ⊗ (c ∘ a) - each has 1 output
-    fig6 = visualize(tensor_with_comp, "Tensor containing composition")
-    fig6.savefig("Tensor containing composition")
+    save_and_close(tensor_with_comp, "Tensor_containing_composition.png", "Tensor containing composition")
 
     # 7. Complex: (F ⊗ F) composed with Swap, then composed with (F ⊗ F)
     left = a.tensor(a)  # 2 outputs
     middle = left.compose(e_1)  # 2 outputs after swap
     right = a.tensor(a)  # 2 inputs
     full = middle.compose(right)  # 2→2
-    fig7 = visualize(full, "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
-    fig7.savefig("Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
+    save_and_close(full, "Full_circuit_F_tensor_F_swap_F_tensor_F.png", "Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)")
 
-    # # 8. Big Complex diagram
+    # 8. Big Complex diagram
     e = a.tensor(b)
     e = e.tensor(b)
     d2 = e_1.tensor(a)
@@ -1670,10 +1717,7 @@ if __name__ == "__main__":
     g = d2.compose(f)
     g = d2.compose(g)
     a2 = QSpider(3, 3, p)
-    b2 = CompositionDiagram([
-        a2,
-        a2,
-    ])
+    b2 = CompositionDiagram([a2, a2])
     b2 = b2.compose(a2)
     b2 = b2.compose(a2)
     g = g.compose(b2)
@@ -1682,22 +1726,23 @@ if __name__ == "__main__":
     j = QSpider(4, 4, q)
     k = j.tensor(g)
     i = a.tensor(g)
-    # fig8 = visualize(i, "Complex Diagram")
-    # fig8.savefig("Complex Diagram.png")
+    save_and_close(i, "Complex_Diagram.png", "Complex Diagram")
 
     # 9. Proper Contracted diagram
     c1 = ContractedDiagram(d_13, d_23, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
     c1_1 = ContractedDiagram(e_1, c, [0], [0], [], [])
     c1_2 = ContractedDiagram(d_12, e_1, [1], [1], [0, 2], [0, 1])
     c1_3 = ContractedDiagram(b, d_21, [0], [1], [0], [0])
-    # fig9 = visualize(c1, "Proper Contracted Diagram")
-    # fig9_1 = visualize(c1_1, "Proper Contracted Diagram: Swap and Inv Fourier")
-    # fig9_2 = visualize(c1_2, "Proper Contracted Diagram: QSpider and Swap")
-    # fig9_3 = visualize(c1_3, "Proper Contracted Diagram: Fourier2 and PSpider")
-    # fig9.savefig("Proper Contracted Diagram")
-    # fig9_1.savefig("Proper Contracted Diagram: Swap and Inv Fourier")
-    # fig9_2.savefig("Proper Contracted Diagram: QSpider and Swap")
-    # fig9_3.savefig("Proper Contracted Diagram: Fourier2 and PSpider")
+    save_and_close(c1, "Proper_Contracted_Diagram.png", "Proper Contracted Diagram")
+    save_and_close(
+        c1_1, "Proper_Contracted_Diagram_Swap_and_Inv_Fourier.png", "Proper Contracted Diagram: Swap and Inv Fourier"
+    )
+    save_and_close(
+        c1_2, "Proper_Contracted_Diagram_QSpider_and_Swap.png", "Proper Contracted Diagram: QSpider and Swap"
+    )
+    save_and_close(
+        c1_3, "Proper_Contracted_Diagram_Fourier2_and_PSpider.png", "Proper Contracted Diagram: Fourier2 and PSpider"
+    )
 
     # 10. Proper Contracted diagram inside a Composition Diagram
     e_2 = e_1.tensor(a)
@@ -1705,32 +1750,47 @@ if __name__ == "__main__":
     d1 = c1.compose(e_2)
     d1 = e_2.compose(d1)
     e_3 = b.tensor(c)
-    # fig10 = visualize(d1, "Proper Contracted Diagram inside a Composition Diagram 1")
-    # fig10_1 = visualize(c1_1.compose(e_3), "Proper Contracted Diagram inside a Composition Diagram 2")
-    # fig10_2 = visualize(e_3.compose(c1_2), "Proper Contracted Diagram inside a Composition Diagram 3")
-    # fig10_3 = visualize(a.compose(c1_3.compose(e_3)), "Proper Contracted Diagram inside a Composition Diagram 3")
-    # fig10.savefig("Proper Contracted Diagram inside a Composition Diagram 1")
-    # fig10_1.savefig("Proper Contracted Diagram inside a Composition Diagram 2")
-    # fig10_2.savefig("Proper Contracted Diagram inside a Composition Diagram 3")
-    # fig10_3.savefig("Proper Contracted Diagram inside a Composition Diagram 4")
+    save_and_close(
+        d1,
+        "Proper_Contracted_Diagram_inside_Composition_1.png",
+        "Proper Contracted Diagram inside a Composition Diagram 1",
+    )
+    save_and_close(
+        c1_1.compose(e_3),
+        "Proper_Contracted_Diagram_inside_Composition_2.png",
+        "Proper Contracted Diagram inside a Composition Diagram 2",
+    )
+    save_and_close(
+        e_3.compose(c1_2),
+        "Proper_Contracted_Diagram_inside_Composition_3.png",
+        "Proper Contracted Diagram inside a Composition Diagram 3",
+    )
+    save_and_close(
+        a.compose(c1_3.compose(e_3)),
+        "Proper_Contracted_Diagram_inside_Composition_4.png",
+        "Proper Contracted Diagram inside a Composition Diagram 4",
+    )
 
     # 11. Proper Contracted diagram inside a Tensor Diagram
     d_14 = QSpider(5, 5, 20 * (p + q))
     d1 = c1.tensor(d_14)
     d1 = d_23.tensor(d1)
     d1 = c1_1.tensor(d1)
-    # fig11 = visualize(d1, "Proper Contracted Diagram inside a Tensor Diagram")
-    # fig11.savefig("Proper Contracted Diagram inside a Tensor Diagram")
+    save_and_close(
+        d1, "Proper_Contracted_Diagram_inside_Tensor.png", "Proper Contracted Diagram inside a Tensor Diagram"
+    )
 
     # 12. Contracted diagram composed of Composition Diagram(s)
     c2 = d_13.compose(d_23)
     c2 = d_14.compose(c2)
     d2 = ContractedDiagram(c2, d_13, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
     d3 = ContractedDiagram(d_13, c2, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
-    # fig12_1 = visualize(d2, "Contracted diagram composed of Composition Diagrams 1")
-    # fig12_1.savefig("Contracted diagram composed of Composition Diagrams 1")
-    # fig12_2 = visualize(d3, "Contracted diagram composed of Composition Diagrams 2")
-    # fig12_2.savefig("Contracted diagram composed of Composition Diagrams 2")
+    save_and_close(
+        d2, "Contracted_diagram_composed_of_Composition_1.png", "Contracted diagram composed of Composition Diagrams 1"
+    )
+    save_and_close(
+        d3, "Contracted_diagram_composed_of_Composition_2.png", "Contracted diagram composed of Composition Diagrams 2"
+    )
 
     # 13. Contracted diagram composed of Tensor Diagram(s)
     c2 = d_13.tensor(e_1)
@@ -1741,9 +1801,12 @@ if __name__ == "__main__":
     d2 = ContractedDiagram(c2, c3, [0, 1, 4, 6], [1, 2, 3, 4], [0, 1, 2, 5], [0, 1, 2, 5])
     d3 = ContractedDiagram(d_13, c2, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
     d4 = ContractedDiagram(c3, c4, [0, 1, 2, 6], [0, 1, 2, 4], [4, 5], [1, 3])
-    # fig13_1 = visualize(d2, "Contracted diagram composed of Tensor Diagrams 1")
-    # fig13_1.savefig("Contracted diagram composed of Tensor Diagrams 1")
-    # fig13_2 = visualize(d3, "Contracted diagram composed of Tensor Diagrams 2")
-    # fig13_2.savefig("Contracted diagram composed of Tensor Diagrams 2")
-    # fig13_3 = visualize(d4, "Contracted diagram composed of Tensor Diagrams 3")
-    # fig13_3.savefig("Contracted diagram composed of Tensor Diagrams 3")
+    save_and_close(
+        d2, "Contracted_diagram_composed_of_Tensor_1.png", "Contracted diagram composed of Tensor Diagrams 1"
+    )
+    save_and_close(
+        d3, "Contracted_diagram_composed_of_Tensor_2.png", "Contracted diagram composed of Tensor Diagrams 2"
+    )
+    save_and_close(
+        d4, "Contracted_diagram_composed_of_Tensor_3.png", "Contracted diagram composed of Tensor Diagrams 3"
+    )
