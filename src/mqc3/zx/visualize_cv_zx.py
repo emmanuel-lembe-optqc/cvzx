@@ -264,7 +264,7 @@ class DiagramVisualizer:
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
         radius: float | None
-            This is the variable used to find any other meaningful parameter:
+            This is the variable used to define the parameters:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
@@ -403,7 +403,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
-        is_sub_comp: bool = False,  # noqa: FBT001, FBT002
+        is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
@@ -434,10 +434,11 @@ class DiagramVisualizer:
             the input wires from that sub-diagram to the current diagram.
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
-        is_sub_comp: bool
-            It is true when a composition is a sub-diagram.
+        is_sub_tensor: bool | None
+            Boolean tag to indicate that a composition is a sub-diagram of a
+            tensor diagram.
         radius: float | None
-            This is the variable used to find any other meaningful parameter:
+            This is the variable used to define the parameters:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
@@ -471,10 +472,10 @@ class DiagramVisualizer:
             kept_outputs = range(diagram.num_outputs)
         output_radius = radius
         # Draw each sub-diagram at its position
-        # If is_sub_comp is True means that we are inside a composition block
-        # which is part of a tensor product therefore we must resize the
+        # is_sub_tensor is True means that we are inside a composition block
+        # which is part of a tensor diagram therefore we must resize the
         # sub_hor_span, spacing and radius
-        if is_sub_comp:
+        if is_sub_tensor:
             cs = len(diagram.diagrams)
             sub_hor_span = 6 * radius / cs if comp_idx != -1 and comp_idx is not None else 18 * radius / (2 * cs + 1)
         else:
@@ -484,13 +485,13 @@ class DiagramVisualizer:
         sub_x = x + 3 * (radius - sub_radius)
         # Calculate positions for each sub-diagram
         # Composition is drawn left to right
-        start_x = 0
+        spacing_i = sub_hor_spacing
         output_positions = input_positions
         init_input_positions = []
         for i, sub_diagram in enumerate(diagram.diagrams):
-            d = start_x - i * sub_hor_spacing
+            spacing_i -= sub_hor_spacing
             idx = i
-            if is_sub_comp:
+            if is_sub_tensor:
                 sub_comp_idx = idx
             else:
                 comp_idx = idx
@@ -500,7 +501,7 @@ class DiagramVisualizer:
             elif i == n - 1:
                 sent_kept_inputs = range(diagram.num_inputs)
                 sent_kept_outputs = kept_outputs
-                if is_sub_comp:
+                if is_sub_tensor:
                     sub_comp_idx = -1
                 else:
                     comp_idx = -1
@@ -510,17 +511,17 @@ class DiagramVisualizer:
             output_positions, init_input_pos, radius = self._draw_sub_diagram(
                 ax,
                 sub_diagram,
-                sub_x + d,
+                sub_x + spacing_i,
                 y,
                 comp_idx=comp_idx,
                 sub_comp_idx=sub_comp_idx,
-                is_sub_comp=is_sub_comp,
+                is_sub_tensor=is_sub_tensor,
                 input_positions=output_positions,
                 radius=sub_radius,
                 kept_inputs=sent_kept_inputs,
                 kept_outputs=sent_kept_outputs,
             )
-            # The input positions of a composition diagram is
+            # The input positions of a composition diagram are
             # the input positions of its first sub-diagram
             if i == 0:
                 init_input_positions = init_input_pos
@@ -535,7 +536,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
-        is_sub_comp: bool = False,  # noqa: FBT001, FBT002
+        is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
@@ -560,8 +561,10 @@ class DiagramVisualizer:
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
-        is_sub_comp: bool
-            It is true when a composition is a sub-diagram.
+        is_sub_tensor: bool | None
+            Boolean tag to indicate that a composition is a sub-diagram of a tensor
+            diagram. It is a relevant argument for _draw_tensor because a
+            composition can contain a tensor diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
@@ -569,7 +572,7 @@ class DiagramVisualizer:
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
         radius: float | None
-            This is the variable used to find any other meaningful parameter:
+            This is the variable used to define the parameters:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
@@ -623,7 +626,7 @@ class DiagramVisualizer:
         contract_shift = 0
         h = vertical_spacing
         for sub_diagram in diagram.diagrams:
-            is_sub_comp = isinstance(sub_diagram, CompositionDiagram)
+            is_sub_tensor = isinstance(sub_diagram, CompositionDiagram)
             if contract_shift != 0:
                 h -= contract_shift
             else:
@@ -658,7 +661,7 @@ class DiagramVisualizer:
                 y + h,
                 comp_idx=comp_idx,
                 sub_comp_idx=sub_comp_idx,
-                is_sub_comp=is_sub_comp,
+                is_sub_tensor=is_sub_tensor,
                 input_positions=sub_input_positions,
                 radius=radius,
                 kept_outputs=sub_kept_outputs,
@@ -684,7 +687,7 @@ class DiagramVisualizer:
         y: float = 0,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
-        is_sub_comp: bool = False,  # noqa: FBT001, FBT002
+        is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
     ) -> tuple[list[float], list[float] | None, float | list[float]]:
@@ -715,8 +718,10 @@ class DiagramVisualizer:
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
-        is_sub_comp: bool
-            It is true when a composition is a sub-diagram.
+        is_sub_tensor: bool | None
+            Boolean tag to indicate that a composition is a sub-diagram of a tensor
+            diagram. It is a relevant argument for _draw_contracted because a
+            composition can contain a contracted diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
             current diagram in a composition diagram. It will help to draw
@@ -724,7 +729,7 @@ class DiagramVisualizer:
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
         radius: float | None
-            This is the variable used to find any other meaningful parameter:
+            This is the variable used to define the parameters:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
@@ -753,7 +758,7 @@ class DiagramVisualizer:
         if radius is None:
             radius = self.config.node_radius
         # Draw second diagram (D2)
-        is_sub_comp = isinstance(diagram.second, CompositionDiagram)
+        is_sub_tensor = isinstance(diagram.second, CompositionDiagram)
         num_d2_out_wires = len(diagram.kept_second_outputs) + len(diagram.J2)
         num_d2_input_wires = len(diagram.kept_second_inputs) + len(diagram.I2)
         draw_kept_second_inputs = [num_d2_input_wires - i - 1 for i in diagram.kept_second_inputs]
@@ -779,7 +784,7 @@ class DiagramVisualizer:
             y2,
             comp_idx=comp_idx,
             sub_comp_idx=sub_comp_idx,
-            is_sub_comp=is_sub_comp,
+            is_sub_tensor=is_sub_tensor,
             input_positions=sec_in_positions,
             radius=radius,
             kept_inputs=draw_kept_second_inputs,
@@ -787,7 +792,7 @@ class DiagramVisualizer:
         )
 
         # Draw first diagram (D1)
-        is_sub_comp = isinstance(diagram.first, CompositionDiagram)
+        is_sub_tensor = isinstance(diagram.first, CompositionDiagram)
         num_d1_out_wires = len(diagram.kept_first_outputs) + len(diagram.I1)
         num_d1_input_wires = len(diagram.kept_first_inputs) + len(diagram.J1)
         # Wires are drawn from bottom to top
@@ -804,7 +809,7 @@ class DiagramVisualizer:
             y1,
             comp_idx=comp_idx,
             sub_comp_idx=sub_comp_idx,
-            is_sub_comp=is_sub_comp,
+            is_sub_tensor=is_sub_tensor,
             input_positions=fir_in_positions,
             radius=radius,
             kept_inputs=draw_kept_first_inputs,
@@ -1128,7 +1133,7 @@ class DiagramVisualizer:
         y: float,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
-        is_sub_comp: bool = False,  # noqa: FBT001, FBT002
+        is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
         kept_inputs: list | None = None,
@@ -1153,10 +1158,8 @@ class DiagramVisualizer:
             Index of a proper diagram inside a sub-composition diagram. Along with
             the comp_idx, their value determine whether to draw input and/or output
             wires on the proper diagram.
-        is_sub_comp: bool
-            This variable is not None when a composition is part of a tensor
-            diagram. And in that case we need to resize this composition
-            diagram so that it fits in the horizontal spacing of the tensor
+        is_sub_tensor: bool | None
+            Boolean tag to indicate that a composition is a sub-diagram of a tensor
             diagram.
         input_positions: list | None
             List of positions received from the sub-diagram that precedes the
@@ -1165,7 +1168,7 @@ class DiagramVisualizer:
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
         radius: float | None
-            This is the variable used to find any other meaningful parameter:
+            This is the variable used to define the parameters:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
@@ -1202,7 +1205,7 @@ class DiagramVisualizer:
                 y,
                 comp_idx,
                 sub_comp_idx,
-                is_sub_comp,
+                is_sub_tensor,
                 input_positions,
                 radius,
                 kept_inputs,
@@ -1216,7 +1219,7 @@ class DiagramVisualizer:
                 y,
                 comp_idx,
                 sub_comp_idx,
-                is_sub_comp,
+                is_sub_tensor,
                 input_positions,
                 radius,
                 kept_inputs,
@@ -1230,7 +1233,7 @@ class DiagramVisualizer:
                 y,
                 comp_idx,
                 sub_comp_idx,
-                is_sub_comp,
+                is_sub_tensor,
                 input_positions,
                 radius,
             )
@@ -1274,7 +1277,7 @@ class DiagramVisualizer:
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
         radius: float | None
-            This is the variable used to find any other meaningful parameter:
+            This is the variable used to define the parameters:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
@@ -1414,7 +1417,7 @@ class DiagramVisualizer:
             In case list is empty, it means the sub-diagram is not part of a
             composition diagram.
         radius: float | None
-            This is the variable used to find any other meaningful parameter:
+            This is the variable used to define the parameters:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
