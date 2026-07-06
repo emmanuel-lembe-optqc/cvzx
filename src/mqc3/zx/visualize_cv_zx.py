@@ -41,38 +41,6 @@ from mqc3.zx.base_gates import (
 class VisualizerConfig:
     """Configuration for diagram visualization.
 
-    Layout Rules (l(D) - horizontal space occupied by diagram D):
-    ------------------------------------------------------------
-    Rule 0 (Base cases):
-        - If D is a ProperDiagram, then l(D) = 1.
-        - If D is a CompositionDiagram where every child is a ProperDiagram,
-          then l(D) = |D| (number of child diagrams).
-
-    Rule 1 (TensorDiagram with only ProperDiagrams):
-        - If D is a TensorDiagram and every child is a ProperDiagram,
-          then l(D) = 1 (sub-diagrams are packed vertically, same horizontal space).
-
-    Rule 2 (TensorDiagram containing CompositionDiagram):
-        - If D is a TensorDiagram and there exists a child D' that is a CompositionDiagram,
-          then l(D') = 1 (overriding Rule 0). Composition diagrams inside a tensor
-          diagram are resized to occupy 1 horizontal unit.
-
-    Rule 3 (General CompositionDiagram):
-        - If D is a CompositionDiagram, then l(D) = sum_{child in D.diagrams} l(child).
-
-    Spacing Formulas (derived, not configurable):
-    --------------------------------------------
-    arrow_length = 2 * node_radius
-        The length of input/output wires extending from nodes.
-
-    horizontal_spacing = node_radius * 2 + arrow_length * 2
-        Horizontal spacing between sub-diagrams inside a composition diagram.
-        This ensures proper separation for sequential placement left to right.
-
-    vertical_spacing = node_radius * vertical_factor
-        Vertical spacing between sub-diagrams inside a tensor diagram.
-        vertical_factor must be > 2 to prevent overlap. Default is 2.2.
-
     Attributes:
     ----------
     node_radius : float
@@ -126,52 +94,6 @@ class VisualizerConfig:
         self.arrow_length = 2 * self.node_radius
         self.horizontal_spacing = self.node_radius * 2 + self.arrow_length * 2
         self.vertical_spacing = self.node_radius * self.vertical_factor
-
-    def get_horizontal_space(self, diagram: Diagram) -> int:  # noqa: PLR0911
-        """Compute the horizontal space l(D) occupied by a diagram.
-
-        This implements the layout rules defined in the class docstring.
-
-        Parameters
-        ----------
-        diagram : Diagram
-            The diagram to measure.
-
-        Returns:
-        -------
-        int
-            Horizontal space occupied by the diagram (in units).
-        """
-        # Rule 0: ProperDiagram
-        if isinstance(diagram, ProperDiagram):
-            return 1
-
-        # Rule 1 & 2: TensorDiagram
-        if isinstance(diagram, TensorDiagram):
-            # Check if any child is a CompositionDiagram (Rule 2)
-            for child in diagram.diagrams:
-                if isinstance(child, CompositionDiagram):
-                    return 1
-            # Rule 1: All children are ProperDiagrams -> l(D) = 1
-            return 1
-
-        # Rule 0 & 3: CompositionDiagram
-        if isinstance(diagram, CompositionDiagram):
-            total = 0
-            for child in diagram.diagrams:
-                total += self.get_horizontal_space(child)
-            return total
-
-        # ContractedDiagram: treat as atomic (horizontal space = 1)
-        if isinstance(diagram, ContractedDiagram):
-            return 1
-
-        # ScalarDiagram: no horizontal space
-        if isinstance(diagram, ScalarDiagram):
-            return 0
-
-        # Default fallback
-        return 1
 
 
 class DiagramVisualizer:
@@ -237,7 +159,7 @@ class DiagramVisualizer:
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
-    ) -> tuple[list[float], list[float] | None, float | list[float]]:
+    ) -> tuple[list[float], list[float] | None, float]:
         """Draw a proper diagram (single node).
 
         Parameters:
@@ -283,9 +205,8 @@ class DiagramVisualizer:
         list[tuple[float]] | None
             Lists of proper input indices, i.e. different from input indices
             received from a sub-diagram.
-        float | list[float]
-            radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radiuses of a tensor diagram.
+        float
+            radius of the proper diagram.
         """
         output_positions = []
         # Determine spider type
@@ -458,11 +379,11 @@ class DiagramVisualizer:
             Lists of proper input indices, i.e. different from input indices
             received from a sub-diagram.
         float | list[float]
-            radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radiuses of a tensor diagram.
+            radius of the first diagram of a composition diagram it can be a
+            list of radiuses if it's a tensor diagram.
         """
-        n = len(diagram.diagrams)
-        if n == 0:
+        diagram_length = len(diagram.diagrams)
+        if diagram_length == 0:
             return None
 
         if radius is None:
@@ -476,15 +397,18 @@ class DiagramVisualizer:
         # which is part of a tensor diagram therefore we must resize the
         # sub_hor_span, spacing and radius
         if is_sub_tensor:
-            cs = len(diagram.diagrams)
-            sub_hor_span = 6 * radius / cs if comp_idx != -1 and comp_idx is not None else 18 * radius / (2 * cs + 1)
+            sub_hor_span = (
+                6 * radius / diagram_length
+                if comp_idx != -1 and comp_idx is not None
+                else 18 * radius / (2 * diagram_length + 1)
+            )
         else:
             sub_hor_span = 6 * radius
         sub_radius = sub_hor_span / 6
         sub_hor_spacing = 4 * sub_radius
         sub_x = x + 3 * (radius - sub_radius)
         # Calculate positions for each sub-diagram
-        # Composition is drawn left to right
+        # Composition Diagrams are from drawn left to right
         spacing_i = sub_hor_spacing
         output_positions = input_positions
         init_input_positions = []
@@ -498,7 +422,7 @@ class DiagramVisualizer:
             if i == 0:
                 sent_kept_inputs = kept_inputs
                 sent_kept_outputs = range(diagram.num_outputs)
-            elif i == n - 1:
+            elif i == diagram_length - 1:
                 sent_kept_inputs = range(diagram.num_inputs)
                 sent_kept_outputs = kept_outputs
                 if is_sub_tensor:
@@ -541,7 +465,7 @@ class DiagramVisualizer:
         radius: float | None = None,
         kept_inputs: list | None = None,
         kept_outputs: list | None = None,
-    ) -> tuple[list[float], list[float] | None, float | list[float]]:
+    ) -> tuple[list[float], list[float] | None, list[float]]:
         """Draw a tensor diagram (parallel).
 
         Parameters:
@@ -591,16 +515,14 @@ class DiagramVisualizer:
         list[tuple[float]] | None
             Lists of proper input indices, i.e. different from input indices
             received from a sub-diagram.
-        float | list[float]
-            radius of either the proper diagram, of the first diagram of a
-            composition diagram or the list of radiuses of a tensor diagram.
+        list[float]
+            the list of radiuses of the tensor diagram.
         """
-        n = len(diagram.diagrams)
-        if n == 0:
+        if len(diagram.diagrams) == 0:
             return []
 
         # Calculate positions for each sub-diagram
-        # Tensor is drawn top to bottom
+        # Tensor Diagrams are drawn top to bottom
         output_positions = []
         init_input_positions = []
         output_radius = []
@@ -611,7 +533,7 @@ class DiagramVisualizer:
             vertical_spacing = self.config.vertical_spacing
         else:
             vertical_spacing = self.config.vertical_factor * radius
-        # input_positions are from the bottom to the top and since
+        # input positions are listed from the bottom to the top and since
         # we draw from top to bottom in draw_tensor we must reverse
         # input_positions
         if input_positions is not None:
@@ -824,8 +746,8 @@ class DiagramVisualizer:
         # We must make sure there is no equal output radiuses
         new_output_radius_2 = normalize_radiuses(output_radius_2)
         new_output_radius_1 = normalize_radiuses(output_radius_1)
-        J_dict = {diagram.J2[i]: diagram.J1[i] for i in range(len(diagram.J1))}
-        I_dict = {diagram.I1[i]: diagram.I2[i] for i in range(len(diagram.I2))}
+        J_dict = {diagram.J2[i]: diagram.J1[i] for i in range(len(diagram.J1))}  # noqa: N806
+        I_dict = {diagram.I1[i]: diagram.I2[i] for i in range(len(diagram.I2))}  # noqa: N806
         # Let's compute the distance between D1 and D2
         box_dist = spacing - 2 * radius
         # Draw feedback connections (J2 → J1)
@@ -846,7 +768,7 @@ class DiagramVisualizer:
             sub_output_positions_2 = output_positions_2[k : k + sub_diagram.num_outputs]
             sub_J2 = []  # noqa: N806
             sub_J2_dict = {}  # noqa: N806
-            # This is to allow the arrow to appear when when there is a Swap
+            # This is to allow the arrow to appear when there is a Swap
             padding = isinstance(sub_diagram, Swap)
             padding_coef = 0.4
             for ind in range(k, k + sub_diagram.num_outputs):
@@ -857,7 +779,7 @@ class DiagramVisualizer:
             x_offset_2_i.reverse()
             J2_points = {}  # noqa: N806
             for i in sub_J2:
-                # We draw from down to top
+                # We draw from bottom to top
                 sec_point_i = sub_output_positions_2[i]
                 ax.plot(
                     [sec_point_i[0], sec_point_i[0] - x_offset_2_i[i]],
@@ -909,7 +831,7 @@ class DiagramVisualizer:
             padding = isinstance(sub_diagram, Swap)
             padding_coef = 0.4
             for i in sub_J1:
-                # We draw from down to top
+                # We draw from bottom to top
                 fir_point_i = sub_input_positions_1[i]
                 # We move fir_point_i to the end of the arrow
                 fir_point_i = (fir_point_i[0] - 2 * output_radius_1[j], fir_point_i[1])
@@ -938,13 +860,13 @@ class DiagramVisualizer:
             k += sub_diagram.num_inputs
 
         # Now we link the arrows J1[k], J2[k]
-        y_offset_J = list(np.linspace(0, box_dist / 2, len(diagram.J2) + 2))
+        y_offset_J = list(np.linspace(0, box_dist / 2, len(diagram.J2) + 2))  # noqa: N806
         y_offset_J.pop(0)
         y_offset_J.pop(-1)
         for j, sub_diagram in enumerate(second_diagrams):
-            sub_J2 = J2_info[j][0]
-            sub_J2_dict = J2_info[j][1]
-            J2_points = J2_info[j][2]
+            sub_J2 = J2_info[j][0]  # noqa: N806
+            sub_J2_dict = J2_info[j][1]  # noqa: N806
+            J2_points = J2_info[j][2]  # noqa: N806
             for i in sub_J2:
                 # We draw from down to top
                 starting_point = J2_points[i]
@@ -955,8 +877,8 @@ class DiagramVisualizer:
                     color=color_in,
                 )
                 fir_sub_diag_ind = J1_sub_diag_mapping[J_dict[sub_J2_dict[i]]]
-                sub_J1_info = J1_info[fir_sub_diag_ind]
-                sub_J1_ind = sub_J1_info[1][1][J_dict[sub_J2_dict[i]]]
+                sub_J1_info = J1_info[fir_sub_diag_ind]  # noqa: N806
+                sub_J1_ind = sub_J1_info[1][1][J_dict[sub_J2_dict[i]]]  # noqa: N806
                 end_point = sub_J1_info[2][sub_J1_ind]
                 ax.plot(
                     [starting_point[0], end_point[0]],
@@ -1080,14 +1002,14 @@ class DiagramVisualizer:
             I2_info[j] = (sub_I2, (sub_I2_dict, sub_I2_dict_inv), I2_points)
             k += sub_diagram.num_inputs
         # Then we link arrows I1[k] , I2[k]
-        y_offset_I = list(np.linspace(0, box_dist / 2, len(diagram.I1) + 2))
+        y_offset_I = list(np.linspace(0, box_dist / 2, len(diagram.I1) + 2))  # noqa: N806
         y_offset_I.pop(0)
         y_offset_I.pop(-1)
         k = 0
         for j, sub_diagram in enumerate(first_diagrams):
-            sub_I1 = I1_info[j][0]
-            sub_I1_dict = I1_info[j][1]
-            I1_points = I1_info[j][2]
+            sub_I1 = I1_info[j][0]  # noqa: N806
+            sub_I1_dict = I1_info[j][1]  # noqa: N806
+            I1_points = I1_info[j][2]  # noqa: N806
             for i in sub_I1:
                 # We draw from down to top
                 starting_point = I1_points[i]
@@ -1098,8 +1020,8 @@ class DiagramVisualizer:
                     color=color_out,
                 )
                 sec_sub_diag_ind = I2_sub_diag_mapping[I_dict[sub_I1_dict[i]]]
-                sub_I2_info = I2_info[sec_sub_diag_ind]
-                sub_I2_ind = sub_I2_info[1][1][I_dict[sub_I1_dict[i]]]
+                sub_I2_info = I2_info[sec_sub_diag_ind]  # noqa: N806
+                sub_I2_ind = sub_I2_info[1][1][I_dict[sub_I1_dict[i]]]  # noqa: N806
                 end_point = sub_I2_info[2][sub_I2_ind]
                 ax.plot(
                     [starting_point[0], end_point[0]],
