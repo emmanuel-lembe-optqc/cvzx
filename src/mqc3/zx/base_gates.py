@@ -813,7 +813,6 @@ class ContractedDiagram(Diagram):
                 msg_4 = f"J2 index {idx} out of range for second diagram outputs [0, {self.second.num_outputs})"
                 raise ValueError(msg_4)
 
-        # TODO Prevent a situation where there is either no inputs or outputs
         # Determine which inputs/outputs remain external
         # Inputs: all inputs from first diagram EXCEPT those in J1
         #         plus all inputs from second diagram EXCEPT those in I2
@@ -969,9 +968,8 @@ class TensorDiagram(Diagram):
         ----------
         diagram_pairs : Sequence[tuple[int, Sequence[int], Sequence[int]]]
             Each tuple contains:
-                - diagram index of the first diagram
+                - diagram index of the first/second diagram
                 - output wire indices from that diagram to contract
-                - diagram index of the second diagram
                 - input wire indices from that diagram to contract
             The output wires from the first diagram are connected to the input wires
             of the second diagram. And the input wires of the first diagram are
@@ -990,8 +988,9 @@ class TensorDiagram(Diagram):
         Notes:
         -----
         The contraction operation is only valid when the contracted diagrams
-        are adjacent in the tensor product. This ensures the contraction corresponds
-        to a valid partial trace over connected modes.
+        are adjacent in the tensor product. This restriction is to draw the
+        resulting contracted diagram easily. But in theory the partial trace
+        can be applied to any two diagrams of a tensor diagram.
 
         After contraction, the two diagrams are replaced by a single diagram
         representing their composition with the contracted wires traced out.
@@ -1000,7 +999,7 @@ class TensorDiagram(Diagram):
 
         References:
         ----------
-        [3] Nagayoshi et al., CV ZX calculus, Definition 11 (contraction rule)
+        [3] Nagayoshi et al., CV ZX calculus, Definition 11
         """
         if not diagram_pairs:
             msg = "diagram_pairs cannot be empty"
@@ -1010,7 +1009,7 @@ class TensorDiagram(Diagram):
         diagrams = list(self.diagrams)
 
         # Sort pairs by first diagram index (to process from higher to lower)
-        sorted_pairs = sorted(diagram_pairs, key=operator.itemgetter(0), reverse=True)
+        sorted_pairs = sorted(diagram_pairs, key=operator.itemgetter(0))
         first_idx, f_output_wires, f_input_wires = sorted_pairs[0]
         second_idx, s_output_wires, s_input_wires = sorted_pairs[1]
         # Validate diagram indices in the tensor product
@@ -1078,7 +1077,7 @@ class TensorDiagram(Diagram):
         # Replace the two diagrams with the contracted one
         diagrams[first_idx : second_idx + 1] = [
             ContractedDiagram(
-                diagrams[first_idx], diagrams[second_idx], f_output_wires, f_input_wires, s_output_wires, s_input_wires
+                diagrams[first_idx], diagrams[second_idx], f_output_wires, s_input_wires, f_input_wires, s_output_wires
             )
         ]
 
