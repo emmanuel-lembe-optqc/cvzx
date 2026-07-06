@@ -1,4 +1,4 @@
-"""Graphical tests for visualize_cv_zx.py - human verification required.
+"""Graphical tests for visualize_base_gates.py - human verification required.
 
 Run this script directly to generate all test images for visual inspection.
 Images are saved in the 'test_images' directory.
@@ -20,7 +20,7 @@ from mqc3.zx.base_gates import (
     Swap,
     ZxPoly,
 )
-from mqc3.zx.visualize_cv_zx import visualize
+from mqc3.zx.visualize_base_gates import visualize
 
 # Create output directory using Path
 OUTPUT_DIR = Path("test_images")
