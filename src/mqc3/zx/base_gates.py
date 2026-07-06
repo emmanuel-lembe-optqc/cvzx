@@ -1234,7 +1234,7 @@ class CompositionDiagram(Diagram):
         return TensorDiagram([self, other])
 
     def compose(self, other: Diagram) -> Diagram:
-        """Associative composition: (other ∘ self).
+        """Associative composition: (self ∘ other).
 
         Parameters
         ----------

@@ -209,17 +209,45 @@ class DiagramVisualizer:
         """
         output_positions = []
         # Determine spider type
-        if isinstance(diagram, (QSpider, PSpider)):
+        if isinstance(diagram, (QSpider, PSpider)):  # noqa: PLR1702
             if radius is None:
                 radius = self.config.node_radius
+            width = 2 * radius
+            height = 2 * radius
             arrow_length = 2 * radius
+            y_offset_in = list(np.linspace(0, height, diagram.num_inputs + 2))
+            # Remove the two edges
+            y_offset_in.pop(0)
+            y_offset_in.pop(-1)
+            y_offset_out = list(np.linspace(0, height, diagram.num_outputs + 2))
+            # Remove the two edges
+            y_offset_out.pop(0)
+            y_offset_out.pop(-1)
+            pivot = (x - radius, y - radius)
+            init_input_positions = [
+                (pivot[0] + width + arrow_length, pivot[1] + y_offset_in[i]) for i in range(diagram.num_inputs)
+            ]
+            # Wiring Diagram
+            if not diagram.phase.coeffs and (diagram.num_inputs == diagram.num_outputs):
+                for i in range(diagram.num_inputs):
+                    arrow_i = patches.FancyArrowPatch(
+                        init_input_positions[i],
+                        (init_input_positions[i][0] - radius - arrow_length, init_input_positions[i][1]),
+                        arrowstyle="->",
+                        ec="black",
+                        mutation_scale=20,
+                        linewidth=self.config.wire_width,
+                    )
+                    ax.add_patch(arrow_i)
+                ax.plot()
+                output_positions = [(point[0] + arrow_length + width, point[1]) for point in init_input_positions]
+                return output_positions, init_input_positions, radius
+            # Spider diagram
             spider_type = self._get_spider_type(diagram)
             color = self.config.colors.get(spider_type, self.config.colors["default"])
 
             # Draw node
             pivot = (x - radius, y - radius)
-            width = 2 * radius
-            height = 2 * radius
             box = patches.Rectangle(pivot, width, height, facecolor=color)
             ax.add_patch(box)
 
@@ -250,13 +278,6 @@ class DiagramVisualizer:
             if kept_outputs is None:
                 kept_outputs = range(diagram.num_outputs)
             # Draw input wires (left side)
-            y_offset = list(np.linspace(0, height, diagram.num_inputs + 2))
-            # Remove the two edges
-            y_offset.pop(0)
-            y_offset.pop(-1)
-            init_input_positions = [
-                (pivot[0] + width + arrow_length, pivot[1] + y_offset[i]) for i in range(diagram.num_inputs)
-            ]
             if draw_in_wires:
                 if input_positions is None:
                     # input_positions is empty only for the first element of a composition
@@ -278,7 +299,7 @@ class DiagramVisualizer:
                             )
                         input_i = patches.FancyArrowPatch(
                             input_pos,
-                            (pivot[0] + arrow_length, pivot[1] + y_offset[i]),
+                            (pivot[0] + arrow_length, pivot[1] + y_offset_in[i]),
                             arrowstyle="->",
                             ec="black",
                             mutation_scale=20,
@@ -287,17 +308,13 @@ class DiagramVisualizer:
                         ax.add_patch(input_i)
 
             # Draw output wires (right side)
-            y_offset = list(np.linspace(0, height, diagram.num_outputs + 2))
-            # Remove the two edges
-            y_offset.pop(0)
-            y_offset.pop(-1)
-            output_positions = [(pivot[0], pivot[1] + y_offset[i]) for i in range(diagram.num_outputs)]
+            output_positions = [(pivot[0], pivot[1] + y_offset_out[i]) for i in range(diagram.num_outputs)]
             if draw_out_wires:
                 for i in range(diagram.num_outputs):
                     if i in kept_outputs:
                         output_i = patches.FancyArrowPatch(
                             output_positions[i],
-                            (pivot[0] - arrow_length, pivot[1] + y_offset[i]),
+                            (pivot[0] - arrow_length, pivot[1] + y_offset_out[i]),
                             arrowstyle="->",
                             ec="black",
                             mutation_scale=20,
