@@ -169,6 +169,59 @@ class ZxPoly:
         result = {deg: coeff * scalar for deg, coeff in self.coeffs.items()}
         return ZxPoly(result)
 
+    def __pow__(self, n: int) -> "ZxPoly":
+        """Raise the polynomial to the n-th power using binary exponentiation.
+
+        Parameters:
+        ----------
+        n : int
+            Non-negative integer exponent.
+
+        Returns:
+        -------
+        ZxPoly
+            New polynomial representing (self)^n.
+
+        Raises:
+        ------
+        ValueError:
+            If n is negative.
+
+        Examples:
+        --------
+        >>> p = ZxPoly({0: 2.0, 1: 1.0})  # 2 + x
+        >>> p2 = p ** 2                    # (2 + x)² = 4 + 4x + x²
+        >>> p2.coeffs
+        {0: 4.0, 1: 4.0, 2: 1.0}
+
+        >>> p = ZxPoly({1: 2.0})           # 2x
+        >>> p0 = p ** 0                    # (2x)⁰ = 1
+        >>> p0.coeffs
+        {0: 1.0}
+        """
+        if n < 0:
+            msg = f"Power exponent must be non-negative, got {n}"
+            raise ValueError(msg)
+
+        if n == 0:
+            return ZxPoly({0: 1.0})
+
+        if self.is_zero():
+            return ZxPoly({})
+
+        # Binary exponentiation: result = 1, base = self
+        result = ZxPoly({0: 1.0})
+        base = self
+        exp = n
+
+        while exp > 0:
+            if exp & 1:
+                result *= base
+            base *= base
+            exp >>= 1
+
+        return result
+
     def __neg__(self) -> "ZxPoly":
         """Negate the polynomial.
 

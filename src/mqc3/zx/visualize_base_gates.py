@@ -34,6 +34,16 @@ from mqc3.zx.base_gates import (
     TensorDiagram,
     ZxPoly,
 )
+from mqc3.zx.gates import (
+    BeamsplitterGate,
+    CompactDiagram,
+    ControlledSumGate,
+    ControlledZGate,
+    CubicPhaseGate,
+    DisplacementGate,
+    PhaseRotationGate,
+    SqueezingGate,
+)
 
 
 @dataclass
@@ -69,6 +79,8 @@ class VisualizerConfig:
             "q": "lightgreen",
             "p": "lightcoral",
             "macronode": "lightblue",
+            "compact": "lightgray",
+            "gaussian": "violet",
             "non_gaussian": "gold",
             "contraction_out": "gray",
             "contraction_in": "violet",
@@ -209,7 +221,7 @@ class DiagramVisualizer:
         """
         output_positions = []
         # Determine spider type
-        if isinstance(diagram, (QSpider, PSpider)):  # noqa: PLR1702
+        if isinstance(diagram, (QSpider, PSpider, CompactDiagram)):  # noqa: PLR1702
             if radius is None:
                 radius = self.config.node_radius
             width = 2 * radius
@@ -227,21 +239,6 @@ class DiagramVisualizer:
             init_input_positions = [
                 (pivot[0] + width + arrow_length, pivot[1] + y_offset_in[i]) for i in range(diagram.num_inputs)
             ]
-            # Wiring Diagram
-            if not diagram.phase.coeffs and (diagram.num_inputs == diagram.num_outputs):
-                for i in range(diagram.num_inputs):
-                    arrow_i = patches.FancyArrowPatch(
-                        init_input_positions[i],
-                        (init_input_positions[i][0] - radius - arrow_length, init_input_positions[i][1]),
-                        arrowstyle="->",
-                        ec="black",
-                        mutation_scale=20,
-                        linewidth=self.config.wire_width,
-                    )
-                    ax.add_patch(arrow_i)
-                ax.plot()
-                output_positions = [(point[0] + arrow_length + width, point[1]) for point in init_input_positions]
-                return output_positions, init_input_positions, radius
             # Spider diagram
             spider_type = self._get_spider_type(diagram)
             color = self.config.colors.get(spider_type, self.config.colors["default"])
@@ -249,13 +246,16 @@ class DiagramVisualizer:
             # Draw node
             pivot = (x - radius, y - radius)
             box = patches.Rectangle(pivot, width, height, facecolor=color)
+            if is_wiring_diagram(diagram):
+                box = patches.Rectangle(pivot, width, height, facecolor="white", edgecolor=color)
             ax.add_patch(box)
 
             # Draw phase if present
-            phase_str = self._format_phase(diagram.phase)
+            phase = diagram.phase if isinstance(diagram, (QSpider, PSpider)) else diagram.label
+            phase_str = self._format_phase(phase)
 
             # Wrap text
-            phase_str = textwrap.fill(phase_str, width=int(width))
+            phase_str = textwrap.fill(phase_str, width=max(int(width), 1))
             ax.text(
                 x,
                 y,
@@ -437,17 +437,17 @@ class DiagramVisualizer:
                 comp_idx = idx
             if i == 0:
                 sent_kept_inputs = kept_inputs
-                sent_kept_outputs = range(diagram.num_outputs)
+                sent_kept_outputs = range(sub_diagram.num_outputs)
             elif i == diagram_length - 1:
-                sent_kept_inputs = range(diagram.num_inputs)
+                sent_kept_inputs = range(sub_diagram.num_inputs)
                 sent_kept_outputs = kept_outputs
                 if is_sub_tensor:
                     sub_comp_idx = -1
                 else:
                     comp_idx = -1
             else:
-                sent_kept_inputs = range(diagram.num_inputs)
-                sent_kept_outputs = range(diagram.num_outputs)
+                sent_kept_inputs = range(sub_diagram.num_inputs)
+                sent_kept_outputs = range(sub_diagram.num_outputs)
             output_positions, init_input_pos, radius = self._draw_sub_diagram(
                 ax,
                 sub_diagram,
@@ -536,7 +536,6 @@ class DiagramVisualizer:
         """
         if len(diagram.diagrams) == 0:
             return []
-
         # Calculate positions for each sub-diagram
         # Tensor Diagrams are drawn top to bottom
         output_positions = []
@@ -592,7 +591,7 @@ class DiagramVisualizer:
                 sub_kept_inputs.sort()
                 sub_kept_outputs.sort()
             # Find local_kept_inputs and local_kept_outputs
-            output_pos, init_input_pos, radius = self._draw_sub_diagram(
+            output_pos, init_input_pos, sub_radius = self._draw_sub_diagram(
                 ax,
                 sub_diagram,
                 x,
@@ -606,13 +605,13 @@ class DiagramVisualizer:
                 kept_inputs=sub_kept_inputs,
             )
             if isinstance(sub_diagram, ContractedDiagram):
-                contract_shift = radius[1]
-                radius = radius[0]
+                contract_shift = sub_radius[1]
+                sub_radius = sub_radius[0]
             else:
                 contract_shift = 0
             output_positions = output_pos + output_positions
             init_input_positions = init_input_pos + init_input_positions
-            output_radius = [radius, *output_radius]
+            output_radius = [sub_radius, *output_radius]
             inp_ind += sub_diagram.num_inputs
             out_ind += sub_diagram.num_outputs
         return output_positions, init_input_positions, output_radius
@@ -1456,19 +1455,22 @@ class DiagramVisualizer:
             style="italic",
         )
 
-    def _format_phase(self, phase: ZxPoly) -> str:
-        """Format phase polynomial for display.
+    def _format_phase(self, phase: ZxPoly | str) -> str:  # noqa: PLR0912
+        """Format phase polynomial or Compact Diagram label for display.
 
         Parameters:
         ----------
-        phase: ZxPoly
-            Real polynomial describing a p/q spider.
+        phase: ZxPoly | str
+            Real polynomial describing a p/q spider. Or label denoting a
+            CompactDiagram
 
         Returns:
         -------
         str
             String display of the phase polynomial
         """
+        if isinstance(phase, str):
+            return phase
         if phase.is_zero():
             return ""
         terms = []
@@ -1515,6 +1517,14 @@ class DiagramVisualizer:
             return "swap"
         if isinstance(diagram, (Fourier, FourierInv, Fourier2)):
             return "fourier"
+        if isinstance(diagram, CompactDiagram):
+            return "compact"
+        if isinstance(
+            BeamsplitterGate, ControlledSumGate, ControlledZGate, DisplacementGate, PhaseRotationGate, SqueezingGate
+        ):
+            return "gaussian"
+        if isinstance(diagram, CubicPhaseGate):
+            return "nongaussian"
         return "default"
 
 
@@ -1568,3 +1578,36 @@ def normalize_radiuses(radiuses: list[float]) -> list[float]:
     output = list(np.linspace(min_val, max_val, len(radiuses) + 1))
     output.pop(0)
     return output
+
+
+def is_wiring_diagram(diagram: Diagram) -> bool:
+    """Check if a diagram is a wiring (identity) diagram.
+
+    Returns:
+    -------
+    bool
+    """
+    return (
+        isinstance(diagram, (QSpider, PSpider))
+        and not diagram.phase.coeffs
+        and diagram.num_inputs == diagram.num_outputs
+    )
+
+
+if __name__ == "__main__":
+    identity = QSpider(1, 1, ZxPoly({}))
+    fourier_inv = FourierInv()
+    i_tensor_f = TensorDiagram([fourier_inv, Fourier()])
+    q_spider2 = QSpider(1, 2, ZxPoly({1: 2}))
+    # fig = visualize(i_tensor_f, title="Test Wiring with tensor")
+    # fig.savefig(
+    #     "Test Wiring with tensor",
+    #     dpi=150,
+    # )
+    # plt.close(fig)
+    fig1 = visualize(i_tensor_f.compose(q_spider2), title="Test Wiring with tensor 2")
+    fig1.savefig(
+        "Test Wiring with tensor 2",
+        dpi=150,
+    )
+    plt.close(fig1)
