@@ -7,8 +7,7 @@ covered.
 """
 
 import unittest
-
-import numpy as np
+from math import pi
 
 from mqc3.zx.base_gates import (
     CompositionDiagram,
@@ -62,14 +61,14 @@ class TestIdentityRule(unittest.TestCase):
         self.swap = Swap()
         # Basic Gates
         self.disp = DisplacementGate(alpha=1.0 + 0.5j)
-        self.ph_rot = PhaseRotationGate(theta=np.pi / 4)
+        self.ph_rot = PhaseRotationGate(theta=pi / 4)
         self.sq_gate = SqueezingGate(tau=0.5)
         self.ctrl_sum_gate1 = ControlledSumGate(gain=1.0, control=1, target=2)
         self.ctrl_sum_gate2 = ControlledSumGate(gain=2.0, control=2, target=1)
         self.ctrl_z_gate1 = ControlledZGate(gain=1.0)
         self.ctrl_sum_gate2 = ControlledZGate(gain=2.0)
-        self.beam_splitter1 = BeamsplitterGate(theta=np.pi / 4)
-        self.beam_splitter2 = BeamsplitterGate(theta=np.pi / 6)
+        self.beam_splitter1 = BeamsplitterGate(theta=pi / 4)
+        self.beam_splitter2 = BeamsplitterGate(theta=pi / 6)
         self.cubic = CubicPhaseGate(gamma=0.1)
 
         # Compositions
@@ -617,9 +616,9 @@ if __name__ == "__main__":
     non_id_p = PSpider(1, 1, phase_poly)
     non_id_q_3x3 = QSpider(3, 3, phase_poly)
     non_id_p_3x3 = PSpider(3, 3, phase_poly)
-    beam_splitter1 = BeamsplitterGate(theta=np.pi / 4)
+    beam_splitter1 = BeamsplitterGate(theta=pi / 4)
     sq_gate = SqueezingGate(tau=0.5)
-    ph_rot = PhaseRotationGate(theta=np.pi / 4)
+    ph_rot = PhaseRotationGate(theta=pi / 4)
 
     # Test 1: Simple composition with identity in middle
     comp1 = CompositionDiagram([fourier, id_q, sq_gate, id_p, fourier2])

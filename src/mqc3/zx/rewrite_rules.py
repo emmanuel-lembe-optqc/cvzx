@@ -8,14 +8,10 @@ References:
 [3] Nagayoshi et al., CV ZX calculus, 2024
 """
 
-from mqc3.zx.base_gates import (
-    CompositionDiagram,
-    ContractedDiagram,
-    Diagram,
-    TensorDiagram,
-)
-from mqc3.zx.visualize_base_gates import is_wiring_diagram
 import operator
+
+from mqc3.zx.base_gates import CompositionDiagram, ContractedDiagram, Diagram, PSpider, QSpider, TensorDiagram
+from mqc3.zx.visualize_base_gates import is_wiring_diagram
 
 # =============================================================================
 # Rewrite Rules (Section IV.A)
@@ -122,8 +118,6 @@ class IdentityRule(RewriteRule):
                 parent = parent.diagrams[idx]
             elif isinstance(parent, ContractedDiagram):
                 parent = parent.first if idx == 0 else parent.second
-            else:
-                return diagram
 
         # Check if the parent is a CompositionDiagram
         if not isinstance(parent, CompositionDiagram):
@@ -350,3 +344,228 @@ class IdentityRule(RewriteRule):
             return self._reduce_contracted(result)
 
         return diagram
+
+
+class FusionRule(RewriteRule):
+    r"""Fusion rule (f) from [3] Eq. (70).
+
+    Two same-type spiders connected by wires can be fused into a single spider.
+    For Q-spiders: two q-spiders connected by wires can be fused with phase addition.
+    For P-spiders: two p-spiders connected by wires can be fused with phase addition.
+
+    The rule applies when:
+    - Both spiders are the same type (both Q or both P)
+    - They are in a ContractedDiagram
+    - They are connected via some wires (I1 and I2 matching J1 and J2)
+    - The resulting spider has:
+        inputs = inputs of first + inputs of second (minus connected wires)
+        outputs = outputs of first + outputs of second (minus connected wires)
+    - Phase is the sum of the two phases
+    """
+
+    def match(self, diagram: Diagram, path: list[int] | None = None, parent: Diagram | None = None) -> list[list[int]]:
+        """Find ContractedDiagram containing two same-type spiders.
+
+        Parameters:
+        ----------
+        diagram : Diagram
+            Input Diagram to search.
+        path : list[int] | None
+            Current path in the nested structure.
+        parent : Diagram | None
+            Parent of the current diagram.
+
+        Returns:
+        -------
+        list[list[int]]
+            List of paths to ContractedDiagram containing fusible spiders.
+        """
+        if path is None:
+            path = []
+
+        matches = []
+
+        # Check if current diagram is a ContractedDiagram
+        if isinstance(parent, ContractedDiagram) and parent == diagram:
+            first = parent.first
+            second = parent.second
+            # Check if both are spiders of the same type
+            if (isinstance(first, QSpider) and isinstance(second, QSpider) and self._are_connected(diagram)) or (  # noqa: PLR0916
+                isinstance(first, PSpider) and isinstance(second, PSpider) and self._are_connected(diagram)
+            ):
+                # The spiders are fusible if they share connections
+                matches.append(path.copy())
+                return matches
+            return matches
+
+        # Recursive cases
+        if isinstance(diagram, (CompositionDiagram, TensorDiagram)):
+            for i, sub_diagram in enumerate(diagram.diagrams):
+                new_path = [*path, i]
+                matches.extend(self.match(sub_diagram, new_path, diagram))
+
+        elif isinstance(diagram, ContractedDiagram):
+            new_path_first = [*path, 0]
+            if isinstance(diagram.first, (QSpider, PSpider)) and isinstance(diagram.second, (QSpider, PSpider)):
+                new_path = [*path, 0]
+                return self.match(diagram, new_path, diagram)
+            if isinstance(diagram.first, (CompositionDiagram, TensorDiagram, ContractedDiagram)):
+                new_path_first = [*path, 0]
+                matches.extend(self.match(diagram.first, new_path_first, diagram))
+            if isinstance(diagram.second, (CompositionDiagram, TensorDiagram, ContractedDiagram)):
+                new_path_second = [*path, 1]
+                matches.extend(self.match(diagram.second, new_path_second, diagram))
+
+        return matches
+
+    def apply_single(self, diagram: Diagram, match_path: list[int]) -> Diagram:  # noqa: C901
+        """Fuse two same-type spiders in a ContractedDiagram.
+
+        Parameters:
+        ----------
+        diagram : Diagram
+            The diagram to modify.
+        match_path : list[int]
+            Path to the ContractedDiagram containing fusible spiders.
+
+        Returns:
+        -------
+        Diagram
+            New diagram with the two spiders fused into one.
+        """
+        if not match_path:
+            return diagram
+        # Navigate to the ContractedDiagram
+        target = diagram
+        if len(match_path) > 1:
+            for idx in match_path:
+                if isinstance(target, (CompositionDiagram, TensorDiagram)):
+                    target = target.diagrams[idx]
+                elif isinstance(target, ContractedDiagram):
+                    if idx == 0 and not isinstance(target.first, (QSpider, PSpider)):
+                        target = target.first
+                    if idx == 1:
+                        target = target.second
+
+        first = target.first
+        second = target.second
+
+        # Compute new arities
+        new_n_in = len(target.kept_first_inputs) + len(target.kept_second_inputs)
+        new_n_out = len(target.kept_first_outputs) + len(target.kept_second_outputs)
+
+        # Phase is the sum
+        new_phase = first.phase + second.phase
+
+        # Create fused spider
+        if isinstance(first, QSpider):
+            fused = QSpider(new_n_in, new_n_out, new_phase)
+        else:  # PSpider
+            fused = PSpider(new_n_in, new_n_out, new_phase)
+
+        # Replace the ContractedDiagram with the fused spider
+        return self._replace_at_path(diagram, match_path, fused)
+
+    def _are_connected(self, contracted: ContractedDiagram) -> bool:
+        """Check if the two diagrams in ContractedDiagram are connected.
+
+        For fusion, we need at least one connection between the spiders.
+        Parameters:
+        ----------
+        contracted : ContractedDiagram
+            Input contracted diagram.
+
+        Returns:
+        -------
+            bool
+        """
+        # Check if second spider's outputs connect to first spider's inputs
+        return bool(len(contracted.J1) > 0 and len(contracted.J2) > 0) or bool(
+            len(contracted.I1) > 0 and len(contracted.I2) > 0
+        )
+
+    def _replace_at_path(self, diagram: Diagram, path: list[int], replacement: Diagram) -> Diagram:
+        """Replace the diagram at the given path with replacement.
+
+        Parameters:
+        ----------
+        diagram : Diagram
+            The diagram to modify.
+        path : list[int]
+            Path to the location where to replace the current ContractedDiagram by the
+            reduced form.
+        replacement: Diagram
+            Diagram reduced after applying the fusion rule. It must be replace
+            its former version.
+
+        Returns:
+        -------
+        Diagram
+            New diagram with the identity spiders in a contracted diagram fused.
+        """
+        if path == [0]:
+            return replacement
+
+        idx = path[0]
+        remaining_path = path[1:]
+
+        if isinstance(diagram, CompositionDiagram):
+            diagrams = list(diagram.diagrams)
+            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
+            return CompositionDiagram(diagrams)
+
+        if isinstance(diagram, TensorDiagram):
+            diagrams = list(diagram.diagrams)
+            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
+            return TensorDiagram(diagrams)
+
+        if isinstance(diagram, ContractedDiagram):
+            if idx == 0:
+                new_first = self._replace_at_path(diagram.first, remaining_path, replacement)
+                result = ContractedDiagram(
+                    first=new_first,
+                    second=diagram.second,
+                    I1=diagram.I1,
+                    I2=diagram.I2,
+                    J1=diagram.J1,
+                    J2=diagram.J2,
+                )
+            else:
+                new_second = self._replace_at_path(diagram.second, remaining_path, replacement)
+                result = ContractedDiagram(
+                    first=diagram.first,
+                    second=new_second,
+                    I1=diagram.I1,
+                    I2=diagram.I2,
+                    J1=diagram.J1,
+                    J2=diagram.J2,
+                )
+            return result
+
+        return diagram
+
+    def apply_rule(self, diagram: Diagram) -> Diagram:
+        """Apply the fusion rule to the input diagram.
+
+        Parameters:
+        ----------
+        diagram : Diagram
+            The diagram to modify.
+
+        Returns:
+        -------
+        Diagram
+            New diagram with the identity spiders inside a composition diagram
+            fused  if applicable, or the original diagram if not.
+        """
+        result = diagram
+        matches = self.match(diagram)
+        if not matches:
+            return diagram
+
+        # Process all matches
+        # print("Matches", matches)
+        for match_path in matches:
+            result = self.apply_single(result, match_path)
+            # print("step", match_path)
+        return result
