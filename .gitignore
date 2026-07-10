@@ -1,0 +1,56 @@
+# Byte-compiled / optimization files
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+*.py,cover
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Ruff cache
+.ruff_cache/
+
+# Mypy cache
+.mypy_cache/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+
+# Output images
+*.png
+*.pdf
+*.svg
+
+# Local configuration
+*.local.py
+*.local.cfg
+
+# Archive files
+*.tar.gz
+*.zip
+
+# Debug files
+debug/
+tmp/
