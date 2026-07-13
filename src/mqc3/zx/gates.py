@@ -140,7 +140,7 @@ class CompactDiagram(ProperDiagram):
             decomposition=new_decomp,
         )
 
-    def tensor(self, other: Diagram, expand_self: bool = False) -> Diagram:
+    def tensor(self, other: Diagram, expand_self: bool = False) -> Diagram:  # noqa: FBT001, FBT002
         """Tensor product of this compact diagram with another diagram.
 
         Parameters:
@@ -176,13 +176,16 @@ class CompactDiagram(ProperDiagram):
             return TensorDiagram([self, *diagrams])
         return TensorDiagram([self, other])
 
-    def compose(self, other: Diagram, expand_self: bool = False) -> Diagram:
+    def compose(self, other: Diagram, connectivity: dict | None = None, expand_self: bool = False) -> Diagram:  # noqa: C901, FBT001, FBT002, PLR0912
         """Compose this compact diagram with another diagram.
 
         Parameters:
         ----------
         other : Diagram
             Diagram to apply after self (other ∘ self).
+        connectivity : dict | None
+            Dictionary mapping input indices of self to output indices of other.
+            If None, uses identity mapping.
         expand_self : bool, default=False
             If True, expand this diagram before composing.
 
@@ -197,19 +200,29 @@ class CompactDiagram(ProperDiagram):
         - If expand_self is True, self is expanded first.
         - The other diagram is only expanded if it is not a CompactDiagram.
         """
+        # Default connectivity if None
+        if connectivity is None:
+            connectivity = {i: i for i in range(self.num_inputs)}
         # Expand self if requested
         if expand_self:
             if self.can_expand:
-                return self.expand().compose(other)
+                return self.expand().compose(other, connectivity=connectivity)
             if isinstance(other, CompositionDiagram):
                 diagrams = list(other.diagrams)
-                return CompositionDiagram([*diagrams, self])
-            return CompositionDiagram([other, self])
+                old_connectivity = other.connectivity
+                last_idx = len(diagrams) - 1
+                old_connectivity[last_idx] = connectivity
+                return CompositionDiagram([*diagrams, self], old_connectivity)
+            return CompositionDiagram([other, self], {0: connectivity})
         if isinstance(other, CompactDiagram):
             # Both are CompactDiagrams
             # Keep compact: compute new label and decomposition
             new_label = f"{other.label} ∘ {self.label}"
-            new_decomp = self.expand().compose(other.expand())
+            # For decomposition, we need to handle connectivity
+            # Expand both and compose with the given connectivity
+            expanded_self = self.expand()
+            expanded_other = other.expand()
+            new_decomp = expanded_self.compose(expanded_other, connectivity)
 
             return CompactDiagram(
                 label=new_label,
@@ -219,11 +232,20 @@ class CompactDiagram(ProperDiagram):
             )
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            return CompositionDiagram([*diagrams, self])
-        return CompositionDiagram([other, self])
+            old_connectivity = other.connectivity
+            # Add this diagram as the last element
+            last_idx = len(diagrams)
+            old_connectivity[last_idx] = connectivity
+            return CompositionDiagram([*diagrams, self], old_connectivity)
+        return CompositionDiagram([other, self], {0: connectivity})
 
     def is_proper(self) -> bool:
-        """Compact diagrams are not proper (they are composite)."""
+        """Compact diagrams are not proper..
+
+        Returns:
+        -------
+            bool
+        """
         return False
 
     def __repr__(self) -> str:
@@ -253,7 +275,7 @@ class DisplacementGate(CompactDiagram):
     References:
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.1, Eq. (57)
-    """
+    """  # noqa: RUF002
 
     alpha: complex
     label: str = field(init=False)
@@ -274,14 +296,14 @@ class DisplacementGate(CompactDiagram):
         -------
         CompositionDiagram
             Composition of p-spider then q-spider.
-        """
+        """  # noqa: RUF002
         re = np.sqrt(2) * self.alpha.real
         im = np.sqrt(2) * self.alpha.imag
 
         q_spider = QSpider(1, 1, ZxPoly({1: im}))
         p_spider = PSpider(1, 1, ZxPoly({1: re}))
 
-        # D(α) = Q ∘ P  (P applied first, then Q)
+        # D(α) = Q ∘ P  (P applied first, then Q)  # noqa: RUF003
         return CompositionDiagram([p_spider, q_spider])
 
     def conjugate(self) -> "DisplacementGate":
@@ -291,7 +313,7 @@ class DisplacementGate(CompactDiagram):
         -------
         DisplacementGate
             D(-α)
-        """
+        """  # noqa: RUF002
         return DisplacementGate(alpha=-self.alpha)
 
     def __repr__(self) -> str:
@@ -302,7 +324,7 @@ class DisplacementGate(CompactDiagram):
         str
             String showing the displacement amplitude alpha.
         """
-        return f"DisplacementGate(α={self.alpha:.2f})"
+        return f"DisplacementGate(α={self.alpha:.2f})"  # noqa: RUF001
 
 
 @dataclass
@@ -434,7 +456,7 @@ class SqueezingGate(CompactDiagram):
             Composition of Q, P, Q, P spiders in sequence.
         """
         a = self.tau * (1 - self.tau) / 4
-        b = -1 / self.tau if abs(self.tau) > 1e-10 else 0
+        b = -1 / self.tau if abs(self.tau) > 1e-10 else 0  # noqa: PLR2004
         c = (self.tau - 1) / 4
         d = 1.0
 
@@ -810,7 +832,7 @@ class CubicPhaseGate(CompactDiagram):
     References:
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.7, Eq. (68)
-    """
+    """  # noqa: RUF002
 
     gamma: float
     label: str = field(init=False)
@@ -830,7 +852,7 @@ class CubicPhaseGate(CompactDiagram):
         -------
         QSpider
             q-spider with phase function f(x) = γ x³.
-        """
+        """  # noqa: RUF002
         return QSpider(1, 1, ZxPoly({3: self.gamma}))
 
     def conjugate(self) -> "CubicPhaseGate":
@@ -840,7 +862,7 @@ class CubicPhaseGate(CompactDiagram):
         -------
         CubicPhaseGate
             CPG(-γ)
-        """
+        """  # noqa: RUF002
         return CubicPhaseGate(gamma=-self.gamma)
 
     def __repr__(self) -> str:
@@ -851,7 +873,7 @@ class CubicPhaseGate(CompactDiagram):
         str
             String showing the cubic phase strength gamma.
         """
-        return f"CubicPhaseGate(γ={self.gamma:.2f})"
+        return f"CubicPhaseGate(γ={self.gamma:.2f})"  # noqa: RUF001
 
 
 # =============================================================================

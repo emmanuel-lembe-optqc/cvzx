@@ -555,7 +555,7 @@ class Diagram(ABC):
         """
 
     @abstractmethod
-    def compose(self, other: "Diagram") -> "Diagram":
+    def compose(self, other: "Diagram", connectivity: dict | None = None) -> "Diagram":
         """Composition: sequential connection of diagrams.
 
         Connects outputs of self to inputs of other.
@@ -565,6 +565,8 @@ class Diagram(ABC):
         ----------
         other : Diagram
             Diagram to apply after self (other ∘ self).
+        connectivity: dict
+            Dictionary indicating how the diagrams are connected.
 
         Returns:
         -------
@@ -666,23 +668,47 @@ class ProperDiagram(Diagram):
             return TensorDiagram([self, *diagrams])
         return TensorDiagram([self, other])
 
-    def compose(self, other: Diagram) -> Diagram:
+    def compose(self, other: Diagram, connectivity: dict | None = None) -> Diagram:
         """Compose with another diagram.
 
         Parameters
         ----------
         other : Diagram
             Diagram to apply after self.
+        connectivity: dict
+            Dictionary indicating how the diagrams are connected.
 
         Returns:
         -------
         CompositionDiagram
             Composition other ∘ self.
+
+        Raises:
+        ------
+        ValueError: if the connectivity dictionary coherent with the inputs of
+            self and/or the outputs of the input diagram.
         """
+        if connectivity is None:
+            connectivity = {k: k for k in range(self.num_inputs)}
+        # Check the validity of the connectivity
+        keys = list(connectivity.keys())
+        keys.sort()
+        if keys != list(range(self.num_inputs)):
+            msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
+            raise ValueError(msg)
+        values = list(connectivity.values())
+        values.sort()
+        if values != list(range(other.num_outputs)):
+            msg = (
+                "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
+            )
+            raise ValueError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            return CompositionDiagram([*diagrams, self])
-        return CompositionDiagram([other, self])
+            old_connectivity = other.connectivity
+            old_connectivity[len(diagrams) - 1] = connectivity
+            return CompositionDiagram([*diagrams, self], old_connectivity)
+        return CompositionDiagram([other, self], {0: connectivity})
 
     def is_proper(self) -> bool:
         """Proper diagrams are always proper by definition.
@@ -899,23 +925,47 @@ class ContractedDiagram(Diagram):
             return TensorDiagram([self, *diagrams])
         return TensorDiagram([self, other])
 
-    def compose(self, other: Diagram) -> Diagram:
-        """Compose tensor diagram with another diagram.
+    def compose(self, other: Diagram, connectivity: dict | None = None) -> Diagram:
+        """Compose with another diagram.
 
         Parameters
         ----------
         other : Diagram
             Diagram to apply after self.
+        connectivity: dict
+            Dictionary indicating how the diagrams are connected.
 
         Returns:
         -------
         CompositionDiagram
             Composition other ∘ self.
+
+        Raises:
+        ------
+        ValueError: if the connectivity dictionary coherent with the inputs of
+            self and/or the outputs of the input diagram.
         """
+        if connectivity is None:
+            connectivity = {k: k for k in range(self.num_inputs)}
+        # Check the validity of the connectivity
+        keys = list(connectivity.keys())
+        keys.sort()
+        if keys != list(range(self.num_inputs)):
+            msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
+            raise ValueError(msg)
+        values = list(connectivity.values())
+        values.sort()
+        if values != list(range(other.num_outputs)):
+            msg = (
+                "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
+            )
+            raise ValueError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            return CompositionDiagram([*diagrams, self])
-        return CompositionDiagram([other, self])
+            old_connectivity = other.connectivity
+            old_connectivity[len(diagrams) - 1] = connectivity
+            return CompositionDiagram([*diagrams, self], old_connectivity)
+        return CompositionDiagram([other, self], {0: connectivity})
 
     def conjugate(self) -> Diagram:
         """Conjugate reverses order and swaps connection sets.
@@ -1154,23 +1204,47 @@ class TensorDiagram(Diagram):
             return TensorDiagram([*list(self.diagrams), *diagrams])
         return TensorDiagram([*list(self.diagrams), other])
 
-    def compose(self, other: Diagram) -> Diagram:
-        """Compose tensor diagram with another diagram.
+    def compose(self, other: Diagram, connectivity: dict | None = None) -> Diagram:
+        """Compose with another diagram.
 
         Parameters
         ----------
         other : Diagram
             Diagram to apply after self.
+        connectivity: dict
+            Dictionary indicating how the diagrams are connected.
 
         Returns:
         -------
         CompositionDiagram
             Composition other ∘ self.
+
+        Raises:
+        ------
+        ValueError: if the connectivity dictionary coherent with the inputs of
+            self and/or the outputs of the input diagram.
         """
+        if connectivity is None:
+            connectivity = {k: k for k in range(self.num_inputs)}
+        # Check the validity of the connectivity
+        keys = list(connectivity.keys())
+        keys.sort()
+        if keys != list(range(self.num_inputs)):
+            msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
+            raise ValueError(msg)
+        values = list(connectivity.values())
+        values.sort()
+        if values != list(range(other.num_outputs)):
+            msg = (
+                "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
+            )
+            raise ValueError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            return CompositionDiagram([*diagrams, self])
-        return CompositionDiagram([other, self])
+            old_connectivity = other.connectivity
+            old_connectivity[len(diagrams) - 1] = connectivity
+            return CompositionDiagram([*diagrams, self], old_connectivity)
+        return CompositionDiagram([other, self], {0: connectivity})
 
     def conjugate(self) -> Diagram:
         """Conjugate distributes over tensor product.
@@ -1248,13 +1322,17 @@ class CompositionDiagram(Diagram):
     """
 
     diagrams: Sequence[Diagram]
+    connectivity: dict | None = None
 
     def __post_init__(self) -> None:
         """Initialise composition diagram by validating consecutive composition.
 
         Raises:
         ------
-        ValueError: If any consecutive diagrams have mismatched input/output counts.
+        ValueError:
+            If any consecutive diagrams have mismatched input/output counts.
+            If the connectivity dictionary is coherent with the input/output
+                of diagrams.
         """
         for i in range(len(self.diagrams) - 1):
             first = self.diagrams[i]
@@ -1267,6 +1345,30 @@ class CompositionDiagram(Diagram):
                 raise ValueError(msg)
         self._num_inputs = self.diagrams[0].num_inputs
         self._num_outputs = self.diagrams[-1].num_outputs
+        if self.connectivity is None:
+            self.connectivity = {}
+            for i in range(len(self.diagrams) - 1):
+                self.connectivity[i] = {k: k for k in range(self.diagrams[i + 1].num_inputs)}
+        # Check connectivity
+        for i in range(len(self.diagrams) - 1):
+            # Check keys
+            keys = list(self.connectivity[i].keys())
+            keys.sort()
+            if keys != list(range(self.diagrams[i + 1].num_inputs)):
+                msg = (
+                    "The keys of the connectivity dictionary do not correspond "
+                    f"the input indices of the sub_diagram {i + 1}."
+                )
+                raise ValueError(msg)
+            # Check values
+            values = list(self.connectivity[i].values())
+            values.sort()
+            if values != list(range(self.diagrams[i].num_outputs)):
+                msg = (
+                    "The values of the connectivity dictionary do not "
+                    f"correspond the output indices of the sub_diagram {i}."
+                )
+                raise ValueError(msg)
 
     def tensor(self, other: Diagram) -> Diagram:
         """Parallelize composition with another diagram.
@@ -1286,23 +1388,51 @@ class CompositionDiagram(Diagram):
             return TensorDiagram([self, *diagrams])
         return TensorDiagram([self, other])
 
-    def compose(self, other: Diagram) -> Diagram:
-        """Associative composition: (self ∘ other).
+    def compose(self, other: Diagram, connectivity: dict | None = None) -> Diagram:
+        """Compose with another diagram.
 
         Parameters
         ----------
         other : Diagram
             Diagram to apply after self.
+        connectivity: dict
+            Dictionary indicating how the diagrams are connected.
 
         Returns:
         -------
         CompositionDiagram
-            New composition diagram with self.diagrams + [other].
+            Composition other ∘ self.
+
+        Raises:
+        ------
+        ValueError: if the connectivity dictionary coherent with the inputs of
+            self and/or the outputs of the input diagram.
         """
+        if connectivity is None:
+            connectivity = {k: k for k in range(self.num_inputs)}
+        # Check the validity of the connectivity
+        keys = list(connectivity.keys())
+        keys.sort()
+        if keys != list(range(self.num_inputs)):
+            msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
+            raise ValueError(msg)
+        values = list(connectivity.values())
+        values.sort()
+        if values != list(range(other.num_outputs)):
+            msg = (
+                "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
+            )
+            raise ValueError(msg)
+        # Composition
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            return CompositionDiagram([*diagrams, *list(self.diagrams)])
-        return CompositionDiagram([other, *list(self.diagrams)])
+            old_connectivity = other.connectivity
+            old_connectivity[len(diagrams) - 1] = connectivity
+            return CompositionDiagram([*diagrams, self], old_connectivity)
+        diagrams = list(self.diagrams)
+        old_connectivity = self.connectivity
+        old_connectivity[len(diagrams) - 1] = connectivity
+        return CompositionDiagram([other, *diagrams], old_connectivity)
 
     def conjugate(self) -> Diagram:
         """Conjugate reverses composition order.
@@ -1369,36 +1499,7 @@ class ScalarDiagram(Diagram):
 
     _num_inputs: int = field(default=0, init=False)
     _num_outputs: int = field(default=0, init=False)
-
-    def tensor(self, other: Diagram) -> Diagram:
-        """Tensor product with another diagram.
-
-        Parameters
-        ----------
-        other : Diagram
-            Diagram to place in parallel.
-
-        Returns:
-        -------
-        Diagram
-            Other diagram unchanged (since scalar ⊗ X = X).
-        """
-        return other
-
-    def compose(self, other: Diagram) -> Diagram:
-        """Composition with another diagram.
-
-        Parameters
-        ----------
-        other : Diagram
-            Diagram to apply after self.
-
-        Returns:
-        -------
-        Diagram
-            Other diagram (since identity composition doesn't change).
-        """
-        return other
+    value: int = field(default=0, init=False)
 
     def conjugate(self) -> Diagram:
         """Scalar diagram is self-conjugate.
@@ -1450,7 +1551,7 @@ class ScalarDiagram(Diagram):
         str
             "Scalar()"
         """
-        return "Scalar()"
+        return f"Scalar({self.value})"
 
 
 @dataclass

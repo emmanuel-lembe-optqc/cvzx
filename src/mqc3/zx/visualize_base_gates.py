@@ -221,7 +221,7 @@ class DiagramVisualizer:
         """
         output_positions = []
         # Determine spider type
-        if isinstance(diagram, (QSpider, PSpider, CompactDiagram)):  # noqa: PLR1702
+        if isinstance(diagram, (QSpider, PSpider, CompactDiagram)):
             if radius is None:
                 radius = self.config.node_radius
             width = 2 * radius
@@ -431,6 +431,7 @@ class DiagramVisualizer:
         for i, sub_diagram in enumerate(diagram.diagrams):
             spacing_i -= sub_hor_spacing
             idx = i
+            input_pos = output_positions
             if is_sub_tensor:
                 sub_comp_idx = idx
             else:
@@ -439,6 +440,7 @@ class DiagramVisualizer:
                 sent_kept_inputs = kept_inputs
                 sent_kept_outputs = range(sub_diagram.num_outputs)
             elif i == diagram_length - 1:
+                input_pos = self._reorder_positions(diagram.connectivity[i - 1], output_positions)
                 sent_kept_inputs = range(sub_diagram.num_inputs)
                 sent_kept_outputs = kept_outputs
                 if is_sub_tensor:
@@ -446,6 +448,7 @@ class DiagramVisualizer:
                 else:
                     comp_idx = -1
             else:
+                input_pos = self._reorder_positions(diagram.connectivity[i - 1], output_positions)
                 sent_kept_inputs = range(sub_diagram.num_inputs)
                 sent_kept_outputs = range(sub_diagram.num_outputs)
             output_positions, init_input_pos, radius = self._draw_sub_diagram(
@@ -456,7 +459,7 @@ class DiagramVisualizer:
                 comp_idx=comp_idx,
                 sub_comp_idx=sub_comp_idx,
                 is_sub_tensor=is_sub_tensor,
-                input_positions=output_positions,
+                input_positions=input_pos,
                 radius=sub_radius,
                 kept_inputs=sent_kept_inputs,
                 kept_outputs=sent_kept_outputs,
@@ -1496,7 +1499,7 @@ class DiagramVisualizer:
             result = result[:17] + "..."
         return result
 
-    def _get_spider_type(self, diagram: ProperDiagram) -> str:
+    def _get_spider_type(self, diagram: ProperDiagram) -> str:  # noqa: PLR0911
         """Get spider type string from diagram instance.
 
         Parameters:
@@ -1526,6 +1529,25 @@ class DiagramVisualizer:
         if isinstance(diagram, CubicPhaseGate):
             return "nongaussian"
         return "default"
+
+    def _reorder_positions(self, connectivity: dict, positions: list) -> list:
+        """Reorder input positions of a diagram inside a composition diagram according to the connectivity.
+
+        Parameters:
+        ----------
+            connectivity : dict
+                Dictionary indicating how the output position of a sub_diagram
+                of a composition is connected to the the next one.
+            positions : list
+                List of positions of the sub_diagram which must be reordered
+                according to the connectivity
+
+        Returns:
+        -------
+            list
+                Reorder positions
+        """
+        return [positions[connectivity[i]] for i in range(len(positions))]
 
 
 def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None = None) -> plt.Figure:
@@ -1595,19 +1617,20 @@ def is_wiring_diagram(diagram: Diagram) -> bool:
 
 
 if __name__ == "__main__":
-    identity = QSpider(1, 1, ZxPoly({}))
-    fourier_inv = FourierInv()
-    i_tensor_f = TensorDiagram([fourier_inv, Fourier()])
-    q_spider2 = QSpider(1, 2, ZxPoly({1: 2}))
-    # fig = visualize(i_tensor_f, title="Test Wiring with tensor")
-    # fig.savefig(
-    #     "Test Wiring with tensor",
-    #     dpi=150,
-    # )
-    # plt.close(fig)
-    fig1 = visualize(i_tensor_f.compose(q_spider2), title="Test Wiring with tensor 2")
+    phase = ZxPoly({1: 1})
+    q_spider = QSpider(3, 3, phase)
+    p_spider = PSpider(3, 3, phase)
+    fig1 = visualize(q_spider.compose(p_spider, {0: 2, 1: 0, 2: 1}), title="Test Connectivity in Composition 1")
     fig1.savefig(
-        "Test Wiring with tensor 2",
+        "Test Connectivity in Composition 1",
+        dpi=150,
+    )
+    q_spider2 = QSpider(5, 5, phase)
+    tensor1 = TensorDiagram([Swap(), Fourier(), FourierInv(), PSpider(1, 1, phase)])
+    comp1 = CompositionDiagram([q_spider2, tensor1], {0: {0: 2, 1: 4, 2: 0, 3: 3, 4: 1}})
+    fig2 = visualize(comp1, title="Test Connectivity in Composition 2")
+    fig2.savefig(
+        "Test Connectivity in Composition 2",
         dpi=150,
     )
     plt.close(fig1)

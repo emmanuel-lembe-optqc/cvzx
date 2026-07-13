@@ -23,9 +23,6 @@ from mqc3.zx.base_gates import (
 )
 from mqc3.zx.gates import (
     BeamsplitterGate,
-    ControlledSumGate,
-    ControlledZGate,
-    CubicPhaseGate,
     DisplacementGate,
     PhaseRotationGate,
     SqueezingGate,
@@ -36,7 +33,7 @@ from mqc3.zx.rewrite_rules import ChainReductionRule
 class TestChainReductionRule(unittest.TestCase):
     """Test suite for ChainReductionRule."""
 
-    def setUp(self):
+    def setUp(self):  # noqa: PLR0915
         """Create common objects used in many tests."""
         # Phase polynomials
         self.phase_x2 = ZxPoly({2: 2})

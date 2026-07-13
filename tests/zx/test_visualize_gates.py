@@ -12,14 +12,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from mqc3.zx.base_gates import (
-    QSpider,
-    PSpider,
-    Swap,
+    CompositionDiagram,
+    ContractedDiagram,
+    Diagram,
     Fourier,
     Fourier2,
     FourierInv,
-    CompositionDiagram,
-    ContractedDiagram,
+    PSpider,
+    QSpider,
+    Swap,
     ZxPoly,
 )
 from mqc3.zx.gates import (
@@ -41,7 +42,7 @@ OUTPUT_DIR = Path("test_images_gates")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def save_and_close(diagram, filename: str, title: str = ""):
+def save_and_close(diagram: Diagram, filename: str, title: str = ""):
     """Save a diagram visualization to a file and close the figure."""
     filepath = OUTPUT_DIR / filename
     fig = visualize(diagram, title=title)
@@ -50,7 +51,7 @@ def save_and_close(diagram, filename: str, title: str = ""):
     print(f"Saved: {filepath}")
 
 
-def test_compact_gates():
+def test_compact_gates():  # noqa: PLR0914
     """Test visualization of all gates in compact form."""
     print("Testing compact gate visualization...")
 
@@ -70,7 +71,85 @@ def test_compact_gates():
 
     for gate in gates:
         filename = f"{gate.__class__.__name__}_compact.png"
-        save_and_close(gate, filename, f"{repr(gate)} (compact)")
+        save_and_close(gate, filename, f"{gate!r} (compact)")
+
+    # 2. Test CompactDiagram.compose with connectivity
+    print("\n" + "=" * 60)
+    print("Testing CompactDiagram.compose with connectivity")
+    print("=" * 60)
+
+    # Create some compact gates
+    D = DisplacementGate(alpha=1.0 + 0.5j)  # noqa: N806
+    R = PhaseRotationGate(theta=np.pi / 4)  # noqa: N806
+    Sq = SqueezingGate(tau=0.5)  # noqa: N806
+    BS = BeamsplitterGate(theta=np.pi / 4)  # noqa: N806
+    CS = ControlledSumGate(gain=2.0, control=2, target=1)  # noqa: N806
+    CZ = ControlledZGate(gain=1.0)  # noqa: N806
+
+    # Test 1: Simple composition with non-trivial connectivity (1 input, 1 output)
+    # D has 1 input, 1 output; R has 1 input, 1 output
+    # Connectivity: map input 0 of D to output 0 of R (only possible)
+    comp1 = D.compose(R, connectivity={0: 0})
+    save_and_close(comp1, "Compact_compose_D_R_conn.png", "D ∘ R with connectivity (0→0)")
+
+    # Test 2: Composition with swapped connectivity (if arities allow)
+    # Create a diagram with 2 inputs and 2 outputs
+    # We can use a CompactDiagram from a tensor product
+    D_tensor = D.tensor(D)  # noqa: N806
+    R_tensor = R.tensor(R)  # noqa: N806
+
+    # Connectivity: swap the wires (0→1, 1→0)
+    comp2 = D_tensor.compose(R_tensor, connectivity={0: 1, 1: 0})
+    save_and_close(
+        comp2, "Compact_compose_tensor_swapped_conn.png", "(D⊗D) ∘ (R⊗R) with swapped connectivity (0→1, 1→0)"
+    )
+
+    # Test 3: Connectivity with identity (0→0, 1→1) for comparison
+    comp3 = D_tensor.compose(R_tensor, connectivity={0: 0, 1: 1})
+    save_and_close(
+        comp3, "Compact_compose_tensor_identity_conn.png", "(D⊗D) ∘ (R⊗R) with identity connectivity (0→0, 1→1)"
+    )
+
+    # Test 4: CompactDiagram with CompositionDiagram connectivity
+    comp_diag = CS.compose(CZ)  # CompositionDiagram
+    BS_compact = BS  # CompactDiagram  # noqa: N806
+
+    comp4 = comp_diag.compose(BS_compact)
+    save_and_close(comp4, "Compact_compose_CompDiagram_BS_conn.png", "(D ∘ R) ∘ BS with connectivity (0→0)")
+
+    # Test 5: Non-trivial connectivity with 2-input, 2-output diagrams
+    # Create two 2-mode gates
+    R_tensor = R.tensor(R)  # noqa: N806
+    Sq_tensor = Sq.tensor(Sq)  # noqa: N806
+
+    comp5 = R_tensor.compose(Sq_tensor, connectivity={0: 1, 1: 0})
+    save_and_close(
+        comp5,
+        "Compact_compose_R_tensor_Sq_tensor_reverse_conn.png",
+        "(R⊗R) ∘ (Sq⊗Sq) with reverse connectivity (0→1, 1→0)",
+    )
+
+    # Test 6: Connectivity with partial mapping
+
+    phase = ZxPoly({2: 2})
+    q_spider = QSpider(2, 1, phase)
+    compact_q = CompactDiagram(2, 1, "Q2x1", q_spider)
+    q_spider_1x2 = QSpider(1, 2, phase)
+    compact_q_1x2 = CompactDiagram(1, 2, "Q1x2", q_spider_1x2)
+
+    comp6 = compact_q.compose(compact_q_1x2, connectivity={0: 0, 1: 1})
+    save_and_close(comp6, "Compact_compose_different_arities_conn.png", "Q(2→1) ∘ Q(1→2) with connectivity (0→0, 1→1)")
+
+    # Test 7: Connectivity with expansion
+    # Compose with expand_self=True
+    comp7 = compact_q.compose(compact_q_1x2, connectivity={0: 1, 1: 0}, expand_self=True)
+    save_and_close(
+        comp7,
+        "Compact_compose_expand_self_conn.png",
+        "Q(2→1) ∘ Q(1→2) with expand_self=True and swapped connectivity (0→1, 1→0)",
+    )
+
+    print("CompactDiagram.compose connectivity tests completed.\n")
 
 
 def test_expanded_gates():
@@ -90,16 +169,16 @@ def test_expanded_gates():
     for gate in gates:
         expanded = gate.expand()
         filename = f"{gate.__class__.__name__}_expanded.png"
-        save_and_close(expanded, filename, f"{repr(gate)} (expanded)")
+        save_and_close(expanded, filename, f"{gate!r} (expanded)")
 
 
 def test_composed_gates():
     """Test visualization of composed gates (compact and expanded)."""
     print("Testing composed gate visualization...")
 
-    R = PhaseRotationGate(theta=np.pi / 4)
-    Sq = SqueezingGate(tau=0.5)
-    BS = BeamsplitterGate(theta=np.pi / 4)
+    R = PhaseRotationGate(theta=np.pi / 4)  # noqa: N806
+    Sq = SqueezingGate(tau=0.5)  # noqa: N806
+    BS = BeamsplitterGate(theta=np.pi / 4)  # noqa: N806
 
     # Compact composition
     circuit = R.compose(Sq)
@@ -128,8 +207,8 @@ def test_with_custom_config():
         fontsize=12,
     )
 
-    R = PhaseRotationGate(theta=np.pi / 4)
-    Sq = SqueezingGate(tau=0.5)
+    R = PhaseRotationGate(theta=np.pi / 4)  # noqa: N806
+    Sq = SqueezingGate(tau=0.5)  # noqa: N806
     circuit = R.compose(Sq)
 
     visualizer = DiagramVisualizer(config)
@@ -146,7 +225,7 @@ def test_compact_diagram_label_validation():
     print("Testing label validation...")
     # Empty label
     try:
-        d = CompactDiagram(1, 1, "", None)
+        d = CompactDiagram(1, 1, "", None)  # noqa: F841
         print("❌ Should have raised ValueError")
     except ValueError as e:
         print(f"✅ Caught expected error: {e}")
@@ -300,7 +379,7 @@ def test_conjugate_gates():
     for gate in gates:
         conjugated = gate.conjugate()
         filename = f"{gate.__class__.__name__}_conjugate.png"
-        save_and_close(conjugated, filename, f"{repr(gate)}†")
+        save_and_close(conjugated, filename, f"{gate!r}†")
 
         # Verify conjugation consistency: (gate†)† = gate
         double_conj = conjugated.conjugate()
