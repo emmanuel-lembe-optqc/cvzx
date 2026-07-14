@@ -40,10 +40,15 @@ from mqc3.zx.visualize_base_gates import DiagramVisualizer, VisualizerConfig, vi
 # Create output directory
 OUTPUT_DIR = Path("test_images_gates")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+saved_ids = []
 
 
 def save_and_close(diagram: Diagram, filename: str, title: str = ""):
     """Save a diagram visualization to a file and close the figure."""
+    # Check diagram id
+    assert isinstance(diagram.id, int)
+    assert diagram.id not in saved_ids
+    saved_ids.append(diagram.id)
     filepath = OUTPUT_DIR / filename
     fig = visualize(diagram, title=title)
     fig.savefig(filepath, dpi=150, bbox_inches="tight")
@@ -51,7 +56,7 @@ def save_and_close(diagram: Diagram, filename: str, title: str = ""):
     print(f"Saved: {filepath}")
 
 
-def test_compact_gates():  # noqa: PLR0914
+def compact_gates_test():  # noqa: PLR0914
     """Test visualization of all gates in compact form."""
     print("Testing compact gate visualization...")
 
@@ -133,9 +138,9 @@ def test_compact_gates():  # noqa: PLR0914
 
     phase = ZxPoly({2: 2})
     q_spider = QSpider(2, 1, phase)
-    compact_q = CompactDiagram(2, 1, "Q2x1", q_spider)
+    compact_q = CompactDiagram("Q2x1", 2, 1, q_spider)
     q_spider_1x2 = QSpider(1, 2, phase)
-    compact_q_1x2 = CompactDiagram(1, 2, "Q1x2", q_spider_1x2)
+    compact_q_1x2 = CompactDiagram("Q1x2", 1, 2, q_spider_1x2)
 
     comp6 = compact_q.compose(compact_q_1x2, connectivity={0: 0, 1: 1})
     save_and_close(comp6, "Compact_compose_different_arities_conn.png", "Q(2→1) ∘ Q(1→2) with connectivity (0→0, 1→1)")
@@ -152,7 +157,7 @@ def test_compact_gates():  # noqa: PLR0914
     print("CompactDiagram.compose connectivity tests completed.\n")
 
 
-def test_expanded_gates():
+def expanded_gates_test():
     """Test visualization of gates after expansion."""
     print("Testing expanded gate visualization...")
 
@@ -172,7 +177,7 @@ def test_expanded_gates():
         save_and_close(expanded, filename, f"{gate!r} (expanded)")
 
 
-def test_composed_gates():
+def composed_gates_test():
     """Test visualization of composed gates (compact and expanded)."""
     print("Testing composed gate visualization...")
 
@@ -196,7 +201,7 @@ def test_composed_gates():
     save_and_close(expanded2, "Expanded_complex_circuit.png", "Expanded: (Sq ∘ R) ⊗ BS")
 
 
-def test_with_custom_config():
+def with_custom_config_test():
     """Test visualization with custom visualizer configuration."""
     print("Testing custom configuration...")
 
@@ -220,18 +225,18 @@ def test_with_custom_config():
     print(f"Saved: {filepath}")
 
 
-def test_compact_diagram_label_validation():
+def compact_diagram_label_validation_test():
     """Test label validation for CompactDiagram."""
     print("Testing label validation...")
     # Empty label
     try:
-        d = CompactDiagram(1, 1, "", None)  # noqa: F841
+        d = CompactDiagram("", 1, 1, None)  # noqa: F841
         print("❌ Should have raised ValueError")
     except ValueError as e:
         print(f"✅ Caught expected error: {e}")
 
 
-def test_create_compact_diagram():  # noqa: PLR0914, PLR0915
+def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     """Compress a diagram into a compact diagram."""
     print("\n" + "=" * 60)
     print("Testing create_compact_diagram")
@@ -362,7 +367,7 @@ def test_create_compact_diagram():  # noqa: PLR0914, PLR0915
     save_and_close(expanded_tensor, "original_tensor_contracted.png", "Original Tensor with Contracted")
 
 
-def test_conjugate_gates():
+def conjugate_gates_test():
     """Test conjugation of gates."""
     print("Testing gate conjugation...")
 
@@ -377,6 +382,7 @@ def test_conjugate_gates():
     ]
 
     for gate in gates:
+        print()
         conjugated = gate.conjugate()
         filename = f"{gate.__class__.__name__}_conjugate.png"
         save_and_close(conjugated, filename, f"{gate!r}†")
@@ -391,13 +397,13 @@ def test_conjugate_gates():
 
 def run_all_tests():
     """Run all test functions."""
-    test_compact_gates()
-    test_expanded_gates()
-    test_composed_gates()
-    test_with_custom_config()
-    test_compact_diagram_label_validation()
-    test_conjugate_gates()
-    test_create_compact_diagram()
+    compact_gates_test()
+    expanded_gates_test()
+    composed_gates_test()
+    with_custom_config_test()
+    compact_diagram_label_validation_test()
+    conjugate_gates_test()
+    create_compact_diagram_test()
 
 
 if __name__ == "__main__":

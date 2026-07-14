@@ -4,6 +4,7 @@ import operator
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from itertools import count
 
 
 class ZxPoly:
@@ -539,6 +540,11 @@ class Diagram(ABC):
         - Contraction (partial trace over connected modes)
     """
 
+    _id_counter = count(1)
+
+    def __init__(self) -> None:  # noqa: D107
+        self._id = next(Diagram._id_counter)
+
     @abstractmethod
     def tensor(self, other: "Diagram") -> "Diagram":
         """Parallelisation: tensor product of two diagrams.
@@ -605,6 +611,17 @@ class Diagram(ABC):
         bool
             True if diagram is one of the basic generators.
         """
+
+    @property
+    def id(self) -> int:
+        """ID of the diagram.
+
+        Returns:
+        --------
+            int
+                ID of the diagram.
+        """
+        return self._id
 
     @property
     @abstractmethod
@@ -742,6 +759,9 @@ class ProperDiagram(Diagram):
         """
         return self._num_outputs
 
+    def __post_init__(self) -> None:  # noqa: D105
+        super().__init__()
+
     def __repr__(self) -> str:
         """Return string representation of the proper diagram.
 
@@ -836,6 +856,7 @@ class ContractedDiagram(Diagram):
                     If J1 indices are out of range for first diagram inputs
                     If J2 indices are out of range for second diagram outputs
         """
+        super().__init__()
         self.diagrams = [first, second]
         self.first = first
         self.second = second
@@ -1048,11 +1069,6 @@ class TensorDiagram(Diagram):
     """
 
     diagrams: Sequence[Diagram]
-
-    def __post_init__(self) -> None:
-        """Initialise tensor diagram by summing input/output counts."""
-        self._num_inputs = sum(d.num_inputs for d in self.diagrams)
-        self._num_outputs = sum(d.num_outputs for d in self.diagrams)
 
     def partial_trace(  # noqa: C901, PLR0912, PLR0915
         self,
@@ -1290,6 +1306,12 @@ class TensorDiagram(Diagram):
         """
         return self._num_outputs
 
+    def __post_init__(self) -> None:
+        """Initialise tensor diagram by summing input/output counts."""
+        super().__init__()
+        self._num_inputs = sum(d.num_inputs for d in self.diagrams)
+        self._num_outputs = sum(d.num_outputs for d in self.diagrams)
+
     def __repr__(self) -> str:
         """Return string representation of the tensor diagram.
 
@@ -1323,52 +1345,6 @@ class CompositionDiagram(Diagram):
 
     diagrams: Sequence[Diagram]
     connectivity: dict | None = None
-
-    def __post_init__(self) -> None:
-        """Initialise composition diagram by validating consecutive composition.
-
-        Raises:
-        ------
-        ValueError:
-            If any consecutive diagrams have mismatched input/output counts.
-            If the connectivity dictionary is coherent with the input/output
-                of diagrams.
-        """
-        for i in range(len(self.diagrams) - 1):
-            first = self.diagrams[i]
-            second = self.diagrams[i + 1]
-            if first.num_outputs != second.num_inputs:
-                msg = (
-                    f"Cannot compose diagram {i} (outputs={first.num_outputs}) "
-                    f"with diagram {i + 1} (inputs={second.num_inputs})"
-                )
-                raise ValueError(msg)
-        self._num_inputs = self.diagrams[0].num_inputs
-        self._num_outputs = self.diagrams[-1].num_outputs
-        if self.connectivity is None:
-            self.connectivity = {}
-            for i in range(len(self.diagrams) - 1):
-                self.connectivity[i] = {k: k for k in range(self.diagrams[i + 1].num_inputs)}
-        # Check connectivity
-        for i in range(len(self.diagrams) - 1):
-            # Check keys
-            keys = list(self.connectivity[i].keys())
-            keys.sort()
-            if keys != list(range(self.diagrams[i + 1].num_inputs)):
-                msg = (
-                    "The keys of the connectivity dictionary do not correspond "
-                    f"the input indices of the sub_diagram {i + 1}."
-                )
-                raise ValueError(msg)
-            # Check values
-            values = list(self.connectivity[i].values())
-            values.sort()
-            if values != list(range(self.diagrams[i].num_outputs)):
-                msg = (
-                    "The values of the connectivity dictionary do not "
-                    f"correspond the output indices of the sub_diagram {i}."
-                )
-                raise ValueError(msg)
 
     def tensor(self, other: Diagram) -> Diagram:
         """Parallelize composition with another diagram.
@@ -1478,6 +1454,53 @@ class CompositionDiagram(Diagram):
         """
         return self._num_outputs
 
+    def __post_init__(self) -> None:
+        """Initialise composition diagram by validating consecutive composition.
+
+        Raises:
+        ------
+        ValueError:
+            If any consecutive diagrams have mismatched input/output counts.
+            If the connectivity dictionary is coherent with the input/output
+                of diagrams.
+        """
+        super().__init__()
+        for i in range(len(self.diagrams) - 1):
+            first = self.diagrams[i]
+            second = self.diagrams[i + 1]
+            if first.num_outputs != second.num_inputs:
+                msg = (
+                    f"Cannot compose diagram {i} (outputs={first.num_outputs}) "
+                    f"with diagram {i + 1} (inputs={second.num_inputs})"
+                )
+                raise ValueError(msg)
+        self._num_inputs = self.diagrams[0].num_inputs
+        self._num_outputs = self.diagrams[-1].num_outputs
+        if self.connectivity is None:
+            self.connectivity = {}
+            for i in range(len(self.diagrams) - 1):
+                self.connectivity[i] = {k: k for k in range(self.diagrams[i + 1].num_inputs)}
+        # Check connectivity
+        for i in range(len(self.diagrams) - 1):
+            # Check keys
+            keys = list(self.connectivity[i].keys())
+            keys.sort()
+            if keys != list(range(self.diagrams[i + 1].num_inputs)):
+                msg = (
+                    "The keys of the connectivity dictionary do not correspond "
+                    f"the input indices of the sub_diagram {i + 1}."
+                )
+                raise ValueError(msg)
+            # Check values
+            values = list(self.connectivity[i].values())
+            values.sort()
+            if values != list(range(self.diagrams[i].num_outputs)):
+                msg = (
+                    "The values of the connectivity dictionary do not "
+                    f"correspond the output indices of the sub_diagram {i}."
+                )
+                raise ValueError(msg)
+
     def __repr__(self) -> str:
         """Return string representation of the composition diagram.
 
@@ -1499,7 +1522,6 @@ class ScalarDiagram(Diagram):
 
     _num_inputs: int = field(default=0, init=False)
     _num_outputs: int = field(default=0, init=False)
-    value: int = field(default=0, init=False)
 
     def conjugate(self) -> Diagram:
         """Scalar diagram is self-conjugate.
@@ -1542,6 +1564,9 @@ class ScalarDiagram(Diagram):
             0 for closed diagrams.
         """
         return self._num_outputs
+
+    def __post_init__(self) -> None:  # noqa: D105
+        super().__init__()
 
     def __repr__(self) -> str:
         """Return string representation of the scalar diagram.

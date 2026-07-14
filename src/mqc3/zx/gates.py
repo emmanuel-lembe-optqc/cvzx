@@ -29,7 +29,7 @@ from mqc3.zx.base_gates import (
 
 
 @dataclass
-class CompactDiagram(ProperDiagram):
+class CompactDiagram(Diagram):
     """Compact representation of a diagram with an optional decomposition.
 
     This class allows representing a complex diagram (composed of tensors,
@@ -58,19 +58,6 @@ class CompactDiagram(ProperDiagram):
     _num_inputs: int
     _num_outputs: int
     decomposition: Diagram
-
-    def __post_init__(self) -> None:
-        """Initialize the compact diagram.
-
-        Raises:
-        ------
-        ValueError:
-            If label is empty or None.
-            If label exceeds 5 characters.
-        """
-        if self.label is None or not self.label:
-            msg = "CompactDiagram requires a non-empty label"
-            raise ValueError(msg)
 
     def expand(self) -> Diagram:
         """Expand the compact diagram to its full decomposition.
@@ -248,6 +235,42 @@ class CompactDiagram(ProperDiagram):
         """
         return False
 
+    @property
+    def num_inputs(self) -> int:
+        """Number of input wires.
+
+        Returns:
+        -------
+        int
+            Number of input ports.
+        """
+        return self._num_inputs
+
+    @property
+    def num_outputs(self) -> int:
+        """Number of output wires.
+
+        Returns:
+        -------
+        int
+            Number of output ports.
+        """
+        return self._num_outputs
+
+    def __post_init__(self) -> None:
+        """Initialize the compact diagram.
+
+        Raises:
+        ------
+        ValueError:
+            If label is empty or None.
+            If label exceeds 5 characters.
+        """
+        super().__init__()
+        if self.label is None or not self.label:
+            msg = "CompactDiagram requires a non-empty label"
+            raise ValueError(msg)
+
     def __repr__(self) -> str:
         """Return string representation of the compact diagram.
 
@@ -283,10 +306,6 @@ class DisplacementGate(CompactDiagram):
     _num_outputs: int = field(default=1, init=False)
     decomposition: Diagram | None = field(default=None, init=False)
 
-    def __post_init__(self) -> None:
-        """Initialize the Displacement Gate."""
-        self.label = f"D({self.alpha:.2f})"
-
     def expand(self) -> CompositionDiagram:
         """Decompose displacement gate into q-spider and p-spider.
 
@@ -315,6 +334,11 @@ class DisplacementGate(CompactDiagram):
             D(-α)
         """  # noqa: RUF002
         return DisplacementGate(alpha=-self.alpha)
+
+    def __post_init__(self) -> None:
+        """Initialize the Displacement Gate."""
+        self.label = f"D({self.alpha:.2f})"
+        super().__post_init__()
 
     def __repr__(self) -> str:
         """Return string representation of the displacement gate.
@@ -357,23 +381,6 @@ class PhaseRotationGate(CompactDiagram):
     decomposition: Diagram | None = field(default=None, init=False)
     spider_type: str = field(default="gate", init=False)
 
-    def __post_init__(self) -> None:
-        """Initialise the Phase Rotation Gate.
-
-        Raises:
-        ------
-        ValueError: If the angle is an odd multiple of π/2.
-        """
-        self.label = f"R({self.theta:.2f})"
-
-        # Check for invalid angles where tan is infinite
-        if np.isclose(np.abs(self.theta) % np.pi, np.pi / 2):
-            msg = (
-                f"θ = {self.theta} is an odd multiple of π/2. "
-                f"For π/2 rotation, use Fourier gate. For 3π/2, use FourierInv."
-            )
-            raise ValueError(msg)
-
     def expand(self) -> CompositionDiagram:
         """Decompose phase rotation into three quadratic q-spiders.
 
@@ -402,6 +409,23 @@ class PhaseRotationGate(CompactDiagram):
             R(-θ)
         """
         return PhaseRotationGate(theta=-self.theta)
+
+    def __post_init__(self) -> None:
+        """Initialise the Phase Rotation Gate.
+
+        Raises:
+        ------
+        ValueError: If the angle is an odd multiple of π/2.
+        """
+        self.label = f"R({self.theta:.2f})"
+        super().__post_init__()
+        # Check for invalid angles where tan is infinite
+        if np.isclose(np.abs(self.theta) % np.pi, np.pi / 2):
+            msg = (
+                f"θ = {self.theta} is an odd multiple of π/2. "
+                f"For π/2 rotation, use Fourier gate. For 3π/2, use FourierInv."
+            )
+            raise ValueError(msg)
 
     def __repr__(self) -> str:
         """Return string representation of the phase rotation gate.
@@ -440,10 +464,6 @@ class SqueezingGate(CompactDiagram):
     decomposition: Diagram | None = field(default=None, init=False)
     spider_type: str = field(default="gate", init=False)
 
-    def __post_init__(self) -> None:
-        """Initialize the Squeezing Gate."""
-        self.label = f"Sq({self.tau:.2f})"
-
     def expand(self) -> CompositionDiagram:
         """Decompose squeezing gate into four quadratic spiders.
 
@@ -476,6 +496,11 @@ class SqueezingGate(CompactDiagram):
             Sq(1/τ)
         """
         return SqueezingGate(tau=1 / self.tau)
+
+    def __post_init__(self) -> None:
+        """Initialize the Squeezing Gate."""
+        self.label = f"Sq({self.tau:.2f})"
+        super().__post_init__()
 
     def __repr__(self) -> str:
         """Return string representation of the squeezing gate.
@@ -525,22 +550,6 @@ class ControlledSumGate(CompactDiagram):
     _num_outputs: int = field(default=2, init=False)
     decomposition: Diagram | None = field(default=None, init=False)
     spider_type: str = field(default="gate", init=False)
-
-    def __post_init__(self) -> None:
-        """Initializes the ControlledSum Gate.
-
-        Raises:
-        ------
-        ValueError: If the control is equal to the target.
-        """
-        if self.control == self.target:
-            msg = f"Control mode {self.control} and target mode {self.target} must be different"
-            raise ValueError(msg)
-
-        if self.gain == 1:
-            self.label = f"CS{self.target},{self.control}"
-        else:
-            self.label = f"CS{self.target},{self.control}({self.gain:.2f})"
 
     def expand(self) -> Diagram:
         """Decompose CSUM gate into spiders with contraction.
@@ -610,6 +619,23 @@ class ControlledSumGate(CompactDiagram):
         """
         return ControlledSumGate(gain=-self.gain, control=self.control, target=self.target)
 
+    def __post_init__(self) -> None:
+        """Initializes the ControlledSum Gate.
+
+        Raises:
+        ------
+        ValueError: If the control is equal to the target.
+        """
+        if self.control == self.target:
+            msg = f"Control mode {self.control} and target mode {self.target} must be different"
+            raise ValueError(msg)
+
+        if self.gain == 1:
+            self.label = f"CS{self.target},{self.control}"
+        else:
+            self.label = f"CS{self.target},{self.control}({self.gain:.2f})"
+        super().__post_init__()
+
     def __repr__(self) -> str:
         """Return string representation of the controlled-sum gate.
 
@@ -645,13 +671,6 @@ class ControlledZGate(CompactDiagram):
     _num_outputs: int = field(default=2, init=False)
     decomposition: Diagram | None = field(default=None, init=False)
     spider_type: str = field(default="gate", init=False)
-
-    def __post_init__(self) -> None:
-        """Initialize the ControlZ Gate."""
-        if self.gain == 1:
-            self.label = "CZ"
-        else:
-            self.label = f"CZ({self.gain:.2f})"
 
     def expand(self) -> Diagram:
         """Decompose CZ gate using Fourier gates and CSUM.
@@ -713,6 +732,14 @@ class ControlledZGate(CompactDiagram):
         """
         return ControlledZGate(gain=self.gain)
 
+    def __post_init__(self) -> None:
+        """Initialize the ControlZ Gate."""
+        if self.gain == 1:
+            self.label = "CZ"
+        else:
+            self.label = f"CZ({self.gain:.2f})"
+        super().__post_init__()
+
     def __repr__(self) -> str:
         """Return string representation of the controlled-Z gate.
 
@@ -749,13 +776,6 @@ class BeamsplitterGate(CompactDiagram):
     _num_outputs: int = field(default=2, init=False)
     decomposition: Diagram | None = field(default=None, init=False)
     spider_type: str = field(default="gate", init=False)
-
-    def __post_init__(self) -> None:
-        """Initialize the Beamsplitter Gate."""
-        if np.isclose(self.theta, np.pi / 4):
-            self.label = "BS(π/4)"
-        else:
-            self.label = f"BS({self.theta:.2f})"
 
     def expand(self) -> Diagram:
         """Decompose beamsplitter using squeezing and CSUM gates.
@@ -804,6 +824,14 @@ class BeamsplitterGate(CompactDiagram):
         """
         return BeamsplitterGate(theta=-self.theta)
 
+    def __post_init__(self) -> None:
+        """Initialize the Beamsplitter Gate."""
+        if np.isclose(self.theta, np.pi / 4):
+            self.label = "BS(π/4)"
+        else:
+            self.label = f"BS({self.theta:.2f})"
+        super().__post_init__()
+
     def __repr__(self) -> str:
         """Return string representation of the beamsplitter gate.
 
@@ -841,10 +869,6 @@ class CubicPhaseGate(CompactDiagram):
     decomposition: Diagram | None = field(default=None, init=False)
     spider_type: str = field(default="non_gaussian", init=False)
 
-    def __post_init__(self) -> None:
-        """Initialize the CubicPhase Gate."""
-        self.label = f"CPG({self.gamma:.2f})"
-
     def expand(self) -> QSpider:
         """Decompose cubic phase gate into a single q-spider with cubic phase.
 
@@ -864,6 +888,11 @@ class CubicPhaseGate(CompactDiagram):
             CPG(-γ)
         """  # noqa: RUF002
         return CubicPhaseGate(gamma=-self.gamma)
+
+    def __post_init__(self) -> None:
+        """Initialize the CubicPhase Gate."""
+        self.label = f"CPG({self.gamma:.2f})"
+        super().__post_init__()
 
     def __repr__(self) -> str:
         """Return string representation of the cubic phase gate.

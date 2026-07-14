@@ -140,7 +140,7 @@ class DiagramVisualizer:
         if title:
             ax.set_title(title, fontsize=self.config.fontsize)
 
-        if isinstance(diagram, ProperDiagram):
+        if isinstance(diagram, (ProperDiagram, CompactDiagram)):
             self._draw_proper_diagram(ax, diagram)
         elif isinstance(diagram, CompositionDiagram):
             self._draw_composition(ax, diagram)
@@ -1133,7 +1133,7 @@ class DiagramVisualizer:
         """
         if radius is None:
             radius = self.config.node_radius
-        if isinstance(diagram, ProperDiagram):
+        if isinstance(diagram, (ProperDiagram, CompactDiagram)):
             return self._draw_proper_diagram(
                 ax, diagram, x, y, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
             )
@@ -1614,23 +1614,3 @@ def is_wiring_diagram(diagram: Diagram) -> bool:
         and not diagram.phase.coeffs
         and diagram.num_inputs == diagram.num_outputs
     )
-
-
-if __name__ == "__main__":
-    phase = ZxPoly({1: 1})
-    q_spider = QSpider(3, 3, phase)
-    p_spider = PSpider(3, 3, phase)
-    fig1 = visualize(q_spider.compose(p_spider, {0: 2, 1: 0, 2: 1}), title="Test Connectivity in Composition 1")
-    fig1.savefig(
-        "Test Connectivity in Composition 1",
-        dpi=150,
-    )
-    q_spider2 = QSpider(5, 5, phase)
-    tensor1 = TensorDiagram([Swap(), Fourier(), FourierInv(), PSpider(1, 1, phase)])
-    comp1 = CompositionDiagram([q_spider2, tensor1], {0: {0: 2, 1: 4, 2: 0, 3: 3, 4: 1}})
-    fig2 = visualize(comp1, title="Test Connectivity in Composition 2")
-    fig2.savefig(
-        "Test Connectivity in Composition 2",
-        dpi=150,
-    )
-    plt.close(fig1)

@@ -27,10 +27,15 @@ from mqc3.zx.visualize_base_gates import visualize
 # Create output directory using Path
 OUTPUT_DIR = Path("test_images")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+saved_ids = []
 
 
 def save_and_close(diagram: Diagram, filename: str, title: str = ""):
     """Save a diagram visualization to a file in test_images/ and close the figure."""
+    # Check diagram id
+    assert isinstance(diagram.id, int)
+    assert diagram.id not in saved_ids
+    saved_ids.append(diagram.id)
     filepath = OUTPUT_DIR / filename  # Path with / operator
     fig = visualize(diagram, title=title)
     fig.savefig(filepath, dpi=150, bbox_inches="tight")
