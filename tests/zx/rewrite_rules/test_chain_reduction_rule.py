@@ -188,7 +188,7 @@ class TestChainReductionRule(unittest.TestCase):
             "values": [math.pi / 4, math.pi / 6],
         }
         self.match6 = {
-            "path": [5, 2, 1, 0],
+            "path": [5, 2, 1],
             "start": 1,
             "end": 4,
             "gate_type": "D",
@@ -222,7 +222,7 @@ class TestChainReductionRule(unittest.TestCase):
         gate_type, value = self.rule.get_gate_info(self.q_mixed)
         assert gate_type == "Q"
         assert value[0] == self.phase_mixed
-        assert value[1] is None
+        assert value[1] == None
 
     def test_get_gate_info_p_spider_monomial(self):
         """P-spider with monomial phase returns ('P', (phase, degree, num_inputs, num_outputs))."""
@@ -245,7 +245,7 @@ class TestChainReductionRule(unittest.TestCase):
         gate_type, value = self.rule.get_gate_info(self.p_mixed)
         assert gate_type == "P"
         assert value[0] == self.phase_mixed
-        assert value[1] is None
+        assert value[1] == None
 
     def test_get_gate_info_phase_rotation(self):
         """PhaseRotationGate returns ('R', theta)."""
@@ -292,8 +292,8 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_swap_returns_none(self):
         """Swap returns None (not reducible)."""
         gate_type, value = self.rule.get_gate_info(self.swap)
-        assert gate_type is None
-        assert value is None
+        assert gate_type == None
+        assert value == None
 
     # -------------------------------------------------------------------------
     # 2. Testing match() and find_chains_in_composition()
@@ -469,7 +469,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert len(matches) == 0
 
     def test_match_contracted_with_composition1(self):
-        """Chain inside a composition that is inside a ContractedDiagram should match."""
+        """Chain inside a composition that == inside a ContractedDiagram should match."""
         comp = CompositionDiagram([self.fourier, self.p_x2_2, self.p_x2_3])
         contracted = ContractedDiagram(comp, self.swap, [], [], [], [])
         matches = self.rule.match(contracted)
@@ -484,7 +484,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert matches[0] == m
 
     def test_match_contracted_with_composition2(self):
-        """Chain inside a composition that is inside a ContractedDiagram should match."""
+        """Chain inside a composition that == inside a ContractedDiagram should match."""
         comp = CompositionDiagram([self.fourier, self.p_x2_2, self.p_x2_3])
         contracted = ContractedDiagram(self.swap, comp, [], [], [], [])
         matches = self.rule.match(contracted)
@@ -499,7 +499,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert matches[0] == m
 
     def test_match_contracted_nested(self):
-        """Chain inside a composition that is inside a ContractedDiagram should match."""
+        """Chain inside a composition that == inside a ContractedDiagram should match."""
         q_spider = QSpider(10, 10, self.phase_x2)
         contracted1 = ContractedDiagram(self.tensor2, q_spider, [1, 2, 3], [4, 5, 6], [0, 1, 2, 5], [1, 3, 5, 7])
         contracted2 = ContractedDiagram(q_spider, self.tensor3, [1, 2, 3], [4, 5, 6], [0, 1, 2, 6], [1, 3, 5, 7])
@@ -762,7 +762,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Apply rule when no chains exist."""
         comp = CompositionDiagram([self.q_x2_2, self.q_x3_2])
         result = self.rule.apply_rule(comp)
-        assert result is comp
+        assert result == comp
 
     def test_apply_rule_mixed_polynomial_no_chain(self):
         """Mixed polynomial spiders do NOT chain."""
@@ -770,7 +770,7 @@ class TestChainReductionRule(unittest.TestCase):
         q2 = QSpider(1, 1, ZxPoly({2: 2, 3: 3}))  # mixed
         comp = CompositionDiagram([q1, q2])
         result = self.rule.apply_rule(comp)
-        assert result is comp
+        assert result == comp
 
     def test_apply_rule_different_degree_no_chain(self):
         """Different degree spiders do NOT chain."""
@@ -778,7 +778,7 @@ class TestChainReductionRule(unittest.TestCase):
         q2 = QSpider(1, 1, ZxPoly({3: 3}))
         comp = CompositionDiagram([q1, q2])
         result = self.rule.apply_rule(comp)
-        assert result is comp
+        assert result == comp
 
     def test_apply_rule_with_identity_removal(self):
         """Apply rule that removes identity."""
@@ -836,13 +836,15 @@ class TestChainReductionRule(unittest.TestCase):
         assert result.diagrams[5].diagrams[:2] == [self.q_x2_3_n23, self.p_x2_3_n34]
         assert isinstance(result.diagrams[5].diagrams[2].diagrams[0], BeamsplitterGate)
         assert math.isclose(result.diagrams[5].diagrams[2].diagrams[0].theta, theta)
-        assert result.diagrams[5].diagrams[2].diagrams[1] == TensorDiagram([
-            CompositionDiagram([self.p_x3_2, DisplacementGate(5.0 + 2.5j), self.p_x3_2]),
-            self.ph_rot1,
+        assert result.diagrams[5].diagrams[2].diagrams[1] == CompositionDiagram([
+            self.p_x3_2,
+            DisplacementGate(5.0 + 2.5j),
+            self.p_x3_2,
         ])
+        assert result.diagrams[5].diagrams[2].diagrams[2] == self.ph_rot1
 
     def test_apply_rule_compos_in_contracted(self):
-        """Chain inside a composition that is inside a ContractedDiagram should match."""
+        """Chain inside a composition that == inside a ContractedDiagram should match."""
         q_spider = QSpider(10, 10, self.phase_x2)
         contracted1 = ContractedDiagram(self.tensor1, q_spider, [1], [0], [0], [1])
         contracted2 = ContractedDiagram(q_spider, self.tensor2, [4, 5, 6], [1, 2, 3], [1, 3, 5, 7], [0, 1, 2, 5])

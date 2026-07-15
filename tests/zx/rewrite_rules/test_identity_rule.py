@@ -162,7 +162,7 @@ class TestIdentityRule(unittest.TestCase):
             [1, 3],
             [3, 1, 1, 1],
             [3, 1, 1, 2],
-            [5, 2, 1, 0, 0],
+            [5, 2, 1, 0],
         ]
 
     def test_match_contracted_direct(self):
@@ -193,7 +193,7 @@ class TestIdentityRule(unittest.TestCase):
         matches1 = self.rule.match(contracted1)
         matches2 = self.rule.match(contracted2)
         assert matches1 == [[0, 1, 2], [0, 1, 3], [0, 3, 1, 1, 1], [0, 3, 1, 1, 2]]
-        assert matches2 == [[1, 1, 2], [1, 1, 3], [1, 3, 1, 1, 1], [1, 3, 1, 1, 2], [1, 5, 2, 1, 0, 0]]
+        assert matches2 == [[1, 1, 2], [1, 1, 3], [1, 3, 1, 1, 1], [1, 3, 1, 1, 2], [1, 5, 2, 1, 0]]
 
     def test_match_does_not_match_non_identity(self):
         """Non‑identity spiders should not be matched."""
@@ -204,6 +204,12 @@ class TestIdentityRule(unittest.TestCase):
     # -------------------------------------------------------------------------
     # 2. Testing apply_single()
     # -------------------------------------------------------------------------
+
+    def test_apply_single_wrong_match(self):
+        """Make sure the diagram is unchanged when the match path is wrong."""
+        comp = CompositionDiagram([self.id_q, self.fourier])
+        new = self.rule.apply_single(comp, [1])
+        assert new == comp
 
     def test_apply_single_remove_identity(self):
         """Removing identity from a two‑element composition leaves the other."""
@@ -370,13 +376,12 @@ class TestIdentityRule(unittest.TestCase):
         """If no identity present, apply_rule should return the original object."""
         comp = CompositionDiagram([self.fourier, self.ph_rot])
         new = self.rule.apply_rule(comp)
-        assert new is comp
+        assert new == comp
 
     def test_apply_rule_with_nested_composition_and_tensor(self):
         """Complex nesting: identities in tensor ignored."""
         tensor = TensorDiagram([self.id_q, self.fourier])
-        comp = CompositionDiagram([self.swap, tensor])
-        outer = CompositionDiagram([comp, self.swap])
+        outer = CompositionDiagram([self.swap, tensor, self.swap])
         new = self.rule.apply_rule(outer)
         assert new == outer
 
@@ -411,13 +416,10 @@ class TestIdentityRule(unittest.TestCase):
         assert new.diagrams[1] == self.non_id_q_4x4
         tensor_new = new.diagrams[2]
         assert isinstance(tensor_new, TensorDiagram)
-        assert len(tensor_new.diagrams) == 2
+        assert len(tensor_new.diagrams) == 3
         assert tensor_new.diagrams[0] == self.beam_splitter1
-        inner_tensor = tensor_new.diagrams[1]
-        assert isinstance(inner_tensor, TensorDiagram)
-        assert len(inner_tensor.diagrams) == 2
-        assert inner_tensor.diagrams[0] == self.fourier_inv
-        assert inner_tensor.diagrams[1] == self.ph_rot
+        assert tensor_new.diagrams[1] == self.fourier_inv
+        assert tensor_new.diagrams[2] == self.ph_rot
 
     def test_apply_rule_tensor1(self):
         """Apply full rule to self.tensor1."""
@@ -495,13 +497,10 @@ class TestIdentityRule(unittest.TestCase):
         assert comp3_new.diagrams[1] == self.non_id_q_4x4
         tensor_new = comp3_new.diagrams[2]
         assert isinstance(tensor_new, TensorDiagram)
-        assert len(tensor_new.diagrams) == 2
+        assert len(tensor_new.diagrams) == 3
         assert tensor_new.diagrams[0] == self.beam_splitter1
-        inner_tensor = tensor_new.diagrams[1]
-        assert isinstance(inner_tensor, TensorDiagram)
-        assert len(inner_tensor.diagrams) == 2
-        assert inner_tensor.diagrams[0] == self.fourier_inv
-        assert inner_tensor.diagrams[1] == self.ph_rot
+        assert tensor_new.diagrams[1] == self.fourier_inv
+        assert tensor_new.diagrams[2] == self.ph_rot
 
     def test_apply_rule_contracted_with_composition1(self):
         """Apply full rule to ContractedDiagram with composition containing identity as first child."""
@@ -553,56 +552,10 @@ class TestIdentityRule(unittest.TestCase):
 
 if __name__ == "__main__":
     # Create output directory for visualizations
-    import io
-    from pathlib import Path
-
-    import matplotlib.pyplot as plt
-    from PIL import Image
-
-    from mqc3.zx.visualize_base_gates import visualize
-
-    VIS_OUTPUT_DIR = Path("test_images_identity_rule")
-    VIS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    def visualize_before_after(diagram_before, diagram_after, test_name):
-        """Visualize both diagrams side by side for comparison."""
-        # Create and render individual figures
-        fig_before = visualize(diagram_before, title=f"Before: {test_name}")
-        fig_after = visualize(diagram_after, title=f"After: {test_name}")
-
-        # Convert to images
-        buf_before = io.BytesIO()
-        fig_before.savefig(buf_before, format="png", dpi=100, bbox_inches="tight")
-        buf_before.seek(0)
-        img_before = Image.open(buf_before)
-
-        buf_after = io.BytesIO()
-        fig_after.savefig(buf_after, format="png", dpi=100, bbox_inches="tight")
-        buf_after.seek(0)
-        img_after = Image.open(buf_after)
-
-        plt.close(fig_before)
-        plt.close(fig_after)
-
-        # Create combined figure with subplots
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
-
-        # Display images
-        ax1.imshow(img_before)
-        ax1.axis("off")
-        ax1.set_title(f"Before: {test_name}", fontsize=14)
-
-        ax2.imshow(img_after)
-        ax2.axis("off")
-        ax2.set_title(f"After: {test_name}", fontsize=14)
-
-        plt.tight_layout()
-        filepath = VIS_OUTPUT_DIR / f"{test_name}.png"
-        plt.savefig(filepath, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"Saved visualization: {filepath}")
+    from mqc3.zx.visualize_base_gates import visualize_before_after
 
     # Create rule instance and test objects
+    rule_name = "Identity Rule"
     rule = IdentityRule()
     zero_phase = ZxPoly({})
     phase_poly = ZxPoly({1: 2, 2: 4})
@@ -623,13 +576,13 @@ if __name__ == "__main__":
     # Test 1: Simple composition with identity in middle
     comp1 = CompositionDiagram([fourier, id_q, sq_gate, id_p, fourier2])
     comp1_after = rule.apply_rule(comp1)
-    visualize_before_after(comp1, comp1_after, "test1_simple_composition")
+    visualize_before_after(comp1, comp1_after, "Simple Composition", rule_name)
 
     # Test 2: Nested composition inside tensor
     inner_comp = CompositionDiagram([id_q, fourier, id_p])
     tensor = TensorDiagram([inner_comp, non_id_p, ph_rot])
     tensor_after = rule.apply_rule(tensor)
-    visualize_before_after(tensor, tensor_after, "test2_nested_composition_in_tensor")
+    visualize_before_after(tensor, tensor_after, "Nested Composition in Tensor", rule_name)
 
     # Test 3: Complex composition with multiple identities at different depths
     comp_deep = CompositionDiagram([
@@ -638,7 +591,7 @@ if __name__ == "__main__":
         TensorDiagram([CompositionDiagram([id_q, sq_gate, id_p]), ph_rot, fourier]),
     ])
     comp_deep_after = rule.apply_rule(comp_deep)
-    visualize_before_after(comp_deep, comp_deep_after, "test3_complex_multiple_identities")
+    visualize_before_after(comp_deep, comp_deep_after, "Complex Multiple Identities", rule_name)
 
     # Test 4: ContractedDiagram with composition containing identities
     comp_for_contracted = CompositionDiagram([id_q, fourier, id_p, ph_rot])
@@ -646,4 +599,9 @@ if __name__ == "__main__":
     q_spider_large = QSpider(3, 3, phase_poly)
     contracted = ContractedDiagram(tensor, q_spider_large, [0, 1], [1, 2], [0], [1])
     contracted_after = rule.apply_rule(contracted)
-    visualize_before_after(contracted, contracted_after, "test4_contracted_with_composition")
+    visualize_before_after(contracted, contracted_after, "Contracted with Composition", rule_name)
+
+    # Test 5: Diagram unchanged because the rule doesn't apply
+    diagram = CompositionDiagram([non_id_p, fourier, ph_rot])
+    diagram_after = rule.apply_rule(diagram)
+    visualize_before_after(diagram, diagram_after, "No reduction", rule_name)

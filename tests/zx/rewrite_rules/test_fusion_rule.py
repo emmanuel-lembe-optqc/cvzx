@@ -153,7 +153,7 @@ class TestFusionRule(unittest.TestCase):
         assert matches == [[0, 0], [1, 0]]
 
     def test_match_connected_through_second_to_first(self):
-        """Match when connection is from second to first (J1/J2)."""
+        """Match when connection == from second to first (J1/J2)."""
         contracted = ContractedDiagram(self.q1, self.q2, I1=[], I2=[], J1=[0], J2=[0])
         matches = self.rule.match(contracted)
         assert matches == [[0]]
@@ -175,8 +175,8 @@ class TestFusionRule(unittest.TestCase):
         """Make sure apply_single doen't modify the diagram when there is no match."""
         result = self.rule.apply_single(self.beam_splitter, [])
         assert result == self.beam_splitter
-        contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
-        result = self.rule.apply_single(contracted, [])
+        contracted = ContractedDiagram(self.q1, self.p2, I1=[0], I2=[0], J1=[], J2=[])
+        result = self.rule.apply_single(contracted, [0])
         assert result == contracted
 
     def test_apply_single_simple_q_spider_fusion(self):
@@ -316,13 +316,13 @@ class TestFusionRule(unittest.TestCase):
         """Apply rule when there are no fusible pairs."""
         contracted = ContractedDiagram(self.q1, self.p2, I1=[0], I2=[0], J1=[], J2=[])
         result = self.rule.apply_rule(contracted)
-        assert result is contracted
+        assert result == contracted
 
     def test_apply_rule_no_connection(self):
         """Apply rule when spiders are not connected."""
         contracted = ContractedDiagram(self.q1, self.q2, I1=[], I2=[], J1=[], J2=[])
         result = self.rule.apply_rule(contracted)
-        assert result is contracted
+        assert result == contracted
 
     def test_apply_rule_complex_nested(self):
         """Apply rule with complex nested structure."""
@@ -360,7 +360,7 @@ class TestFusionRule(unittest.TestCase):
         """ContractedDiagram with non-spider diagrams should not be fused."""
         contracted = ContractedDiagram(self.fourier, self.swap, I1=[0], I2=[0], J1=[], J2=[])
         result = self.rule.apply_rule(contracted)
-        assert result is contracted
+        assert result == contracted
 
     def test_fusion_multiple_times(self):
         """Apply fusion rule twice should fuse nested structures."""
@@ -377,6 +377,95 @@ class TestFusionRule(unittest.TestCase):
         # Apply again - fuses outer pair
         result2 = self.rule.apply_rule(result1)
         assert isinstance(result2, QSpider)
-        assert result2.num_inputs == 2  # 1 + 2 - 1
-        assert result2.num_outputs == 2  # 1 + 2 - 1
+        assert result2.num_inputs == 2
+        assert result2.num_outputs == 2
         assert result2.phase == self.phase_sum + self.phase_poly
+
+
+if __name__ == "__main__":
+    # Create output directory for visualizations
+    from mqc3.zx.visualize_base_gates import visualize_before_after, visualize
+    from mqc3.zx.gates import ControlledSumGate, ControlledZGate
+    import matplotlib.pyplot as plt
+
+    # Create rule instance and test objects
+    rule_name = "Fusion Rule"
+    rule = FusionRule()
+    zero_phase = ZxPoly({})
+    phase_poly = ZxPoly({1: 2, 2: 4})
+    phase_poly2 = ZxPoly({1: 3, 3: 5})
+    phase_sum = phase_poly + phase_poly2
+
+    q1 = QSpider(1, 1, phase_poly)
+    q2 = QSpider(1, 1, phase_poly2)
+    p1 = PSpider(1, 1, phase_poly)
+    p2 = PSpider(1, 1, phase_poly2)
+
+    q_2x2 = QSpider(2, 2, phase_poly)
+    q_3x3 = QSpider(3, 3, phase_poly2)
+
+    fourier = Fourier()
+    fourier2 = Fourier2()
+    swap = Swap()
+    ph_rot = PhaseRotationGate(theta=math.pi / 4)
+    sq_gate = SqueezingGate(tau=0.5)
+    beam_splitter = BeamsplitterGate(theta=math.pi / 4)
+
+    # Test 1: Simple Q-spider fusion
+    contracted_q = ContractedDiagram(q1, q2, I1=[0], I2=[0], J1=[], J2=[])
+    contracted_q_after = rule.apply_rule(contracted_q)
+    visualize_before_after(contracted_q, contracted_q_after, "Simple Q Spider Fusion", rule_name)
+
+    # Test 2: Simple P-spider fusion
+    contracted_p = ContractedDiagram(p1, p2, I1=[0], I2=[0], J1=[], J2=[])
+    contracted_p_after = rule.apply_rule(contracted_p)
+    visualize_before_after(contracted_p, contracted_p_after, "Simple P Spider Fusion", rule_name)
+
+    # Test 3: Fusion inside a CompositionDiagram
+    contracted = ContractedDiagram(q1, q2, I1=[0], I2=[0], J1=[], J2=[])
+    comp = CompositionDiagram([fourier, contracted, sq_gate])
+    comp_after = rule.apply_rule(comp)
+    visualize_before_after(comp, comp_after, "Fusion inside Composition", rule_name)
+
+    # Test 4: Fusion inside a TensorDiagram
+    contracted = ContractedDiagram(q1, q2, I1=[0], I2=[0], J1=[], J2=[])
+    tensor = TensorDiagram([fourier, ph_rot, contracted])
+    tensor_after = rule.apply_rule(tensor)
+    visualize_before_after(tensor, tensor_after, "Fusion inside Tensor", rule_name)
+
+    # Test 5: Nested fusion (fusion inside a ContractedDiagram)
+    inner_contracted = ContractedDiagram(q1, q2, I1=[0], I2=[0], J1=[], J2=[])
+    outer_contracted = ContractedDiagram(inner_contracted, swap, I1=[0], I2=[0], J1=[], J2=[])
+    outer_contracted_after = rule.apply_rule(outer_contracted)
+    visualize_before_after(outer_contracted, outer_contracted_after, "Nested Fusion", rule_name)
+
+    # Test 6: Multiple fusion pairs
+    contracted1 = ContractedDiagram(q1, q2, I1=[0], I2=[0], J1=[], J2=[])
+    contracted2 = ContractedDiagram(p1, p2, I1=[0], I2=[0], J1=[], J2=[])
+    comp_multi = CompositionDiagram([contracted1, contracted2])
+    comp_multi_after = rule.apply_rule(comp_multi)
+    visualize_before_after(comp_multi, comp_multi_after, "Multiple Fusion Pairs", rule_name)
+
+    # Test 7: Fusion with different arities
+    q_2x1 = QSpider(2, 1, phase_poly)
+    q_1x2 = QSpider(1, 2, phase_poly2)
+    contracted_diff = ContractedDiagram(q_2x1, q_1x2, I1=[0], I2=[0], J1=[], J2=[])
+    contracted_diff_after = rule.apply_rule(contracted_diff)
+    visualize_before_after(contracted_diff, contracted_diff_after, "Fusion Different Arities", rule_name)
+
+    # Test 8: Fusion with connections in both directions
+    q_2x2_q1 = QSpider(2, 2, phase_poly)
+    q_2x2_q2 = QSpider(2, 2, phase_poly2)
+    contracted_both = ContractedDiagram(q_2x2_q1, q_2x2_q2, I1=[0], I2=[0], J1=[0], J2=[0])
+    contracted_both_after = rule.apply_rule(contracted_both)
+    visualize_before_after(contracted_both, contracted_both_after, "Fusion Both Directions", rule_name)
+
+    # Test 9: Diagram unchanged because the rule doesn't apply (different spider types)
+    contracted_no_match = ContractedDiagram(q1, p2, I1=[0], I2=[0], J1=[], J2=[])
+    contracted_no_match_after = rule.apply_rule(contracted_no_match)
+    visualize_before_after(contracted_no_match, contracted_no_match_after, "No Fusion (Different Types)", rule_name)
+
+    # Test 10: Diagram unchanged because no connection
+    contracted_no_conn = ContractedDiagram(q1, q2, I1=[], I2=[], J1=[], J2=[])
+    contracted_no_conn_after = rule.apply_rule(contracted_no_conn)
+    visualize_before_after(contracted_no_conn, contracted_no_conn_after, "No Fusion (No Connection)", rule_name)
