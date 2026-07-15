@@ -10,14 +10,17 @@ The visualizer uses matplotlib to draw diagrams in a way that respects
 the input/output wire ordering and connection indices.
 """
 
+import io
 import random as r
 import textwrap
 from copy import deepcopy
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import patches
+from PIL import Image
 
 from mqc3.zx.base_gates import (
     CompositionDiagram,
@@ -105,6 +108,7 @@ class VisualizerConfig:
         self.arrow_length = 2 * self.node_radius
         self.horizontal_spacing = self.node_radius * 2 + self.arrow_length * 2
         self.vertical_spacing = self.node_radius * self.vertical_factor
+        self.contraction_shift = 2 * (self.vertical_spacing - self.node_radius)
 
 
 class DiagramVisualizer:
@@ -158,6 +162,76 @@ class DiagramVisualizer:
         plt.tight_layout()
         return fig
 
+    def vertical_shift_in_contraction(  # noqa: C901
+        self,
+        diagram: Diagram,
+        through_tensor: bool = False,  # noqa: FBT001, FBT002
+        is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
+        radius: float | None = None,
+    ) -> float:
+        """Find the vertical shift corresponding to a diagram in a contracted diagram.
+
+        Parameters:
+        ----------
+        diagram : Diagram
+            Input diagram.
+        through_tensor : bool
+            True if the diagram contains a TensorDiagram. This variable is useful
+            when a diagram is a ContractedDiagram.
+        is_sub_tensor : bool
+            True if the diagram is a sub_diagram of a ContractDiagram. This allows
+            to resize the radius to compute properly the vertical shift.
+        radius : float
+            radius of the diagram.
+
+        Returns:
+        -------
+        float
+        """
+        if radius is None:
+            radius = self.config.node_radius
+        if isinstance(diagram, CompositionDiagram):
+            shift = 0
+            next_value = False
+            diagram_length = len(diagram.diagrams)
+            for sub_diag in diagram.diagrams:
+                sub_radius = 3 * radius / (2 * diagram_length + 1) if is_sub_tensor else radius
+                sub_shift, value = self.vertical_shift_in_contraction(
+                    sub_diag, through_tensor, is_sub_tensor, sub_radius
+                )
+                shift = max(sub_shift, shift)
+                next_value = next_value or value
+            return shift, next_value
+        if isinstance(diagram, TensorDiagram):
+            shift = 0
+            vertical_spacing = self.config.vertical_factor * radius
+            for sub_diag in diagram.diagrams:
+                if isinstance(sub_diag, (ProperDiagram, CompositionDiagram)):
+                    shift += vertical_spacing
+                elif isinstance(sub_diag, (TensorDiagram, ContractedDiagram)):
+                    sub_shift, _ = self.vertical_shift_in_contraction(sub_diag, True, is_sub_tensor, sub_radius)  # noqa: FBT003
+                    shift += sub_shift
+            shift -= vertical_spacing
+            return shift, True
+        if isinstance(diagram, ContractedDiagram):
+            shift1, through_tensor1 = self.vertical_shift_in_contraction(
+                diagram.first, through_tensor, is_sub_tensor=True, radius=radius
+            )
+            if shift1 == 0:
+                shift1 = self.config.vertical_spacing
+            elif through_tensor1:
+                shift1 += self.config.vertical_spacing
+            shift2, through_tensor2 = self.vertical_shift_in_contraction(
+                diagram.second, through_tensor, is_sub_tensor=True, radius=radius
+            )
+            if shift2 == 0:
+                shift2 = self.config.vertical_spacing
+            elif through_tensor2:
+                shift2 += self.config.vertical_spacing
+            through_tensor = through_tensor1 or through_tensor2
+            return shift1 + shift2 + self.config.contraction_shift - self.config.vertical_spacing, through_tensor
+        return 0, through_tensor
+
     def _draw_proper_diagram(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0915, PLR0917
         self,
         ax: plt.Axes,
@@ -168,8 +242,8 @@ class DiagramVisualizer:
         sub_comp_idx: int | None = None,
         input_positions: list | None = None,
         radius: float | None = None,
-        kept_inputs: list | None = None,
-        kept_outputs: list | None = None,
+        draw_kept_inputs: list | None = None,
+        draw_kept_outputs: list | None = None,
     ) -> tuple[list[float], list[float] | None, float]:
         """Draw a proper diagram (single node).
 
@@ -201,12 +275,12 @@ class DiagramVisualizer:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
-        kept_inputs: list | None
-            List of indices of input wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
-        kept_outputs: list | None
-            List of indices of output wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
+        draw_kept_inputs: list | None
+            List of indices of input wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
+        draw_kept_outputs: list | None
+            List of indices of output wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -273,10 +347,10 @@ class DiagramVisualizer:
                 comp_idx is not None and comp_idx != -1
             ) or ((comp_idx == -1 or comp_idx is None) and (sub_comp_idx is not None and sub_comp_idx != -1)):
                 draw_out_wires = False
-            if kept_inputs is None:
-                kept_inputs = range(diagram.num_inputs)
-            if kept_outputs is None:
-                kept_outputs = range(diagram.num_outputs)
+            if draw_kept_inputs is None:
+                draw_kept_inputs = range(diagram.num_inputs)
+            if draw_kept_outputs is None:
+                draw_kept_outputs = range(diagram.num_outputs)
             # Draw input wires (left side)
             if draw_in_wires:
                 if input_positions is None:
@@ -284,18 +358,18 @@ class DiagramVisualizer:
                     # or a single proper diagram
                     input_positions = init_input_positions
                 for i in range(diagram.num_inputs):
-                    if i in kept_inputs:
+                    if i in draw_kept_inputs:
                         if sub_comp_idx is not None:
                             input_pos = (
                                 input_positions[i]
                                 if (sub_comp_idx == 0 and (comp_idx is None or comp_idx == 0))
-                                else input_positions[kept_inputs.index(i)]
+                                else input_positions[draw_kept_inputs.index(i)]
                             )
                         else:
                             input_pos = (
                                 input_positions[i]
                                 if (comp_idx is None or comp_idx == 0)
-                                else input_positions[kept_inputs.index(i)]
+                                else input_positions[draw_kept_inputs.index(i)]
                             )
                         input_i = patches.FancyArrowPatch(
                             input_pos,
@@ -311,7 +385,7 @@ class DiagramVisualizer:
             output_positions = [(pivot[0], pivot[1] + y_offset_out[i]) for i in range(diagram.num_outputs)]
             if draw_out_wires:
                 for i in range(diagram.num_outputs):
-                    if i in kept_outputs:
+                    if i in draw_kept_outputs:
                         output_i = patches.FancyArrowPatch(
                             output_positions[i],
                             (pivot[0] - arrow_length, pivot[1] + y_offset_out[i]),
@@ -324,11 +398,11 @@ class DiagramVisualizer:
                 ax.plot()
         elif isinstance(diagram, Swap):
             output_positions, init_input_positions, radius = self._draw_swap(
-                ax, x, y, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
+                ax, x, y, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs
             )
         elif isinstance(diagram, (Fourier, FourierInv, Fourier2)):
             output_positions, init_input_positions, radius = self._draw_fourier(
-                ax, x, y, diagram, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
+                ax, x, y, diagram, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs
             )
         return output_positions, init_input_positions, radius
 
@@ -343,8 +417,8 @@ class DiagramVisualizer:
         is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
-        kept_inputs: list | None = None,
-        kept_outputs: list | None = None,
+        draw_kept_inputs: list | None = None,
+        draw_kept_outputs: list | None = None,
     ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a composition diagram.
 
@@ -379,12 +453,12 @@ class DiagramVisualizer:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
-        kept_inputs: list | None
-            List of indices of input wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
-        kept_outputs: list | None
-            List of indices of output wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
+        draw_kept_inputs: list | None
+            List of indices of input wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
+        draw_kept_outputs: list | None
+            List of indices of output wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -404,9 +478,9 @@ class DiagramVisualizer:
 
         if radius is None:
             radius = self.config.node_radius
-        if kept_inputs is None:
-            kept_inputs = range(diagram.num_inputs)
-            kept_outputs = range(diagram.num_outputs)
+        if draw_kept_inputs is None:
+            draw_kept_inputs = range(diagram.num_inputs)
+            draw_kept_outputs = range(diagram.num_outputs)
         output_radius = radius
         # Draw each sub-diagram at its position
         # is_sub_tensor is True means that we are inside a composition block
@@ -437,12 +511,12 @@ class DiagramVisualizer:
             else:
                 comp_idx = idx
             if i == 0:
-                sent_kept_inputs = kept_inputs
+                sent_kept_inputs = draw_kept_inputs
                 sent_kept_outputs = range(sub_diagram.num_outputs)
             elif i == diagram_length - 1:
                 input_pos = self._reorder_positions(diagram.connectivity[i - 1], output_positions)
                 sent_kept_inputs = range(sub_diagram.num_inputs)
-                sent_kept_outputs = kept_outputs
+                sent_kept_outputs = draw_kept_outputs
                 if is_sub_tensor:
                     sub_comp_idx = -1
                 else:
@@ -461,8 +535,8 @@ class DiagramVisualizer:
                 is_sub_tensor=is_sub_tensor,
                 input_positions=input_pos,
                 radius=sub_radius,
-                kept_inputs=sent_kept_inputs,
-                kept_outputs=sent_kept_outputs,
+                draw_kept_inputs=sent_kept_inputs,
+                draw_kept_outputs=sent_kept_outputs,
             )
             # The input positions of a composition diagram are
             # the input positions of its first sub-diagram
@@ -482,8 +556,8 @@ class DiagramVisualizer:
         is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
-        kept_inputs: list | None = None,
-        kept_outputs: list | None = None,
+        draw_kept_inputs: list | None = None,
+        draw_kept_outputs: list | None = None,
     ) -> tuple[list[float], list[float] | None, list[float]]:
         """Draw a tensor diagram (parallel).
 
@@ -519,12 +593,12 @@ class DiagramVisualizer:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
-        kept_inputs: list | None
-            List of indices of input wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
-        kept_outputs: list | None
-            List of indices of output wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
+        draw_kept_inputs: list | None
+            List of indices of input wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
+        draw_kept_outputs: list | None
+            List of indices of output wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -556,13 +630,13 @@ class DiagramVisualizer:
         # input_positions
         if input_positions is not None:
             input_positions.reverse()
-        if kept_inputs is not None:
+        if draw_kept_inputs is not None:
             num_inputs = diagram.num_inputs
-            kept_inputs = [num_inputs - i - 1 for i in kept_inputs]
-            kept_inputs.sort()
+            draw_kept_inputs = [num_inputs - i - 1 for i in draw_kept_inputs]
+            draw_kept_inputs.sort()
             num_outputs = diagram.num_outputs
-            kept_outputs = [num_outputs - i - 1 for i in kept_outputs]
-            kept_outputs.sort()
+            draw_kept_outputs = [num_outputs - i - 1 for i in draw_kept_outputs]
+            draw_kept_outputs.sort()
         contract_shift = 0
         h = vertical_spacing
         for sub_diagram in diagram.diagrams:
@@ -579,14 +653,14 @@ class DiagramVisualizer:
                 sub_input_positions = input_positions[inp_ind : inp_ind + sub_diagram.num_inputs]
                 # We must reverse back sub_input_positions
                 sub_input_positions.reverse()
-            if kept_inputs is not None:
+            if draw_kept_inputs is not None:
                 sub_kept_inputs = []
                 for ind in range(inp_ind, inp_ind + sub_diagram.num_inputs):
-                    if ind in kept_inputs:
+                    if ind in draw_kept_inputs:
                         sub_kept_inputs.append(ind - inp_ind)
                 sub_kept_outputs = []
                 for ind in range(out_ind, out_ind + sub_diagram.num_outputs):
-                    if ind in kept_outputs:
+                    if ind in draw_kept_outputs:
                         sub_kept_outputs.append(ind - out_ind)
                 # We must reverse back the lits above
                 sub_kept_inputs = [sub_diagram.num_inputs - p - 1 for p in sub_kept_inputs]
@@ -604,12 +678,12 @@ class DiagramVisualizer:
                 is_sub_tensor=is_sub_tensor,
                 input_positions=sub_input_positions,
                 radius=radius,
-                kept_outputs=sub_kept_outputs,
-                kept_inputs=sub_kept_inputs,
+                draw_kept_outputs=sub_kept_outputs,
+                draw_kept_inputs=sub_kept_inputs,
             )
             if isinstance(sub_diagram, ContractedDiagram):
-                contract_shift = sub_radius[1]
-                sub_radius = sub_radius[0]
+                contract_shift, _ = self.vertical_shift_in_contraction(sub_diagram)
+                contract_shift += 2 * self.config.node_radius
             else:
                 contract_shift = 0
             output_positions = output_pos + output_positions
@@ -630,6 +704,8 @@ class DiagramVisualizer:
         is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
+        draw_kept_inputs: list | None = None,
+        draw_kept_outputs: list | None = None,
     ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a contracted diagram (feedback connections).
 
@@ -673,12 +749,12 @@ class DiagramVisualizer:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
-        kept_inputs: list | None
-            List of indices of input wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
-        kept_outputs: list | None
-            List of indices of output wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
+        draw_kept_inputs: list | None
+            List of indices of input wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
+        draw_kept_outputs: list | None
+            List of indices of output wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -698,24 +774,31 @@ class DiagramVisualizer:
         if radius is None:
             radius = self.config.node_radius
         # Draw second diagram (D2)
-        is_sub_tensor = isinstance(diagram.second, CompositionDiagram)
+        # We draw from bottom to top
         num_d2_out_wires = len(diagram.kept_second_outputs) + len(diagram.J2)
         num_d2_input_wires = len(diagram.kept_second_inputs) + len(diagram.I2)
         draw_kept_second_inputs = [num_d2_input_wires - i - 1 for i in diagram.kept_second_inputs]
         draw_kept_second_inputs.sort()
         draw_kept_second_outputs = [num_d2_out_wires - i - 1 for i in diagram.kept_second_outputs]
         draw_kept_second_outputs.sort()
+        # We take into account draw_kept_inputs and draw_kept_outputs while drawing
+        # the diagram D2
+        if draw_kept_inputs is not None:
+            num_sec_inputs = len(draw_kept_second_inputs)
+            for elt in range(len(draw_kept_second_inputs) - 1, -1, -1):
+                if elt not in draw_kept_inputs:
+                    draw_kept_second_inputs.pop(elt)
+        if draw_kept_outputs is not None:
+            num_sec_outputs = len(draw_kept_second_outputs)
+            for elt in range(len(draw_kept_second_outputs) - 1, -1, -1):
+                if elt not in draw_kept_outputs:
+                    draw_kept_second_outputs.pop(elt)
         # We do not need to reverse input_positions like in draw_tensor because
-        # We draw from bottom to top
+        is_sub_tensor = isinstance(diagram.second, CompositionDiagram)
         sec_in_positions = input_positions[: len(draw_kept_second_inputs)] if input_positions is not None else None
-        y_shift1 = 0
-        y_shift2 = 0
-        if isinstance(diagram.second, TensorDiagram):
-            y_shift2 += (len(diagram.second.diagrams) - 1) * (self.config.vertical_spacing)
-        if isinstance(diagram.first, TensorDiagram):
-            y_shift1 += (len(diagram.first.diagrams) - 1) * (self.config.vertical_spacing)
+        first_shift, _ = self.vertical_shift_in_contraction(diagram.first, is_sub_tensor=True)
         spacing = 2 * self.config.vertical_spacing
-        y2 = y - spacing - y_shift1
+        y2 = y - spacing - first_shift
         x2 = x
         output_positions_2, input_positions_2, output_radius_2 = self._draw_sub_diagram(
             ax,
@@ -727,12 +810,11 @@ class DiagramVisualizer:
             is_sub_tensor=is_sub_tensor,
             input_positions=sec_in_positions,
             radius=radius,
-            kept_inputs=draw_kept_second_inputs,
-            kept_outputs=draw_kept_second_outputs,
+            draw_kept_inputs=draw_kept_second_inputs,
+            draw_kept_outputs=draw_kept_second_outputs,
         )
 
         # Draw first diagram (D1)
-        is_sub_tensor = isinstance(diagram.first, CompositionDiagram)
         num_d1_out_wires = len(diagram.kept_first_outputs) + len(diagram.I1)
         num_d1_input_wires = len(diagram.kept_first_inputs) + len(diagram.J1)
         # Wires are drawn from bottom to top
@@ -740,6 +822,17 @@ class DiagramVisualizer:
         draw_kept_first_inputs.sort()
         draw_kept_first_outputs = [num_d1_out_wires - i - 1 for i in diagram.kept_first_outputs]
         draw_kept_first_outputs.sort()
+        # We take into account draw_kept_inputs and draw_kept_outputs while drawing
+        # the diagram D1
+        if draw_kept_inputs is not None:
+            for elt in range(len(draw_kept_first_inputs) - 1, -1, -1):
+                if elt + num_sec_inputs not in draw_kept_inputs:
+                    draw_kept_first_inputs.pop(elt)
+        if draw_kept_outputs is not None:
+            for elt in range(len(draw_kept_first_outputs) - 1, -1, -1):
+                if elt + num_sec_outputs not in draw_kept_outputs:
+                    draw_kept_first_outputs.pop(elt)
+        is_sub_tensor = isinstance(diagram.first, CompositionDiagram)
         fir_in_positions = input_positions[len(draw_kept_second_inputs) :] if input_positions is not None else None
         x1, y1 = x, y
         output_positions_1, input_positions_1, output_radius_1 = self._draw_sub_diagram(
@@ -752,9 +845,10 @@ class DiagramVisualizer:
             is_sub_tensor=is_sub_tensor,
             input_positions=fir_in_positions,
             radius=radius,
-            kept_inputs=draw_kept_first_inputs,
-            kept_outputs=draw_kept_first_outputs,
+            draw_kept_inputs=draw_kept_first_inputs,
+            draw_kept_outputs=draw_kept_first_outputs,
         )
+
         color_in = self.config.colors["contraction_in"]
         color_out = self.config.colors["contraction_out"]
         if isinstance(output_radius_2, (int, float)):
@@ -767,7 +861,7 @@ class DiagramVisualizer:
         J_dict = {diagram.J2[i]: diagram.J1[i] for i in range(len(diagram.J1))}  # noqa: N806
         I_dict = {diagram.I1[i]: diagram.I2[i] for i in range(len(diagram.I2))}  # noqa: N806
         # Let's compute the distance between D1 and D2
-        box_dist = spacing - 2 * radius
+        box_dist = self.config.contraction_shift
         # Draw feedback connections (J2 → J1)
         # J2: indices of outputs from second diagram
         # J1: indices of inputs from first diagram
@@ -856,9 +950,7 @@ class DiagramVisualizer:
                 ax.plot(
                     [fir_point_i[0] + x_offset_1_i[i], fir_point_i[0] + x_offset_1_i[i]],
                     [
-                        y1
-                        - self.config.vertical_spacing * (len(first_diagrams) - 1)
-                        - output_radius_1[-1] * (1 + padding_coef * padding),
+                        y1 - first_shift - output_radius_1[-1] * (1 + padding_coef * padding),
                         fir_point_i[1],
                     ],
                     linewidth=self.config.wire_width,
@@ -953,9 +1045,7 @@ class DiagramVisualizer:
                     (fir_point_i[0] - x_offset_1_i[i], fir_point_i[1]),
                     (
                         fir_point_i[0] - x_offset_1_i[i],
-                        y1
-                        - self.config.vertical_spacing * (len(first_diagrams) - 1)
-                        - output_radius_1[-1] * (1 + padding_coef * padding),
+                        y1 - first_shift - output_radius_1[-1] * (1 + padding_coef * padding),
                     ),
                     arrowstyle="->",
                     ec=color_out,
@@ -964,9 +1054,7 @@ class DiagramVisualizer:
                 )
                 I1_points[i] = (
                     fir_point_i[0] - x_offset_1_i[i],
-                    y1
-                    - self.config.vertical_spacing * (len(first_diagrams) - 1)
-                    - output_radius_1[-1] * (1 + padding_coef * padding),
+                    y1 - first_shift - output_radius_1[-1] * (1 + padding_coef * padding),
                 )
                 ax.add_patch(fir_arrow_i_1)
             I1_info[j] = (sub_I1, sub_I1_dict, I1_points)
@@ -1058,12 +1146,20 @@ class DiagramVisualizer:
                 )
             k += sub_diagram.num_inputs
         # We take outputs from bottom to top
+        draw_kept_second_inputs = [num_d2_input_wires - i - 1 for i in diagram.kept_second_inputs]
+        draw_kept_second_inputs.sort()
+        draw_kept_second_outputs = [num_d2_out_wires - i - 1 for i in diagram.kept_second_outputs]
+        draw_kept_second_outputs.sort()
+        draw_kept_first_inputs = [num_d1_input_wires - i - 1 for i in diagram.kept_first_inputs]
+        draw_kept_first_inputs.sort()
+        draw_kept_first_outputs = [num_d1_out_wires - i - 1 for i in diagram.kept_first_outputs]
+        draw_kept_first_outputs.sort()
         output_positions = [output_positions_2[i] for i in draw_kept_second_outputs]
         output_positions += [output_positions_1[i] for i in draw_kept_first_outputs]
         # We also return the initial input positions
         init_input_positions = [input_positions_2[i] for i in draw_kept_second_inputs]
         init_input_positions += [input_positions_1[i] for i in draw_kept_first_inputs]
-        return output_positions, init_input_positions, (radius, y_shift1 + y_shift2 + 1.5 * spacing)
+        return output_positions, init_input_positions, radius
 
     def _draw_sub_diagram(  # noqa: PLR0913, PLR0917
         self,
@@ -1076,8 +1172,8 @@ class DiagramVisualizer:
         is_sub_tensor: bool = False,  # noqa: FBT001, FBT002
         input_positions: list | None = None,
         radius: float | None = None,
-        kept_inputs: list | None = None,
-        kept_outputs: list | None = None,
+        draw_kept_inputs: list | None = None,
+        draw_kept_outputs: list | None = None,
     ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a sub-diagram at specified coordinates and return port positions.
 
@@ -1112,12 +1208,12 @@ class DiagramVisualizer:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
-        kept_inputs: list | None
-            List of indices of input wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
-        kept_outputs: list | None
-            List of indices of output wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
+        draw_kept_inputs: list | None
+            List of indices of input wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
+        draw_kept_outputs: list | None
+            List of indices of output wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -1135,7 +1231,7 @@ class DiagramVisualizer:
             radius = self.config.node_radius
         if isinstance(diagram, (ProperDiagram, CompactDiagram)):
             return self._draw_proper_diagram(
-                ax, diagram, x, y, comp_idx, sub_comp_idx, input_positions, radius, kept_inputs, kept_outputs
+                ax, diagram, x, y, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs
             )
         if isinstance(diagram, CompositionDiagram):
             return self._draw_composition(
@@ -1148,8 +1244,8 @@ class DiagramVisualizer:
                 is_sub_tensor,
                 input_positions,
                 radius,
-                kept_inputs,
-                kept_outputs,
+                draw_kept_inputs,
+                draw_kept_outputs,
             )
         if isinstance(diagram, TensorDiagram):
             return self._draw_tensor(
@@ -1162,8 +1258,8 @@ class DiagramVisualizer:
                 is_sub_tensor,
                 input_positions,
                 radius,
-                kept_inputs,
-                kept_outputs,
+                draw_kept_inputs,
+                draw_kept_outputs,
             )
         if isinstance(diagram, ContractedDiagram):
             return self._draw_contracted(
@@ -1176,6 +1272,8 @@ class DiagramVisualizer:
                 is_sub_tensor,
                 input_positions,
                 radius,
+                draw_kept_inputs,
+                draw_kept_outputs,
             )
         return [], [], radius
 
@@ -1188,8 +1286,8 @@ class DiagramVisualizer:
         sub_comp_idx: int | None = None,
         input_positions: list | None = None,
         radius: float | None = None,
-        kept_inputs: list | None = None,
-        kept_outputs: list | None = None,
+        draw_kept_inputs: list | None = None,
+        draw_kept_outputs: list | None = None,
     ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a swap node.
 
@@ -1221,12 +1319,12 @@ class DiagramVisualizer:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
-        kept_inputs: list | None
-            List of indices of input wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
-        kept_outputs: list | None
-            List of indices of output wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
+        draw_kept_inputs: list | None
+            List of indices of input wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
+        draw_kept_outputs: list | None
+            List of indices of output wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -1254,10 +1352,10 @@ class DiagramVisualizer:
             comp_idx is not None and comp_idx != -1
         ) or ((comp_idx == -1 or comp_idx is None) and (sub_comp_idx is not None and sub_comp_idx != -1)):
             draw_out_wires = False
-        if kept_inputs is None:
-            kept_inputs = [0, 1]
-        if kept_outputs is None:
-            kept_outputs = [0, 1]
+        if draw_kept_inputs is None:
+            draw_kept_inputs = [0, 1]
+        if draw_kept_outputs is None:
+            draw_kept_outputs = [0, 1]
         # Draw inputs arrows
         init_input_positions = [
             (x + radius + arrow_length, y - radius),
@@ -1268,7 +1366,7 @@ class DiagramVisualizer:
                 # input_positions is empty only for the first element of a composition
                 # or a single Swap diagram
                 input_positions = init_input_positions
-            if 0 in kept_inputs:
+            if 0 in draw_kept_inputs:
                 input1 = patches.FancyArrowPatch(
                     input_positions[0],
                     (x + radius, y - radius),
@@ -1278,7 +1376,7 @@ class DiagramVisualizer:
                     linewidth=self.config.wire_width,
                 )
                 ax.add_patch(input1)
-            if 1 in kept_inputs:
+            if 1 in draw_kept_inputs:
                 input2 = patches.FancyArrowPatch(
                     input_positions[1],
                     (x + radius, y + radius),
@@ -1296,7 +1394,7 @@ class DiagramVisualizer:
             (x - radius, y + radius),
         ]
         if draw_out_wires:
-            if 0 in kept_outputs:
+            if 0 in draw_kept_outputs:
                 output1 = patches.FancyArrowPatch(
                     output_positions[0],
                     (x - radius - arrow_length, y - radius),
@@ -1306,7 +1404,7 @@ class DiagramVisualizer:
                     linewidth=self.config.wire_width,
                 )
                 ax.add_patch(output1)
-            if 1 in kept_outputs:
+            if 1 in draw_kept_outputs:
                 output2 = patches.FancyArrowPatch(
                     output_positions[1],
                     (x - radius - arrow_length, y + radius),
@@ -1328,8 +1426,8 @@ class DiagramVisualizer:
         sub_comp_idx: int | None = None,
         input_positions: list | None = None,
         radius: float | None = None,
-        kept_inputs: list | None = None,
-        kept_outputs: list | None = None,
+        draw_kept_inputs: list | None = None,
+        draw_kept_outputs: list | None = None,
     ) -> tuple[list[float], list[float] | None, float | list[float]]:
         """Draw a Fourier node.
 
@@ -1361,12 +1459,12 @@ class DiagramVisualizer:
             arrow_length, horizontal span and the horizontal spacing. So it is
             the unit variable of the diagram. It is initialized as None because
             one can not have access to self in argument definition.
-        kept_inputs: list | None
-            List of indices of input wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
-        kept_outputs: list | None
-            List of indices of output wires not involved in a partial trace. This
-            parameter is computed inside _draw_contracted_diagram.
+        draw_kept_inputs: list | None
+            List of indices of input wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
+        draw_kept_outputs: list | None
+            List of indices of output wires from bottom to top not involved in a
+            partial trace. This parameter is computed inside _draw_contracted_diagram.
 
         Returns:
         -------
@@ -1412,16 +1510,16 @@ class DiagramVisualizer:
             comp_idx is not None and comp_idx != -1
         ) or ((comp_idx == -1 or comp_idx is None) and (sub_comp_idx is not None and sub_comp_idx != -1)):
             draw_out_wires = False
-        if kept_inputs is None:
-            kept_inputs = [0]
-        if kept_outputs is None:
-            kept_outputs = [0]
+        if draw_kept_inputs is None:
+            draw_kept_inputs = [0]
+        if draw_kept_outputs is None:
+            draw_kept_outputs = [0]
         # Draw inputs wires
         init_input_positions = [(x + radius + arrow_length, y)]
         if draw_in_wires:
             if input_positions is None:
                 input_positions = init_input_positions
-            if 0 in kept_inputs:
+            if 0 in draw_kept_inputs:
                 input1 = patches.FancyArrowPatch(
                     input_positions[0],
                     (x + radius, y),
@@ -1433,7 +1531,7 @@ class DiagramVisualizer:
                 ax.add_patch(input1)
         # Draw output wires
         output_positions = [(x - radius, y)]
-        if draw_out_wires and 0 in kept_outputs:
+        if draw_out_wires and 0 in draw_kept_outputs:
             output1 = patches.FancyArrowPatch(
                 output_positions[0],
                 (x - radius - arrow_length, y),
@@ -1548,6 +1646,62 @@ class DiagramVisualizer:
                 Reorder positions
         """
         return [positions[connectivity[i]] for i in range(len(positions))]
+
+
+# =============================================================================
+# Helper functions
+# =============================================================================
+
+
+def visualize_before_after(diagram_before: Diagram, diagram_after: Diagram, test_name: str, rule_name: str) -> None:
+    """Visualize diagrams before and after applying a rewriting rule.
+
+    Parameters:
+    ----------
+    diagram_before : Diagram
+        Diagram before applying the identity rule.
+    diagram_after : Diagram
+        Diagram after applying the identity rule.
+    test_name : str
+        Name of the test.
+    rule_name : str
+        Name of the rewriting rule used.
+    """
+    VIS_OUTPUT_DIR = Path(f"test_images_{rule_name}")  # noqa: N806
+    VIS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    # Create and render individual figures
+    fig_before = visualize(diagram_before, title=f"Before: {test_name}")
+    fig_after = visualize(diagram_after, title=f"After: {test_name}")
+
+    # Convert to images
+    buf_before = io.BytesIO()
+    fig_before.savefig(buf_before, format="png", dpi=100, bbox_inches="tight")
+    buf_before.seek(0)
+    img_before = Image.open(buf_before)
+
+    buf_after = io.BytesIO()
+    fig_after.savefig(buf_after, format="png", dpi=100, bbox_inches="tight")
+    buf_after.seek(0)
+    img_after = Image.open(buf_after)
+
+    plt.close(fig_before)
+    plt.close(fig_after)
+
+    # Create combined figure with subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+
+    # Display images
+    ax1.imshow(img_before)
+    ax1.axis("off")
+    ax1.set_title(f"Before {rule_name}: {test_name}", fontsize=14)
+    ax2.imshow(img_after)
+    ax2.axis("off")
+    ax2.set_title(f"After {rule_name}: {test_name}", fontsize=14)
+
+    plt.tight_layout()
+    filepath = VIS_OUTPUT_DIR / f"{test_name}.png"
+    plt.savefig(filepath, dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
 
 def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None = None) -> plt.Figure:
