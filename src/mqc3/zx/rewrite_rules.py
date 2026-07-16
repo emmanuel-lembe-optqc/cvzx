@@ -37,7 +37,7 @@ class RewriteRule:
         """Find all matches of the rule pattern in the diagram."""
         raise NotImplementedError
 
-    def apply_single(self, diagram: Diagram, match: tuple) -> Diagram:
+    def apply_single(self, diagram: Diagram, match: list | dict) -> Diagram:
         """Apply the rule to a specific match."""
         raise NotImplementedError
 
@@ -113,6 +113,137 @@ class RewriteRule:
                 )
 
         return diagram
+
+    def _replace_at_path(self, diagram: Diagram, path: list[int], replacement: Diagram) -> Diagram:
+        """Replace the diagram at the given path with replacement.
+
+        Parameters:
+        ----------
+        diagram : Diagram
+            The diagram to modify.
+        path : list[int]
+            Path to the location where to replace the current ContractedDiagram by the
+            reduced form.
+        replacement: Diagram
+            Diagram reduced after applying the fusion rule. It must replace
+            its former version.
+
+        Returns:
+        -------
+        Diagram
+            New diagram with the identity spiders in a contracted diagram fused.
+
+        Raises:
+        ------
+        ValueError: if the input path is not coherent.
+        """
+        if len(path) == 0:
+            return replacement
+
+        idx = path[0]
+        remaining_path = path[1:]
+
+        if isinstance(diagram, CompositionDiagram):
+            diagrams = list(diagram.diagrams)
+            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
+            return CompositionDiagram(diagrams)
+
+        if isinstance(diagram, TensorDiagram):
+            diagrams = list(diagram.diagrams)
+            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
+            return TensorDiagram(diagrams)
+
+        if isinstance(diagram, ContractedDiagram):
+            if idx == 0:
+                new_first = self._replace_at_path(diagram.first, remaining_path, replacement)
+                result = ContractedDiagram(
+                    first=new_first,
+                    second=diagram.second,
+                    I1=diagram.I1,
+                    I2=diagram.I2,
+                    J1=diagram.J1,
+                    J2=diagram.J2,
+                )
+            elif idx == 1:
+                new_second = self._replace_at_path(diagram.second, remaining_path, replacement)
+                result = ContractedDiagram(
+                    first=diagram.first,
+                    second=new_second,
+                    I1=diagram.I1,
+                    I2=diagram.I2,
+                    J1=diagram.J1,
+                    J2=diagram.J2,
+                )
+            elif idx == -1:
+                result = self._replace_at_path(diagram, remaining_path, replacement)
+            else:
+                msg = "The input path is not coherent."
+                raise ValueError(msg)
+            return result
+
+        return diagram
+
+    def _group_by_depth(self, matches: list) -> dict[int, list]:
+        """Group matches by depth (length of the path).
+
+        Parameters:
+        ----------
+        matches : list
+            list of paths from match(), it can be a dictionary when there are
+            more information that the path to register.
+
+        Returns:
+        -------
+        dict[int, list[list[int]]]
+            Dictionary mapping depth to list of paths.
+        """
+        groups = {}
+        for match in matches:
+            depth = len(match) if isinstance(match, list) else len(match["path"])
+            if depth not in groups:
+                groups[depth] = []
+            groups[depth].append(match)
+        return groups
+
+    def apply_rule(self, diagram: Diagram) -> Diagram:
+        """Apply the rule to the input diagram.
+
+        Parameters:
+        ----------
+        diagram : Diagram
+            The diagram to modify.
+
+        Returns:
+        -------
+        Diagram
+            New diagram after applying the rule if applicable, or the original
+            diagram if not.
+        """
+        diagram = self.flatten_composition(diagram)
+        result = diagram
+        matches = self.match(diagram)
+        if not matches:
+            return diagram
+
+        # Group matches by depth
+        groups = self._group_by_depth(matches)
+
+        result = diagram
+
+        # Process from deepest to shallowest
+        first_match = matches[0]
+        elt = -1 if isinstance(first_match, list) else "start"
+        for depth in sorted(groups.keys(), reverse=True):
+            matches = groups[depth]
+
+            # Sort by last index in descending order
+            # This ensures removing higher indices doesn't affect lower ones
+            matches.sort(key=operator.itemgetter(elt), reverse=True)
+
+            for path in matches:
+                result = self.apply_single(result, path)
+
+        return result
 
 
 class IdentityRule(RewriteRule):
@@ -222,157 +353,7 @@ class IdentityRule(RewriteRule):
             new_parent = diagrams[0] if len(diagrams) == 1 else CompositionDiagram(diagrams)
 
             # Reconstruct the diagram along the path
-            return self._rebuild_diagram(diagram, parent_path, new_parent)
-        return diagram
-
-    def apply_rule(self, diagram: Diagram) -> Diagram:
-        """Apply the identity rule to the input diagram.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-
-        Returns:
-        -------
-        Diagram
-            New diagram with the identity spiders removed if applicable,
-            or the original diagram if not.
-        """
-        diagram = self.flatten_composition(diagram)
-        result = diagram
-        matches = self.match(diagram)
-        if not matches:
-            return diagram
-
-        # Group matches by depth
-        groups = self._group_by_depth(matches)
-
-        result = diagram
-
-        # Process from deepest to shallowest
-        for depth in sorted(groups.keys(), reverse=True):
-            paths = groups[depth]
-
-            # Sort by last index in descending order
-            # This ensures removing higher indices doesn't affect lower ones
-            paths.sort(key=operator.itemgetter(-1), reverse=True)
-
-            for path in paths:
-                result = self.apply_single(result, path)
-
-        return result
-
-    def _group_by_depth(self, matches: list[list[int]]) -> dict[int, list[list[int]]]:
-        """Group matches by depth (length of the path).
-
-        Parameters:
-        ----------
-        matches : list[list[int]]
-            list of paths from match().
-
-        Returns:
-        -------
-        dict[int, list[list[int]]]
-            Dictionary mapping depth to list of paths.
-        """
-        groups = {}
-        for path in matches:
-            depth = len(path)
-            if depth not in groups:
-                groups[depth] = []
-            groups[depth].append(path)
-        return groups
-
-    def _rebuild_diagram(self, original: Diagram, path: list[int], replacement: Diagram) -> Diagram:
-        """Wrapper of _rebuild_recursive function.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-        path : list[int]
-            Path to the location where to replace the current diagram by the
-            reduced diagram.
-        replacement: Diagram
-            Diagram reduced after applying the identity rule. It must be replace
-            its former version.
-
-        Returns:
-        -------
-        Diagram
-            New diagram with the identity spiders removed.
-        """
-        return self._rebuild_recursive(original, path, 0, replacement)
-
-    def _rebuild_recursive(
-        self,
-        diagram: Diagram,
-        path: list[int],
-        depth: int,
-        replacement: Diagram,
-    ) -> Diagram:
-        """Recursively reconstruct the diagram along the path.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-        path : list[int]
-            Path to the location where to replace the current diagram by the
-            reduced diagram.
-        depth: int
-            Current depth in the exploration of the diagram. The function must
-            go precisely where the diagram to replace is found.
-        replacement: Diagram
-            Diagram reduced after applying the identity rule. It must be replace
-            its former version.
-
-        Returns:
-        -------
-        Diagram
-            New diagram with the identity spiders removed.
-        """
-        if depth >= len(path):
-            return replacement
-
-        idx = path[depth]
-
-        if isinstance(diagram, CompositionDiagram):
-            diagrams = list(diagram.diagrams)
-            new_sub = self._rebuild_recursive(diagrams[idx], path, depth + 1, replacement)
-            diagrams[idx] = new_sub
-            return CompositionDiagram(diagrams)
-
-        if isinstance(diagram, TensorDiagram):
-            diagrams = list(diagram.diagrams)
-            new_sub = self._rebuild_recursive(diagrams[idx], path, depth + 1, replacement)
-            diagrams[idx] = new_sub
-            return TensorDiagram(diagrams)
-
-        if isinstance(diagram, ContractedDiagram):
-            if idx == 0:
-                new_first = self._rebuild_recursive(diagram.first, path, depth + 1, replacement)
-                result = ContractedDiagram(
-                    first=new_first,
-                    second=diagram.second,
-                    I1=diagram.I1,
-                    I2=diagram.I2,
-                    J1=diagram.J1,
-                    J2=diagram.J2,
-                )
-            else:
-                new_second = self._rebuild_recursive(diagram.second, path, depth + 1, replacement)
-                result = ContractedDiagram(
-                    first=diagram.first,
-                    second=new_second,
-                    I1=diagram.I1,
-                    I2=diagram.I2,
-                    J1=diagram.J1,
-                    J2=diagram.J2,
-                )
-            return result
-
+            return self._replace_at_path(diagram, parent_path, new_parent)
         return diagram
 
 
@@ -431,16 +412,12 @@ class FusionRule(RewriteRule):
                 matches.extend(self.match(sub_diagram, new_path, diagram))
 
         elif isinstance(diagram, ContractedDiagram):
-            new_path_first = [*path, 0]
             if isinstance(diagram.first, (QSpider, PSpider)) and isinstance(diagram.second, (QSpider, PSpider)):
-                new_path = [*path, 0]
-                return self.match(diagram, new_path, diagram)
+                return self.match(diagram, [*path, -1], diagram)
             if isinstance(diagram.first, (CompositionDiagram, TensorDiagram, ContractedDiagram)):
-                new_path_first = [*path, 0]
-                matches.extend(self.match(diagram.first, new_path_first, diagram))
+                matches.extend(self.match(diagram.first, [*path, 0], diagram))
             if isinstance(diagram.second, (CompositionDiagram, TensorDiagram, ContractedDiagram)):
-                new_path_second = [*path, 1]
-                matches.extend(self.match(diagram.second, new_path_second, diagram))
+                matches.extend(self.match(diagram.second, [*path, 1], diagram))
 
         return matches
 
@@ -547,66 +524,6 @@ class FusionRule(RewriteRule):
             len(contracted.I1) > 0 and len(contracted.I2) > 0
         )
         return value1 and value2
-
-    def _replace_at_path(self, diagram: Diagram, path: list[int], replacement: Diagram) -> Diagram:
-        """Replace the diagram at the given path with replacement.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-        path : list[int]
-            Path to the location where to replace the current ContractedDiagram by the
-            reduced form.
-        replacement: Diagram
-            Diagram reduced after applying the fusion rule. It must replace
-            its former version.
-
-        Returns:
-        -------
-        Diagram
-            New diagram with the identity spiders in a contracted diagram fused.
-        """
-        if path == [0]:
-            return replacement
-
-        idx = path[0]
-        remaining_path = path[1:]
-
-        if isinstance(diagram, CompositionDiagram):
-            diagrams = list(diagram.diagrams)
-            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
-            return CompositionDiagram(diagrams)
-
-        if isinstance(diagram, TensorDiagram):
-            diagrams = list(diagram.diagrams)
-            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
-            return TensorDiagram(diagrams)
-
-        if isinstance(diagram, ContractedDiagram):
-            if idx == 0:
-                new_first = self._replace_at_path(diagram.first, remaining_path, replacement)
-                result = ContractedDiagram(
-                    first=new_first,
-                    second=diagram.second,
-                    I1=diagram.I1,
-                    I2=diagram.I2,
-                    J1=diagram.J1,
-                    J2=diagram.J2,
-                )
-            else:
-                new_second = self._replace_at_path(diagram.second, remaining_path, replacement)
-                result = ContractedDiagram(
-                    first=diagram.first,
-                    second=new_second,
-                    I1=diagram.I1,
-                    I2=diagram.I2,
-                    J1=diagram.J1,
-                    J2=diagram.J2,
-                )
-            return result
-
-        return diagram
 
 
 class ChainReductionRule(RewriteRule):
@@ -735,43 +652,6 @@ class ChainReductionRule(RewriteRule):
         new_target = diagrams[0] if len(diagrams) == 1 else CompositionDiagram(diagrams)
 
         return self._replace_at_path(diagram, path, new_target)
-
-    def apply_rule(self, diagram: Diagram) -> Diagram:
-        """Apply the chain reduction rule to the input diagram.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-
-        Returns:
-        -------
-        Diagram
-            New diagram with all chains of reducible gates reduced.
-        """
-        diagram = self.flatten_composition(diagram)
-        result = diagram
-        matches = self.match(diagram)
-        if not matches:
-            return diagram
-
-        # Group matches by depth (length of path)
-        matches_by_depth = {}
-        for match in matches:
-            depth = len(match["path"])
-            if depth not in matches_by_depth:
-                matches_by_depth[depth] = []
-            matches_by_depth[depth].append(match)
-
-        # Process from deepest to shallowest
-        for depth in sorted(matches_by_depth.keys(), reverse=True):
-            matches_at_depth = matches_by_depth[depth]
-            matches_at_depth.sort(key=operator.itemgetter("start"), reverse=True)
-
-            for match in matches_at_depth:
-                result = self.apply_single(result, match)
-
-        return result
 
     def get_gate_info(self, diagram: Diagram) -> tuple[str | None, any]:  # noqa: C901, PLR0911
         """Extract gate type and value from a diagram.
@@ -1000,64 +880,6 @@ class ChainReductionRule(RewriteRule):
 
         return chains
 
-    def _replace_at_path(self, diagram: Diagram, path: list[int], replacement: Diagram) -> Diagram:
-        """Replace the diagram at the given path with replacement.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-        path : list[int]
-            Path to the location where to replace the chain of diagrams by the
-            reduced form.
-        replacement: Diagram
-            Diagram reduced after applying the chain reduction rule. It must
-            replace its former version.
-
-        Returns:
-        -------
-        Diagram
-            New diagram with chains of reducible gates reduced.
-        """
-        if not path:
-            return replacement
-
-        idx = path[0]
-        remaining_path = path[1:]
-
-        if isinstance(diagram, CompositionDiagram):
-            diagrams = list(diagram.diagrams)
-            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
-            return CompositionDiagram(diagrams)
-
-        if isinstance(diagram, TensorDiagram):
-            diagrams = list(diagram.diagrams)
-            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
-            return TensorDiagram(diagrams)
-
-        if isinstance(diagram, ContractedDiagram):
-            if idx == 0:
-                new_first = self._replace_at_path(diagram.first, remaining_path, replacement)
-                return ContractedDiagram(
-                    first=new_first,
-                    second=diagram.second,
-                    I1=diagram.I1,
-                    I2=diagram.I2,
-                    J1=diagram.J1,
-                    J2=diagram.J2,
-                )
-            new_second = self._replace_at_path(diagram.second, remaining_path, replacement)
-            return ContractedDiagram(
-                first=diagram.first,
-                second=new_second,
-                I1=diagram.I1,
-                I2=diagram.I2,
-                J1=diagram.J1,
-                J2=diagram.J2,
-            )
-
-        return diagram
-
 
 class BialgebraRule(RewriteRule):
     r"""Bialgebra rule (b) from [3] Eq. (71).
@@ -1066,26 +888,26 @@ class BialgebraRule(RewriteRule):
     It transforms between two equivalent patterns:
 
     Form 1 (Q-P → P-Q):
-        [Q] ⊗ [Q] ∘ [P] ⊗ [P]  =  Q ∘ P
+        [Q] ⊗ [Q] ∘ [P] ⊗ [P]  =  P ∘ Q
         (Two Q-spiders with 1 input, 2 outputs each, in parallel)
         (Two P-spiders with 2 inputs, 1 output each, in parallel)
 
     Form 2 (P-Q → Q-P):
-        [P] ⊗ [P] ∘ [Q] ⊗ [Q]  =  P ∘ Q
+        [P] ⊗ [P] ∘ [Q] ⊗ [Q]  =  Q ∘ P
         (Two P-spiders with 2 inputs, 1 output each, in parallel)
         (Two Q-spiders with 1 input, 2 outputs each, in parallel)
 
     The connections are:
         - Q outputs (2 per spider) connect to P inputs (2 per spider)
         - The connection pattern is: {0:0, 1:2, 2:1, 3:3}
-          meaning:
+          meaning for Form 2:
           - Spider 1 Q output 0 → Spider 1 P input 0
           - Spider 1 Q output 1 → Spider 2 P input 1
           - Spider 2 Q output 0 → Spider 1 P input 1
           - Spider 2 Q output 1 → Spider 2 P input 0
 
     The resulting diagram is a single Q-spider and a single P-spider in sequence,
-    each with 1 input and 1 output.
+    each with 2 inputs and 2 outputs.
     """
 
     # Connection pattern for the bialgebra rule
@@ -1241,40 +1063,6 @@ class BialgebraRule(RewriteRule):
         # Replace the target with the reduced diagram
         return self._replace_at_path(diagram, match_path, reduced)
 
-    def apply_rule(self, diagram: Diagram) -> Diagram:
-        """Apply the bialgebra rule to the entire diagram.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-
-        Returns:
-        -------
-        Diagram
-            New diagram with all bialgebra patterns reduced.
-        """
-        diagram = self.flatten_composition(diagram)
-        result = diagram
-        matches = self.match(diagram)
-        if not matches:
-            return diagram
-
-        # Group matches by depth (length of path)
-        matches_by_depth = {}
-        for match in matches:
-            depth = len(match)
-            if depth not in matches_by_depth:
-                matches_by_depth[depth] = []
-            matches_by_depth[depth].append(match)
-
-        # Process from deepest to shallowest
-        for depth in sorted(matches_by_depth.keys(), reverse=True):
-            for match_path in matches_by_depth[depth]:
-                result = self.apply_single(result, match_path)
-
-        return result
-
     def _is_bialgebra_pattern(self, diagram: Diagram) -> bool:
         """Check if a diagram is exactly a bialgebra pattern.
 
@@ -1321,59 +1109,3 @@ class BialgebraRule(RewriteRule):
         value1 = f1 == q_spider and f2 == q_spider and s1 == p_spider and s2 == p_spider
         value2 = s1 == q_spider and s2 == q_spider and f1 == p_spider and f2 == p_spider
         return (value1 or value2) and connectivity == self.CONNECTIONS
-
-    def _replace_at_path(self, diagram: Diagram, path: list[int], replacement: Diagram) -> Diagram:
-        """Replace the diagram at the given path with replacement.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-        path : list[int]
-            Path to the location where to replace.
-        replacement : Diagram
-            Diagram to insert at the path.
-
-        Returns:
-        -------
-        Diagram
-            New diagram with the replacement.
-        """
-        if not path:
-            return replacement
-
-        idx = path[0]
-        remaining_path = path[1:]
-
-        if isinstance(diagram, CompositionDiagram):
-            diagrams = list(diagram.diagrams)
-            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
-            return CompositionDiagram(diagrams)
-
-        if isinstance(diagram, TensorDiagram):
-            diagrams = list(diagram.diagrams)
-            diagrams[idx] = self._replace_at_path(diagrams[idx], remaining_path, replacement)
-            return TensorDiagram(diagrams)
-
-        if isinstance(diagram, ContractedDiagram):
-            if idx == 0:
-                new_first = self._replace_at_path(diagram.first, remaining_path, replacement)
-                return ContractedDiagram(
-                    first=new_first,
-                    second=diagram.second,
-                    I1=diagram.I1,
-                    I2=diagram.I2,
-                    J1=diagram.J1,
-                    J2=diagram.J2,
-                )
-            new_second = self._replace_at_path(diagram.second, remaining_path, replacement)
-            return ContractedDiagram(
-                first=diagram.first,
-                second=new_second,
-                I1=diagram.I1,
-                I2=diagram.I2,
-                J1=diagram.J1,
-                J2=diagram.J2,
-            )
-
-        return diagram
