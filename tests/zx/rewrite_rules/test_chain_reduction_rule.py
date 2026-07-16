@@ -860,3 +860,132 @@ class TestChainReductionRule(unittest.TestCase):
             [1, 3, 5, 7],
             [0, 1, 2, 5],
         )
+
+
+if __name__ == "__main__":
+    # Create output directory for visualizations
+    from pathlib import Path
+
+    from mqc3.zx.visualize_base_gates import visualize_before_after
+
+    VIS_OUTPUT_DIR = Path("test_images_chain_reduction_rule")
+    VIS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Create rule instance and test objects
+    rule_name = "Chain Reduction Rule"
+    rule = ChainReductionRule()
+    zero_phase = ZxPoly({})
+    phase_x2 = ZxPoly({2: 2})
+    phase_x2_3 = ZxPoly({2: 3})
+    phase_x2_sum = ZxPoly({2: 5})
+    phase_x3 = ZxPoly({3: 2})
+    phase_x4 = ZxPoly({4: 1})
+
+    q1 = QSpider(1, 1, phase_x2)
+    q2 = QSpider(1, 1, phase_x2_3)
+    q3 = QSpider(1, 1, phase_x3)
+    q_x4 = QSpider(1, 1, phase_x4)
+
+    p1 = PSpider(1, 1, phase_x2)
+    p2 = PSpider(1, 1, phase_x2_3)
+
+    fourier = Fourier()
+    fourier2 = Fourier2()
+    fourier_inv = FourierInv()
+    swap = Swap()
+
+    ph_rot1 = PhaseRotationGate(math.pi / 4)
+    ph_rot2 = PhaseRotationGate(math.pi / 3)
+    ph_rot_sum = PhaseRotationGate(7 * math.pi / 12)
+
+    bs1 = BeamsplitterGate(math.pi / 4)
+    bs2 = BeamsplitterGate(math.pi / 6)
+
+    sq1 = SqueezingGate(2.0)
+    sq2 = SqueezingGate(3.0)
+
+    disp1 = DisplacementGate(1.0 + 0.5j)
+    disp2 = DisplacementGate(2.0 + 1.0j)
+
+    # Test 1: Simple Q-spider chain
+    comp1 = CompositionDiagram([q1, q2])
+    comp1_after = rule.apply_rule(comp1)
+    visualize_before_after(comp1, comp1_after, "Simple Q Spider Chain", rule_name)
+
+    # Test 2: Simple P-spider chain
+    comp2 = CompositionDiagram([p1, p2])
+    comp2_after = rule.apply_rule(comp2)
+    visualize_before_after(comp2, comp2_after, "Simple P Spider Chain", rule_name)
+
+    # Test 3: Rotation chain
+    comp3 = CompositionDiagram([ph_rot1, ph_rot2])
+    comp3_after = rule.apply_rule(comp3)
+    visualize_before_after(comp3, comp3_after, "Rotation Chain", rule_name)
+
+    # Test 4: Squeezing chain
+    comp4 = CompositionDiagram([sq1, sq2])
+    comp4_after = rule.apply_rule(comp4)
+    visualize_before_after(comp4, comp4_after, "Squeezing Chain", rule_name)
+
+    # Test 5: Displacement chain
+    comp5 = CompositionDiagram([disp1, disp2])
+    comp5_after = rule.apply_rule(comp5)
+    visualize_before_after(comp5, comp5_after, "Displacement Chain", rule_name)
+
+    # Test 6: Beamsplitter chain
+    comp6 = CompositionDiagram([bs1, bs2])
+    comp6_after = rule.apply_rule(comp6)
+    visualize_before_after(comp6, comp6_after, "Beamsplitter Chain", rule_name)
+
+    # Test 7: Fourier chain (F ∘ F → F²)
+    comp7 = CompositionDiagram([fourier, fourier])
+    comp7_after = rule.apply_rule(comp7)
+    visualize_before_after(comp7, comp7_after, "Fourier Chain (F ∘ F)", rule_name)
+
+    # Test 8: Fourier pair (F ∘ Finv → Identity)
+    comp8 = CompositionDiagram([fourier, fourier_inv])
+    comp8_after = rule.apply_rule(comp8)
+    visualize_before_after(comp8, comp8_after, "Fourier Pair (F ∘ Finv)", rule_name)
+
+    # Test 9: Multiple chains in one composition
+    comp9 = CompositionDiagram([q1, q2, ph_rot1, ph_rot2, sq1, sq2])
+    comp9_after = rule.apply_rule(comp9)
+    visualize_before_after(comp9, comp9_after, "Multiple Chains", rule_name)
+
+    # Test 10: Mixed Q and P spiders (different types - no chain)
+    comp10 = CompositionDiagram([q1, p1])
+    comp10_after = rule.apply_rule(comp10)
+    visualize_before_after(comp10, comp10_after, "Mixed Q and P (No Chain)", rule_name)
+
+    # Test 11: Different degrees (no chain)
+    comp11 = CompositionDiagram([q1, q3])
+    comp11_after = rule.apply_rule(comp11)
+    visualize_before_after(comp11, comp11_after, "Different Degrees (No Chain)", rule_name)
+
+    # Test 12: Mixed polynomial (no chain)
+    mixed_phase = ZxPoly({2: 2, 3: 3})
+    q_mixed = QSpider(1, 1, mixed_phase)
+    comp12 = CompositionDiagram([q1, q_mixed])
+    comp12_after = rule.apply_rule(comp12)
+    visualize_before_after(comp12, comp12_after, "Mixed Polynomial (No Chain)", rule_name)
+
+    # Test 13: Nested composition inside tensor
+    inner_comp = CompositionDiagram([q1, q2])
+    tensor = TensorDiagram([inner_comp, sq1, ph_rot1])
+    tensor_after = rule.apply_rule(tensor)
+    visualize_before_after(tensor, tensor_after, "Nested Composition in Tensor", rule_name)
+
+    # Test 14: ContractedDiagram with composition containing chain
+    comp_for_contracted = CompositionDiagram([q1, q2, ph_rot1, ph_rot2])
+    tensor = TensorDiagram([comp_for_contracted, swap])
+    q_spider_large = QSpider(3, 3, phase_x2)
+    contracted = ContractedDiagram(tensor, q_spider_large, [0, 1], [1, 2], [0], [1])
+    contracted_after = rule.apply_rule(contracted)
+    visualize_before_after(contracted, contracted_after, "Contracted with Composition", rule_name)
+
+    # Test 15: Chain with different arities (compatible)
+    q_3x2 = QSpider(3, 2, phase_x2)
+    q_2x3 = QSpider(2, 3, phase_x2_3)
+    comp15 = CompositionDiagram([q_3x2, q_2x3])
+    comp15_after = rule.apply_rule(comp15)
+    visualize_before_after(comp15, comp15_after, "Different Arities (Compatible)", rule_name)
