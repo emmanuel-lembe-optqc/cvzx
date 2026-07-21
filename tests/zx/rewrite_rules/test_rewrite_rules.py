@@ -16,6 +16,7 @@ from mqc3.zx.base_gates import (
     Swap,
     TensorDiagram,
     ZxPoly,
+    flatten_composition,
 )
 from mqc3.zx.rewrite_rules import RewriteRule
 
@@ -42,13 +43,13 @@ class TestFlattenComposition(unittest.TestCase):
     def test_single_element_returns_element(self):
         """Test that a single-element composition returns the element."""
         comp = CompositionDiagram([self.fourier])
-        result = self.rule.flatten_composition(comp)
+        result = flatten_composition(comp)
         assert result == self.fourier
 
     def test_two_elements_unchanged(self):
         """Test that a two-element composition remains unchanged."""
         comp = CompositionDiagram([self.fourier, self.q1])
-        result = self.rule.flatten_composition(comp)
+        result = flatten_composition(comp)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         assert result.diagrams[0] == self.fourier
@@ -58,7 +59,7 @@ class TestFlattenComposition(unittest.TestCase):
         """Test flattening a single nested composition."""
         inner = CompositionDiagram([self.fourier, self.q1])
         outer = CompositionDiagram([inner])
-        result = self.rule.flatten_composition(outer)
+        result = flatten_composition(outer)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         assert result.diagrams[0] == self.fourier
@@ -69,7 +70,7 @@ class TestFlattenComposition(unittest.TestCase):
         inner1 = CompositionDiagram([self.fourier, self.q1])
         inner2 = CompositionDiagram([self.p1, self.q2])
         outer = CompositionDiagram([inner1, inner2])
-        result = self.rule.flatten_composition(outer)
+        result = flatten_composition(outer)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 4
         assert result.diagrams[0] == self.fourier
@@ -82,7 +83,7 @@ class TestFlattenComposition(unittest.TestCase):
         inner_inner = CompositionDiagram([self.fourier, self.q1])
         inner = CompositionDiagram([inner_inner, self.p1])
         outer = CompositionDiagram([inner, self.q2])
-        result = self.rule.flatten_composition(outer)
+        result = flatten_composition(outer)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 4
         assert result.diagrams[0] == self.fourier
@@ -94,7 +95,7 @@ class TestFlattenComposition(unittest.TestCase):
         """Test flattening with non-composition elements inside."""
         inner = CompositionDiagram([self.q1, self.p1])
         outer = CompositionDiagram([self.fourier, inner, self.q2])
-        result = self.rule.flatten_composition(outer)
+        result = flatten_composition(outer)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 4
         assert result.diagrams[0] == self.fourier
@@ -106,7 +107,7 @@ class TestFlattenComposition(unittest.TestCase):
         """Test that TensorDiagram == NOT flattened."""
         inner = CompositionDiagram([self.fourier, self.q1])
         tensor = TensorDiagram([inner, self.p1])
-        result = self.rule.flatten_composition(tensor)
+        result = flatten_composition(tensor)
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 2
         # The composition inside the tensor should NOT be flattened
@@ -120,7 +121,7 @@ class TestFlattenComposition(unittest.TestCase):
         """Test that composition inside TensorDiagram == flattened only if it's a single element."""
         inner = CompositionDiagram([self.fourier])
         tensor = TensorDiagram([inner, self.q1])
-        result = self.rule.flatten_composition(tensor)
+        result = flatten_composition(tensor)
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 2
         assert result.diagrams[0] == self.fourier
@@ -131,7 +132,7 @@ class TestFlattenComposition(unittest.TestCase):
         comp1 = CompositionDiagram([self.fourier])
         comp2 = CompositionDiagram([self.q1])
         contracted = ContractedDiagram(comp1, comp2, [0], [0], [], [])
-        result = self.rule.flatten_composition(contracted)
+        result = flatten_composition(contracted)
         assert isinstance(result, ContractedDiagram)
         assert result.first == self.fourier
         assert result.second == self.q1
@@ -141,7 +142,7 @@ class TestFlattenComposition(unittest.TestCase):
         comp1 = CompositionDiagram([self.fourier, self.q1])
         comp2 = CompositionDiagram([self.p1, self.q2])
         contracted = ContractedDiagram(comp1, comp2, [0], [0], [], [])
-        result = self.rule.flatten_composition(contracted)
+        result = flatten_composition(contracted)
         assert isinstance(result, ContractedDiagram)
         assert result.first == comp1
         assert result.second == comp2
@@ -151,7 +152,7 @@ class TestFlattenComposition(unittest.TestCase):
         inner_comp = CompositionDiagram([self.fourier, self.q1])
         tensor = TensorDiagram([inner_comp, self.p1])
         outer_comp = CompositionDiagram([tensor, CompositionDiagram([self.swap, self.swap])])
-        result = self.rule.flatten_composition(outer_comp)
+        result = flatten_composition(outer_comp)
 
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 3
@@ -173,7 +174,7 @@ class TestFlattenComposition(unittest.TestCase):
         """Test flattening a composition with a single-element nested composition."""
         inner = CompositionDiagram([self.q1])
         outer = CompositionDiagram([self.fourier, inner, self.p1])
-        result = self.rule.flatten_composition(outer)
+        result = flatten_composition(outer)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 3
         assert result.diagrams[0] == self.fourier
@@ -182,13 +183,13 @@ class TestFlattenComposition(unittest.TestCase):
 
     def test_identity_diagram_not_flattened(self):
         """Test that proper diagrams are returned as-is."""
-        result = self.rule.flatten_composition(self.fourier)
+        result = flatten_composition(self.fourier)
         assert result == self.fourier
 
-        result = self.rule.flatten_composition(self.q1)
+        result = flatten_composition(self.q1)
         assert result == self.q1
 
-        result = self.rule.flatten_composition(self.swap)
+        result = flatten_composition(self.swap)
         assert result == self.swap
 
     # TODO Test the preservation of the connectivity in complex settings

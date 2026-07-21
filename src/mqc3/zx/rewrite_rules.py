@@ -21,6 +21,7 @@ from mqc3.zx.base_gates import (
     PSpider,
     QSpider,
     TensorDiagram,
+    flatten_composition,
 )
 from mqc3.zx.gates import BeamsplitterGate, DisplacementGate, PhaseRotationGate, SqueezingGate
 from mqc3.zx.visualize_base_gates import ZxPoly, is_wiring_diagram
@@ -51,7 +52,7 @@ class RewriteRule:
             New diagram after applying the rule if applicable, or the original
             diagram if not.
         """
-        diagram = self.flatten_composition(diagram)
+        diagram = flatten_composition(diagram)
         result = diagram
         matches = self.match(diagram)
         if not matches:
@@ -76,106 +77,6 @@ class RewriteRule:
                 result = self.apply_single(result, path)
 
         return result
-
-    def flatten_composition(self, diagram: Diagram) -> Diagram:  # noqa: C901, PLR0912
-        """Recursively flatten any CompositionDiagram found in the diagram.
-
-        This method recursively traverses the diagram and flattens:
-            1. Single-element compositions → return the element directly
-            2. Nested compositions → extract and merge their diagrams, preserving connectivity
-            3. Compositions inside TensorDiagram → flatten the composition
-            4. Compositions inside ContractedDiagram → flatten the composition
-
-        When flattening nested compositions, the connectivity is adjusted to reflect
-        the flattened structure.
-
-        Examples:
-            - CompositionDiagram([A]) → A
-            - CompositionDiagram([A, CompositionDiagram([B, C]), D])
-            → CompositionDiagram([A, B, C, D])
-            - TensorDiagram([CompositionDiagram([A, B]), C])
-            → TensorDiagram([CompositionDiagram([A, B]), C])  # Composition inside Tensor is NOT flattened
-            - CompositionDiagram([TensorDiagram([A, B]), C])
-            → CompositionDiagram([TensorDiagram([A, B]), C])  # Tensor inside Composition is NOT flattened
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to flatten.
-
-        Returns:
-        -------
-        Diagram
-            Flattened diagram with no nested compositions.
-        """
-        # Base case: if it's a CompositionDiagram, flatten it
-        if isinstance(diagram, CompositionDiagram):
-            # If it's a single-element composition, return the element directly
-            if len(diagram.diagrams) == 1:
-                return self.flatten_composition(diagram.diagrams[0])
-
-            # Build the flattened list of diagrams and accumulate connectivity
-            flattened_diagrams = []
-            # Maps from original diagram index to the range of flattened indices
-            index_mapping = {}  # original_index -> (start_idx, end_idx)
-            all_connectivity = {}
-
-            current_idx = 0
-            for i, sub_diagram in enumerate(diagram.diagrams):
-                flattened_sub = self.flatten_composition(sub_diagram)
-
-                if isinstance(flattened_sub, CompositionDiagram):
-                    # If the sub-diagram is a CompositionDiagram, merge its elements
-                    sub_start = current_idx
-                    sub_end = current_idx + len(flattened_sub.diagrams)
-                    flattened_diagrams.extend(flattened_sub.diagrams)
-                    # Merge the sub-composition's connectivity
-                    if flattened_sub.connectivity is not None:
-                        for key, conn in flattened_sub.connectivity.items():
-                            # Adjust indices: key + sub_start gives the new position
-                            new_key = key + sub_start
-                            all_connectivity[new_key] = conn
-                    if i < len(diagram.diagrams) - 1:
-                        all_connectivity[sub_end - 1] = diagram.connectivity[i]
-                    current_idx = sub_end
-                else:
-                    # Single element: just append it
-                    index_mapping[i] = (current_idx, current_idx + 1)
-                    if i < len(diagram.diagrams) - 1:
-                        all_connectivity[current_idx] = diagram.connectivity[i]
-                    flattened_diagrams.append(flattened_sub)
-                    current_idx += 1
-
-            # If after flattening we have a single element, return it directly
-            if len(flattened_diagrams) == 1:
-                return flattened_diagrams[0]
-
-            # Return the flattened composition with adjusted connectivity
-            return CompositionDiagram(flattened_diagrams, all_connectivity)
-
-        # If it's a TensorDiagram, flatten each of its sub-diagrams
-        if isinstance(diagram, TensorDiagram):
-            flattened_diagrams = []
-            for sub_diagram in diagram.diagrams:
-                flattened_diagrams.append(self.flatten_composition(sub_diagram))
-            return TensorDiagram(flattened_diagrams)
-
-        # If it's a ContractedDiagram, flatten its first and second diagrams
-        if isinstance(diagram, ContractedDiagram):
-            first = self.flatten_composition(diagram.first)
-            second = self.flatten_composition(diagram.second)
-            # If either changed, create a new ContractedDiagram
-            if first is not diagram.first or second is not diagram.second:
-                return ContractedDiagram(
-                    first=first,
-                    second=second,
-                    I1=diagram.I1,
-                    I2=diagram.I2,
-                    J1=diagram.J1,
-                    J2=diagram.J2,
-                )
-
-        return diagram
 
     def _replace_at_path(self, diagram: Diagram, path: list[int], replacement: Diagram) -> Diagram:
         """Replace the diagram at the given path with replacement.
@@ -513,7 +414,7 @@ class FusionRule(RewriteRule):
             New diagram with the identity spiders inside a composition diagram
             fused  if applicable, or the original diagram if not.
         """
-        diagram = self.flatten_composition(diagram)
+        diagram = flatten_composition(diagram)
         result = diagram
         matches = self.match(diagram)
         if not matches:
