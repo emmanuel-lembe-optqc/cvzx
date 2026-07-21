@@ -230,7 +230,7 @@ def compact_diagram_label_validation_test():
     print("Testing label validation...")
     # Empty label
     try:
-        d = CompactDiagram("", 1, 1, None)  # noqa: F841
+        CompactDiagram("", 1, 1, None)
         print("❌ Should have raised ValueError")
     except ValueError as e:
         print(f"✅ Caught expected error: {e}")

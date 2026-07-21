@@ -190,3 +190,5 @@ class TestFlattenComposition(unittest.TestCase):
 
         result = self.rule.flatten_composition(self.swap)
         assert result == self.swap
+
+    # TODO Test the preservation of the connectivity in complex settings

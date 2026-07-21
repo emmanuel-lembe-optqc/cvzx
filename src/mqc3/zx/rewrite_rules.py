@@ -25,10 +25,6 @@ from mqc3.zx.base_gates import (
 from mqc3.zx.gates import BeamsplitterGate, DisplacementGate, PhaseRotationGate, SqueezingGate
 from mqc3.zx.visualize_base_gates import ZxPoly, is_wiring_diagram
 
-# =============================================================================
-# Rewrite Rules (Section IV.A)
-# =============================================================================
-
 
 class RewriteRule:
     """Base class for rewrite rules."""
@@ -41,14 +37,57 @@ class RewriteRule:
         """Apply the rule to a specific match."""
         raise NotImplementedError
 
-    def flatten_composition(self, diagram: Diagram) -> Diagram:
+    def apply_rule(self, diagram: Diagram) -> Diagram:
+        """Apply the rule to the input diagram.
+
+        Parameters:
+        ----------
+        diagram : Diagram
+            The diagram to modify.
+
+        Returns:
+        -------
+        Diagram
+            New diagram after applying the rule if applicable, or the original
+            diagram if not.
+        """
+        diagram = self.flatten_composition(diagram)
+        result = diagram
+        matches = self.match(diagram)
+        if not matches:
+            return diagram
+
+        # Group matches by depth
+        groups = self._group_by_depth(matches)
+
+        result = diagram
+
+        # Process from deepest to shallowest
+        first_match = matches[0]
+        elt = -1 if isinstance(first_match, list) else "start"
+        for depth in sorted(groups.keys(), reverse=True):
+            matches = groups[depth]
+
+            # Sort by last index in descending order
+            # This ensures removing higher indices doesn't affect lower ones
+            matches.sort(key=operator.itemgetter(elt), reverse=True)
+
+            for path in matches:
+                result = self.apply_single(result, path)
+
+        return result
+
+    def flatten_composition(self, diagram: Diagram) -> Diagram:  # noqa: C901, PLR0912
         """Recursively flatten any CompositionDiagram found in the diagram.
 
         This method recursively traverses the diagram and flattens:
             1. Single-element compositions → return the element directly
-            2. Nested compositions → extract and merge their diagrams
+            2. Nested compositions → extract and merge their diagrams, preserving connectivity
             3. Compositions inside TensorDiagram → flatten the composition
             4. Compositions inside ContractedDiagram → flatten the composition
+
+        When flattening nested compositions, the connectivity is adjusted to reflect
+        the flattened structure.
 
         Examples:
             - CompositionDiagram([A]) → A
@@ -58,9 +97,6 @@ class RewriteRule:
             → TensorDiagram([CompositionDiagram([A, B]), C])  # Composition inside Tensor is NOT flattened
             - CompositionDiagram([TensorDiagram([A, B]), C])
             → CompositionDiagram([TensorDiagram([A, B]), C])  # Tensor inside Composition is NOT flattened
-
-        This is important because nested compositions can hide patterns
-        that we could otherwise reduce (e.g., bialgebra patterns, fusion patterns).
 
         Parameters:
         ----------
@@ -74,21 +110,48 @@ class RewriteRule:
         """
         # Base case: if it's a CompositionDiagram, flatten it
         if isinstance(diagram, CompositionDiagram):
-            # First, recursively flatten all sub-diagrams
+            # If it's a single-element composition, return the element directly
+            if len(diagram.diagrams) == 1:
+                return self.flatten_composition(diagram.diagrams[0])
+
+            # Build the flattened list of diagrams and accumulate connectivity
             flattened_diagrams = []
-            for sub_diagram in diagram.diagrams:
+            # Maps from original diagram index to the range of flattened indices
+            index_mapping = {}  # original_index -> (start_idx, end_idx)
+            all_connectivity = {}
+
+            current_idx = 0
+            for i, sub_diagram in enumerate(diagram.diagrams):
                 flattened_sub = self.flatten_composition(sub_diagram)
-                # If the sub-diagram is now a CompositionDiagram, merge its elements
+
                 if isinstance(flattened_sub, CompositionDiagram):
+                    # If the sub-diagram is a CompositionDiagram, merge its elements
+                    sub_start = current_idx
+                    sub_end = current_idx + len(flattened_sub.diagrams)
                     flattened_diagrams.extend(flattened_sub.diagrams)
+                    # Merge the sub-composition's connectivity
+                    if flattened_sub.connectivity is not None:
+                        for key, conn in flattened_sub.connectivity.items():
+                            # Adjust indices: key + sub_start gives the new position
+                            new_key = key + sub_start
+                            all_connectivity[new_key] = conn
+                    if i < len(diagram.diagrams) - 1:
+                        all_connectivity[sub_end - 1] = diagram.connectivity[i]
+                    current_idx = sub_end
                 else:
+                    # Single element: just append it
+                    index_mapping[i] = (current_idx, current_idx + 1)
+                    if i < len(diagram.diagrams) - 1:
+                        all_connectivity[current_idx] = diagram.connectivity[i]
                     flattened_diagrams.append(flattened_sub)
+                    current_idx += 1
 
             # If after flattening we have a single element, return it directly
             if len(flattened_diagrams) == 1:
                 return flattened_diagrams[0]
 
-            return CompositionDiagram(flattened_diagrams)
+            # Return the flattened composition with adjusted connectivity
+            return CompositionDiagram(flattened_diagrams, all_connectivity)
 
         # If it's a TensorDiagram, flatten each of its sub-diagrams
         if isinstance(diagram, TensorDiagram):
@@ -205,46 +268,6 @@ class RewriteRule:
             groups[depth].append(match)
         return groups
 
-    def apply_rule(self, diagram: Diagram) -> Diagram:
-        """Apply the rule to the input diagram.
-
-        Parameters:
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-
-        Returns:
-        -------
-        Diagram
-            New diagram after applying the rule if applicable, or the original
-            diagram if not.
-        """
-        diagram = self.flatten_composition(diagram)
-        result = diagram
-        matches = self.match(diagram)
-        if not matches:
-            return diagram
-
-        # Group matches by depth
-        groups = self._group_by_depth(matches)
-
-        result = diagram
-
-        # Process from deepest to shallowest
-        first_match = matches[0]
-        elt = -1 if isinstance(first_match, list) else "start"
-        for depth in sorted(groups.keys(), reverse=True):
-            matches = groups[depth]
-
-            # Sort by last index in descending order
-            # This ensures removing higher indices doesn't affect lower ones
-            matches.sort(key=operator.itemgetter(elt), reverse=True)
-
-            for path in matches:
-                result = self.apply_single(result, path)
-
-        return result
-
 
 class IdentityRule(RewriteRule):
     r"""Identity rule (id) from [3] Eq. (69).
@@ -301,7 +324,7 @@ class IdentityRule(RewriteRule):
 
         return matches
 
-    def apply_single(self, diagram: Diagram, match_path: list[int]) -> Diagram:
+    def apply_single(self, diagram: Diagram, match: list[int]) -> Diagram:
         """Remove an identity spider at the given path.
 
         The identity spider is only removed if its immediate parent is a
@@ -312,7 +335,7 @@ class IdentityRule(RewriteRule):
         ----------
         diagram : Diagram
             The diagram to modify.
-        match_path : list[int]
+        match : list[int]
             Path to the identity spider to remove.
 
         Returns:
@@ -321,13 +344,13 @@ class IdentityRule(RewriteRule):
             New diagram with the identity spiders removed if applicable,
             or the original diagram if not.
         """
-        if not match_path:
+        if not match:
             return diagram
 
         # Navigate to the parent of the identity spider
         parent = diagram
-        parent_path = match_path[:-1]
-        last_index = match_path[-1]
+        parent_path = match[:-1]
+        last_index = match[-1]
 
         for idx in parent_path:
             if isinstance(parent, (CompositionDiagram, TensorDiagram)):
@@ -345,7 +368,7 @@ class IdentityRule(RewriteRule):
         diagrams = list(parent.diagrams)
         # We don't remove the identy spider if it's the only diagram
         # of the composition
-        # We must also ensure that wrong match_path do not modify the diagram
+        # We must also ensure that wrong match do not modify the diagram
         if len(diagrams) > 1 and is_wiring_diagram(diagrams[last_index]):
             diagrams.pop(last_index)
 
@@ -421,14 +444,14 @@ class FusionRule(RewriteRule):
 
         return matches
 
-    def apply_single(self, diagram: Diagram, match_path: list[int]) -> Diagram:
+    def apply_single(self, diagram: Diagram, match: list[int]) -> Diagram:
         """Fuse two same-type spiders in a ContractedDiagram.
 
         Parameters:
         ----------
         diagram : Diagram
             The diagram to modify.
-        match_path : list[int]
+        match : list[int]
             Path to the ContractedDiagram containing fusible spiders.
 
         Returns:
@@ -436,12 +459,12 @@ class FusionRule(RewriteRule):
         Diagram
             New diagram with the two spiders fused into one.
         """
-        if not match_path:
+        if not match:
             return diagram
         # Navigate to the ContractedDiagram
         target = diagram
-        if len(match_path) > 1:
-            for idx in match_path:
+        if len(match) > 1:
+            for idx in match:
                 if isinstance(target, (CompositionDiagram, TensorDiagram)):
                     target = target.diagrams[idx]
                 elif isinstance(target, ContractedDiagram):
@@ -452,7 +475,7 @@ class FusionRule(RewriteRule):
                 else:
                     return diagram
 
-        # This ensures that wrong match_path do not modify the diagram
+        # This ensures that wrong match do not modify the diagram
         if not self._is_fusable(target):
             return diagram
 
@@ -474,7 +497,7 @@ class FusionRule(RewriteRule):
             fused = PSpider(new_n_in, new_n_out, new_phase)
 
         # Replace the ContractedDiagram with the fused spider
-        return self._replace_at_path(diagram, match_path, fused)
+        return self._replace_at_path(diagram, match, fused)
 
     def apply_rule(self, diagram: Diagram) -> Diagram:
         """Apply the fusion rule to the input diagram.
@@ -497,8 +520,8 @@ class FusionRule(RewriteRule):
             return diagram
 
         # Process all matches
-        for match_path in matches:
-            result = self.apply_single(result, match_path)
+        for match in matches:
+            result = self.apply_single(result, match)
         return result
 
     def _is_fusable(self, contracted: ContractedDiagram) -> bool:
@@ -882,17 +905,17 @@ class ChainReductionRule(RewriteRule):
 
 
 class BialgebraRule(RewriteRule):
-    r"""Bialgebra rule (b) from [3] Eq. (71).
+    r"""Bialgebra rule (b) from [3] Eq. (72) and (73).
 
     The bialgebra rule captures the complementarity of position (q) and momentum (p) bases.
     It transforms between two equivalent patterns:
 
-    Form 1 (Q-P → P-Q):
+    Form 1:
         [Q] ⊗ [Q] ∘ [P] ⊗ [P]  =  P ∘ Q
         (Two Q-spiders with 1 input, 2 outputs each, in parallel)
         (Two P-spiders with 2 inputs, 1 output each, in parallel)
 
-    Form 2 (P-Q → Q-P):
+    Form 2:
         [P] ⊗ [P] ∘ [Q] ⊗ [Q]  =  Q ∘ P
         (Two P-spiders with 2 inputs, 1 output each, in parallel)
         (Two Q-spiders with 1 input, 2 outputs each, in parallel)
@@ -912,24 +935,22 @@ class BialgebraRule(RewriteRule):
 
     # Connection pattern for the bialgebra rule
     CONNECTIONS: Final[int] = {0: 0, 1: 2, 2: 1, 3: 3}
+    q_spider_2x1 = QSpider(2, 1, ZxPoly({}))
+    q_spider_1x2 = QSpider(1, 2, ZxPoly({}))
+    p_spider_2x1 = PSpider(2, 1, ZxPoly({}))
+    p_spider_1x2 = PSpider(1, 2, ZxPoly({}))
 
     def match(self, diagram: Diagram, path: list[int] | None = None, parent: Diagram | None = None) -> list[list[int]]:  # noqa: C901
         """Find all matches of the bialgebra rule in the diagram.
 
         The pattern to match is:
-            Pattern 1 (Q-P → P-Q):
-                TensorDiagram([QSpider(1,2,0), QSpider(1,2,0)])
-                    .compose(TensorDiagram([PSpider(2,1,0), PSpider(2,1,0)]))
-                OR
+            Pattern 1:
                 CompositionDiagram([
                     TensorDiagram([QSpider(1,2,0), QSpider(1,2,0)]),
                     TensorDiagram([PSpider(2,1,0), PSpider(2,1,0)])
                 ])
 
-            Pattern 2 (P-Q → Q-P):
-                TensorDiagram([PSpider(2,1,0), PSpider(2,1,0)])
-                    .compose(TensorDiagram([QSpider(1,2,0), QSpider(1,2,0)]))
-                OR
+            Pattern 2:
                 CompositionDiagram([
                     TensorDiagram([PSpider(2,1,0), PSpider(2,1,0)]),
                     TensorDiagram([QSpider(1,2,0), QSpider(1,2,0)])
@@ -971,7 +992,7 @@ class BialgebraRule(RewriteRule):
                 second = diagram.diagrams[i + 1]
 
                 # Check if this pair forms a CompositionDiagram that matches the pattern
-                if self._is_bialgebra_pattern(CompositionDiagram([first, second])):
+                if self.is_bialgebra_pattern(CompositionDiagram([first, second], {0: diagram.connectivity[i]})):
                     matches.append([*path, i])
 
             # Recursively search each sub-diagram
@@ -999,14 +1020,14 @@ class BialgebraRule(RewriteRule):
 
         return matches
 
-    def apply_single(self, diagram: Diagram, match_path: list[int]) -> Diagram:
+    def apply_single(self, diagram: Diagram, match: list[int]) -> Diagram:
         """Apply the bialgebra rule to a specific match.
 
         Parameters:
         ----------
         diagram : Diagram
             The diagram to modify.
-        match_path : list[int]
+        match : list[int]
             Path to the CompositionDiagram containing the bialgebra pattern.
 
         Returns:
@@ -1014,12 +1035,14 @@ class BialgebraRule(RewriteRule):
         Diagram
             New diagram with the bialgebra rule applied.
         """
-        if not match_path:
+        if not match:
             return diagram
 
         # Navigate to the CompositionDiagram
         target = diagram
-        for idx in match_path:
+        last_idx = match[-1]
+        path = match[:-1]
+        for idx in path:
             if isinstance(target, (CompositionDiagram, TensorDiagram)):
                 target = target.diagrams[idx]
             elif isinstance(target, ContractedDiagram):
@@ -1030,40 +1053,28 @@ class BialgebraRule(RewriteRule):
         if not isinstance(target, CompositionDiagram):
             return diagram
 
+        first = target.diagrams[last_idx]
+        second = target.diagrams[last_idx + 1]
         # Check that the pattern matches
-        if not self._matches_bialgebra_pattern(target):
+        if not self.is_bialgebra_pattern(CompositionDiagram([first, second], {0: target.connectivity[last_idx]})):
             return diagram
-
-        # Determine which form we have
-        first = target.diagrams[0]
-        second = target.diagrams[1]
-
         # Get the spider types from the TensorDiagrams
-        f1, f2 = first.diagrams[0], first.diagrams[1]
-        s1, s2 = second.diagrams[0], second.diagrams[1]
-
+        f1 = first.diagrams[0]
         is_q_first = isinstance(f1, QSpider)
 
         # Create the reduced diagram
-        zero = ZxPoly({})
-        if is_q_first:
-            # Form 1: Q-P → P-Q
-            # Result: QSpider(1,1,0) ∘ PSpider(1,1,0)
-            q_spider = QSpider(1, 1, zero)
-            p_spider = PSpider(1, 1, zero)
-            # Return CompositionDiagram([q_spider, p_spider])
-            reduced = CompositionDiagram([q_spider, p_spider])
-        else:
-            # Form 2: P-Q → Q-P
-            # Result: PSpider(1,1,0) ∘ QSpider(1,1,0)
-            p_spider = PSpider(1, 1, zero)
-            q_spider = QSpider(1, 1, zero)
-            reduced = CompositionDiagram([p_spider, q_spider])
+        reduced = [self.p_spider_2x1, self.q_spider_1x2] if is_q_first else [self.q_spider_2x1, self.p_spider_1x2]
+        # Replace the bialgebra pattern with the reduced gate
+        diagrams = list(target.diagrams)
+        connectivity = target.connectivity
+        diagrams[last_idx : last_idx + 2] = reduced
+        connectivity[last_idx] = {0: 0}
 
-        # Replace the target with the reduced diagram
-        return self._replace_at_path(diagram, match_path, reduced)
+        # Flatten if needed
+        new_target = diagrams[0] if len(diagrams) == 1 else CompositionDiagram(diagrams, connectivity)
+        return self._replace_at_path(diagram, path, new_target)
 
-    def _is_bialgebra_pattern(self, diagram: Diagram) -> bool:
+    def is_bialgebra_pattern(self, diagram: Diagram) -> bool:
         """Check if a diagram is exactly a bialgebra pattern.
 
         The pattern is a CompositionDiagram with two diagrams:
@@ -1103,9 +1114,11 @@ class BialgebraRule(RewriteRule):
         # Get the connectivity
         connectivity = diagram.connectivity[0]
 
-        p_spider = PSpider(2, 1, ZxPoly({}))
-        q_spider = QSpider(1, 2, ZxPoly({}))
         # Check configuration 1
-        value1 = f1 == q_spider and f2 == q_spider and s1 == p_spider and s2 == p_spider
-        value2 = s1 == q_spider and s2 == q_spider and f1 == p_spider and f2 == p_spider
+        value1 = (
+            f1 == self.q_spider_1x2 and f2 == self.q_spider_1x2 and s1 == self.p_spider_2x1 and s2 == self.p_spider_2x1
+        )
+        value2 = (
+            s1 == self.q_spider_2x1 and s2 == self.q_spider_2x1 and f1 == self.p_spider_1x2 and f2 == self.p_spider_1x2
+        )
         return (value1 or value2) and connectivity == self.CONNECTIONS

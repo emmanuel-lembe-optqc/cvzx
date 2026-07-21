@@ -469,7 +469,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert len(matches) == 0
 
     def test_match_contracted_with_composition1(self):
-        """Chain inside a composition that == inside a ContractedDiagram should match."""
+        """Chain inside a composition that is inside a ContractedDiagram should match."""
         comp = CompositionDiagram([self.fourier, self.p_x2_2, self.p_x2_3])
         contracted = ContractedDiagram(comp, self.swap, [], [], [], [])
         matches = self.rule.match(contracted)
@@ -484,7 +484,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert matches[0] == m
 
     def test_match_contracted_with_composition2(self):
-        """Chain inside a composition that == inside a ContractedDiagram should match."""
+        """Chain inside a composition that is inside a ContractedDiagram should match."""
         comp = CompositionDiagram([self.fourier, self.p_x2_2, self.p_x2_3])
         contracted = ContractedDiagram(self.swap, comp, [], [], [], [])
         matches = self.rule.match(contracted)
@@ -499,7 +499,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert matches[0] == m
 
     def test_match_contracted_nested(self):
-        """Chain inside a composition that == inside a ContractedDiagram should match."""
+        """Chain inside a composition that is inside a ContractedDiagram should match."""
         q_spider = QSpider(10, 10, self.phase_x2)
         contracted1 = ContractedDiagram(self.tensor2, q_spider, [1, 2, 3], [4, 5, 6], [0, 1, 2, 5], [1, 3, 5, 7])
         contracted2 = ContractedDiagram(q_spider, self.tensor3, [1, 2, 3], [4, 5, 6], [0, 1, 2, 6], [1, 3, 5, 7])
@@ -844,7 +844,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert result.diagrams[5].diagrams[2].diagrams[2] == self.ph_rot1
 
     def test_apply_rule_compos_in_contracted(self):
-        """Chain inside a composition that == inside a ContractedDiagram should match."""
+        """Chain inside a composition that is inside a ContractedDiagram should match."""
         q_spider = QSpider(10, 10, self.phase_x2)
         contracted1 = ContractedDiagram(self.tensor1, q_spider, [1], [0], [0], [1])
         contracted2 = ContractedDiagram(q_spider, self.tensor2, [4, 5, 6], [1, 2, 3], [1, 3, 5, 7], [0, 1, 2, 5])

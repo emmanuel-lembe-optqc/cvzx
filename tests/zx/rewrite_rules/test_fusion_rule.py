@@ -89,21 +89,21 @@ class TestFusionRule(unittest.TestCase):
         contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
         matches = self.rule.match(contracted)
         assert len(matches) == 1
-        assert matches[0] == [0]
+        assert matches[0] == [-1]
 
     def test_match_simple_p_spider_fusion(self):
         """Match two P-spiders connected in a ContractedDiagram."""
         contracted = ContractedDiagram(self.p1, self.p2, I1=[0], I2=[0], J1=[], J2=[])
         matches = self.rule.match(contracted)
         assert len(matches) == 1
-        assert matches[0] == [0]
+        assert matches[0] == [-1]
 
     def test_match_connected_both_directions(self):
         """Match spiders connected in both directions."""
         contracted = ContractedDiagram(self.q_2x2, self.q_2x2, I1=[0], I2=[0], J1=[0], J2=[0])
         matches = self.rule.match(contracted)
         assert len(matches) == 1
-        assert matches[0] == [0]
+        assert matches[0] == [-1]
 
     def test_match_no_connection(self):
         """No match when spiders are not connected."""
@@ -128,21 +128,21 @@ class TestFusionRule(unittest.TestCase):
         contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
         comp = CompositionDiagram([self.fourier, contracted, self.sq_gate])
         matches = self.rule.match(comp)
-        assert matches == [[1, 0]]
+        assert matches == [[1, -1]]
 
     def test_match_nested_in_tensor(self):
         """Match ContractedDiagram inside a TensorDiagram."""
         contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
         tensor = TensorDiagram([self.fourier, self.ph_rot, contracted])
         matches = self.rule.match(tensor)
-        assert matches == [[2, 0]]
+        assert matches == [[2, -1]]
 
     def test_match_nested_in_contracted(self):
         """Match ContractedDiagram inside another ContractedDiagram."""
         inner_contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
         outer_contracted = ContractedDiagram(inner_contracted, self.swap, I1=[0], I2=[0], J1=[], J2=[])
         matches = self.rule.match(outer_contracted)
-        assert matches == [[0, 0]]
+        assert matches == [[0, -1]]
 
     def test_match_multiple_fusion_pairs(self):
         """Match multiple fusible pairs in a diagram."""
@@ -150,13 +150,13 @@ class TestFusionRule(unittest.TestCase):
         contracted2 = ContractedDiagram(self.p1, self.p2, I1=[0], I2=[0], J1=[], J2=[])
         comp = CompositionDiagram([contracted1, contracted2])
         matches = self.rule.match(comp)
-        assert matches == [[0, 0], [1, 0]]
+        assert matches == [[0, -1], [1, -1]]
 
     def test_match_connected_through_second_to_first(self):
         """Match when connection == from second to first (J1/J2)."""
         contracted = ContractedDiagram(self.q1, self.q2, I1=[], I2=[], J1=[0], J2=[0])
         matches = self.rule.match(contracted)
-        assert matches == [[0]]
+        assert matches == [[-1]]
 
     def test_match_deeply_nested(self):
         """Match deeply nested ContractedDiagram."""
@@ -165,7 +165,7 @@ class TestFusionRule(unittest.TestCase):
         comp = CompositionDiagram([tensor, self.swap])
         tensor2 = TensorDiagram([comp, self.ph_rot])
         matches = self.rule.match(tensor2)
-        assert matches == [[0, 0, 1, 0]]
+        assert matches == [[0, 0, 1, -1]]
 
     # -------------------------------------------------------------------------
     # 2. Testing apply_single()
@@ -176,13 +176,13 @@ class TestFusionRule(unittest.TestCase):
         result = self.rule.apply_single(self.beam_splitter, [])
         assert result == self.beam_splitter
         contracted = ContractedDiagram(self.q1, self.p2, I1=[0], I2=[0], J1=[], J2=[])
-        result = self.rule.apply_single(contracted, [0])
+        result = self.rule.apply_single(contracted, [-1])
         assert result == contracted
 
     def test_apply_single_simple_q_spider_fusion(self):
         """Fuse two Q-spiders connected in a ContractedDiagram."""
         contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
-        result = self.rule.apply_single(contracted, [0])
+        result = self.rule.apply_single(contracted, [-1])
         assert isinstance(result, QSpider)
         assert result.num_inputs == 1
         assert result.num_outputs == 1
@@ -191,7 +191,7 @@ class TestFusionRule(unittest.TestCase):
     def test_apply_single_simple_p_spider_fusion(self):
         """Fuse two P-spiders connected in a ContractedDiagram."""
         contracted = ContractedDiagram(self.p1, self.p2, I1=[0], I2=[0], J1=[], J2=[])
-        result = self.rule.apply_single(contracted, [0])
+        result = self.rule.apply_single(contracted, [-1])
         assert isinstance(result, PSpider)
         assert result.num_inputs == 1
         assert result.num_outputs == 1
@@ -203,7 +203,7 @@ class TestFusionRule(unittest.TestCase):
         q2 = QSpider(1, 2, self.phase_poly2)
 
         contracted = ContractedDiagram(q1, q2, I1=[0], I2=[0], J1=[], J2=[])
-        result = self.rule.apply_single(contracted, [0])
+        result = self.rule.apply_single(contracted, [-1])
         assert isinstance(result, QSpider)
         assert result.num_inputs == 2
         assert result.num_outputs == 2
@@ -215,7 +215,7 @@ class TestFusionRule(unittest.TestCase):
         q2 = QSpider(2, 2, self.phase_poly2)
 
         contracted = ContractedDiagram(q1, q2, I1=[0], I2=[0], J1=[0], J2=[0])
-        result = self.rule.apply_single(contracted, [0])
+        result = self.rule.apply_single(contracted, [-1])
         assert isinstance(result, QSpider)
         assert result.num_inputs == 2
         assert result.num_outputs == 2
@@ -225,7 +225,7 @@ class TestFusionRule(unittest.TestCase):
         """Fuse spiders in ContractedDiagram inside a CompositionDiagram."""
         contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
         comp = CompositionDiagram([self.fourier, contracted, self.sq_gate])
-        result = self.rule.apply_single(comp, [1, 0])
+        result = self.rule.apply_single(comp, [1, -1])
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 3
         assert result.diagrams[0] == self.fourier
@@ -237,7 +237,7 @@ class TestFusionRule(unittest.TestCase):
         """Fuse spiders in ContractedDiagram inside a TensorDiagram."""
         contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
         tensor = TensorDiagram([self.fourier, self.ph_rot, contracted])
-        result = self.rule.apply_single(tensor, [2, 0])
+        result = self.rule.apply_single(tensor, [2, -1])
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 3
         assert result.diagrams[0] == self.fourier
@@ -249,7 +249,7 @@ class TestFusionRule(unittest.TestCase):
         """Fuse spiders in inner ContractedDiagram inside outer ContractedDiagram."""
         inner_contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
         outer_contracted = ContractedDiagram(inner_contracted, self.swap, I1=[0], I2=[0], J1=[], J2=[])
-        result = self.rule.apply_single(outer_contracted, [0, 0])
+        result = self.rule.apply_single(outer_contracted, [0, -1])
         assert isinstance(result, ContractedDiagram)
         assert isinstance(result.first, QSpider)
         assert result.first.phase == self.phase_sum
@@ -260,7 +260,7 @@ class TestFusionRule(unittest.TestCase):
         contracted1 = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
         contracted2 = ContractedDiagram(self.p1, self.p2, I1=[0], I2=[0], J1=[], J2=[])
         comp = CompositionDiagram([contracted1, contracted2])
-        result = self.rule.apply_single(comp, [1, 0])
+        result = self.rule.apply_single(comp, [1, -1])
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         assert isinstance(result.diagrams[0], ContractedDiagram)
@@ -273,7 +273,7 @@ class TestFusionRule(unittest.TestCase):
         tensor = TensorDiagram([self.fourier, contracted])
         comp = CompositionDiagram([tensor, self.swap])
         tensor2 = TensorDiagram([comp, self.ph_rot])
-        result = self.rule.apply_single(tensor2, [0, 0, 1, 0])
+        result = self.rule.apply_single(tensor2, [0, 0, 1, -1])
         assert isinstance(result, TensorDiagram)
         assert isinstance(result.diagrams[0], CompositionDiagram)
         assert isinstance(result.diagrams[1], PhaseRotationGate)
