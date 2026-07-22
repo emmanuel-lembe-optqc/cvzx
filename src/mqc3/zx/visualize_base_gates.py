@@ -1645,7 +1645,13 @@ class DiagramVisualizer:
             list
                 Reorder positions
         """
-        return [positions[connectivity[i]] for i in range(len(positions))]
+        # We must reverse the mapping because we want to link inputs
+        # sub_diagram[i] and sub_diagram[i+1]
+        connectivity_inv = {value: key for key, value in connectivity.items()}
+        positions.reverse()
+        res = [positions[connectivity_inv[i]] for i in range(len(positions))]
+        res.reverse()
+        return res
 
 
 # =============================================================================

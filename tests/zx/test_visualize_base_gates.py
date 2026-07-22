@@ -21,6 +21,7 @@ from mqc3.zx.base_gates import (
     Swap,
     TensorDiagram,
     ZxPoly,
+    flatten_composition,
 )
 from mqc3.zx.visualize_base_gates import visualize
 
@@ -226,7 +227,7 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     nested_composition_block = nested_composition_block.compose(q_spider_3x3)
 
     large_composition = large_composition.compose(nested_composition_block)
-
+    large_composition = flatten_composition(large_composition)
     final_large_diagram = fourier.tensor(large_composition)
     save_and_close(final_large_diagram, "Complex_Diagram.png", "Complex Diagram")
 
@@ -244,6 +245,7 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     nested_block_conn = nested_block_conn.compose(q_spider_3x3)
 
     large_comp_conn = large_comp_conn.compose(nested_block_conn, connectivity={0: 1, 1: 2, 2: 0})
+    large_comp_conn = flatten_composition(large_comp_conn)
     final_large_conn = fourier.tensor(large_comp_conn)
     save_and_close(final_large_conn, "Complex_Diagram_conn.png", "Complex Diagram (explicit conn)")
 
@@ -415,10 +417,10 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     composition_chain_1 = tensor_chain.compose(composition_chain_1)
 
     contracted_from_composition_1 = ContractedDiagram(
-        composition_chain_1, q_spider_5x5, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4]
+        flatten_composition(composition_chain_1), q_spider_5x5, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4]
     )
     contracted_from_composition_2 = ContractedDiagram(
-        q_spider_5x5, composition_chain_1, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4]
+        q_spider_5x5, flatten_composition(composition_chain_1), [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4]
     )
 
     save_and_close(
@@ -502,8 +504,8 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
         "Contracted diagram composed of Contracted Diagrams 2",
     )
 
-    # print(f"\nAll graphical test images generated successfully in '{OUTPUT_DIR}/'!")
-    # print("Please inspect the generated images manually.")
+    print(f"\nAll graphical test images generated successfully in '{OUTPUT_DIR}/'!")
+    print("Please inspect the generated images manually.")
 
 
 if __name__ == "__main__":
