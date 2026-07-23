@@ -32,7 +32,6 @@ from mqc3.zx.base_gates import (
     ProperDiagram,
     PSpider,
     QSpider,
-    ScalarDiagram,
     Swap,
     TensorDiagram,
     ZxPoly,
@@ -152,8 +151,6 @@ class DiagramVisualizer:
             self._draw_tensor(ax, diagram)
         elif isinstance(diagram, ContractedDiagram):
             self._draw_contracted(ax, diagram)
-        elif isinstance(diagram, ScalarDiagram):
-            self._draw_scalar(ax)
         else:
             ax.text(
                 0.5, 0.5, f"Unknown diagram type: {type(diagram)}", ha="center", va="center", transform=ax.transAxes
@@ -1542,19 +1539,6 @@ class DiagramVisualizer:
             )
             ax.add_patch(output1)
         return output_positions, init_input_positions, radius
-
-    def _draw_scalar(self, ax: plt.Axes) -> None:
-        """Draw a scalar diagram (closed loop)."""
-        ax.text(
-            0.5,
-            0.5,
-            "Scalar (closed diagram)",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-            fontsize=self.config.fontsize,
-            style="italic",
-        )
 
     def _format_phase(self, phase: ZxPoly | str) -> str:  # noqa: PLR0912
         """Format phase polynomial or Compact Diagram label for display.

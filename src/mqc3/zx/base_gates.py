@@ -1309,7 +1309,7 @@ class TensorDiagram(Diagram):
     def __post_init__(self) -> None:
         """Initialise tensor diagram by summing input/output counts."""
         super().__init__()
-        flattened = []
+        flattened: list = []
         for sub_diagram in self.diagrams:
             # Recursively flatten the sub-diagram first
             flattened_sub = self._flatten_tensor(sub_diagram)
@@ -1350,7 +1350,7 @@ class TensorDiagram(Diagram):
         Diagram
         """
         if isinstance(diagram, TensorDiagram):
-            flattened = []
+            flattened: list = []
             for sub in diagram.diagrams:
                 flattened_sub = self._flatten_tensor(sub)
                 if isinstance(flattened_sub, TensorDiagram):
@@ -1579,73 +1579,6 @@ class CompositionDiagram(Diagram):
             String representation showing all components in order.
         """
         return f"Compose({self.diagrams})"
-
-
-@dataclass
-class ScalarDiagram(Diagram):
-    """Closed diagram representing a scalar (no inputs/outputs).
-
-    This represents the result of contracting all modes, which yields
-    a complex scalar.
-    """
-
-    _num_inputs: int = field(default=0, init=False)
-    _num_outputs: int = field(default=0, init=False)
-
-    def conjugate(self) -> Diagram:
-        """Scalar diagram is self-conjugate.
-
-        Returns:
-        -------
-        ScalarDiagram
-            New scalar diagram instance.
-        """
-        return ScalarDiagram()
-
-    def is_proper(self) -> bool:
-        """Scalar is not a proper diagram generator.
-
-        Returns:
-        -------
-        bool
-            Always False.
-        """
-        return False
-
-    @property
-    def num_inputs(self) -> int:
-        """Number of input wires (always 0).
-
-        Returns:
-        -------
-        int
-            0 for closed diagrams.
-        """
-        return self._num_inputs
-
-    @property
-    def num_outputs(self) -> int:
-        """Number of output wires (always 0).
-
-        Returns:
-        -------
-        int
-            0 for closed diagrams.
-        """
-        return self._num_outputs
-
-    def __post_init__(self) -> None:  # noqa: D105
-        super().__init__()
-
-    def __repr__(self) -> str:
-        """Return string representation of the scalar diagram.
-
-        Returns:
-        -------
-        str
-            "Scalar()"
-        """
-        return f"Scalar({self.value})"
 
 
 @dataclass
@@ -1948,7 +1881,7 @@ def flatten_composition(diagram: Diagram) -> Diagram:  # noqa: C901, PLR0912
             return flatten_composition(diagram.diagrams[0])
 
         # Build the flattened list of diagrams and accumulate connectivity
-        flattened_diagrams = []
+        flattened_diagrams: list = []
         # Maps from original diagram index to the range of flattened indices
         index_mapping = {}  # original_index -> (start_idx, end_idx)
         all_connectivity = {}

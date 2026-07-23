@@ -19,10 +19,8 @@ from mqc3.zx.base_gates import (
     ContractedDiagram,
     Diagram,
     FourierInv,
-    ProperDiagram,
     PSpider,
     QSpider,
-    ScalarDiagram,
     TensorDiagram,
     ZxPoly,
 )
@@ -163,7 +161,7 @@ class CompactDiagram(Diagram):
             return TensorDiagram([self, *diagrams])
         return TensorDiagram([self, other])
 
-    def compose(self, other: Diagram, connectivity: dict | None = None, expand_self: bool = False) -> Diagram:  # noqa: C901, FBT001, FBT002, PLR0912
+    def compose(self, other: Diagram, connectivity: dict | None = None, expand_self: bool = False) -> Diagram:  # noqa: FBT001, FBT002
         """Compose this compact diagram with another diagram.
 
         Parameters:
@@ -972,8 +970,5 @@ def expand_all(diagram: Diagram) -> Diagram:
             J1=diagram.J1,
             J2=diagram.J2,
         )
-
-    if isinstance(diagram, ScalarDiagram):
-        return diagram
 
     return diagram

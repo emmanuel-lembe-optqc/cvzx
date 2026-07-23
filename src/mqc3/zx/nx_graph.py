@@ -53,7 +53,7 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
     nx.DiGraph
         Directed graph representation of the diagram with all nodes and edges.
     """
-    G = nx.DiGraph()
+    G = nx.DiGraph()  # noqa: N806
     root_id = _convert_diagram_to_graph(diagram, G, container_id=None, is_root=True)
 
     # Mark the root node
@@ -63,7 +63,7 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
     return G
 
 
-def to_diagram(G: nx.DiGraph) -> Diagram:
+def to_diagram(G: nx.DiGraph) -> Diagram:  # noqa: N803
     """Reconstruct a CV ZX diagram from a directed graph representation.
 
     This function reconstructs the original diagram from the graph, preserving
@@ -102,7 +102,7 @@ def to_diagram(G: nx.DiGraph) -> Diagram:
 def find_node_by_external_output(
     diagram: Diagram,
     ext_port: int,
-    G: nx.DiGraph,
+    G: nx.DiGraph,  # noqa: N803
 ) -> tuple[int | None, int | None]:
     """Find the proper node and its internal port for a given external output port.
 
@@ -160,7 +160,7 @@ def find_node_by_external_output(
 def find_node_by_external_input(
     diagram: Diagram,
     ext_port: int,
-    G: nx.DiGraph,
+    G: nx.DiGraph,  # noqa: N803
 ) -> tuple[int | None, int | None]:
     """Find the proper node and its internal port for a given external input port.
 
@@ -211,7 +211,7 @@ def find_node_by_external_input(
     return find_node_by_external_input(sub_diagram, internal_port, G)
 
 
-def get_proper_nodes(G: nx.DiGraph) -> list[int]:
+def get_proper_nodes(G: nx.DiGraph) -> list[int]:  # noqa: N803
     """Get all proper nodes (leaf operations) from the graph.
 
     Proper nodes represent actual operations (spiders, gates, etc.)
@@ -230,7 +230,7 @@ def get_proper_nodes(G: nx.DiGraph) -> list[int]:
     return [n for n, attrs in G.nodes(data=True) if attrs.get("kind") == "proper"]
 
 
-def get_container_nodes(G: nx.DiGraph) -> list[int]:
+def get_container_nodes(G: nx.DiGraph) -> list[int]:  # noqa: N803
     """Get all container nodes from the graph.
 
     Container nodes represent structural elements (CompositionDiagram,
@@ -249,7 +249,7 @@ def get_container_nodes(G: nx.DiGraph) -> list[int]:
     return [n for n, attrs in G.nodes(data=True) if attrs.get("kind") == "container"]
 
 
-def get_root_node(G: nx.DiGraph) -> int | None:
+def get_root_node(G: nx.DiGraph) -> int | None:  # noqa: N803
     """Get the root node (the outermost diagram) from the graph.
 
     The root node is the container node with is_root=True.
@@ -270,7 +270,7 @@ def get_root_node(G: nx.DiGraph) -> int | None:
     return None
 
 
-def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:
+def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:  # noqa: N803
     """Get the immediate container of a node.
 
     Parameters:
@@ -289,7 +289,7 @@ def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:
     return attrs.get("container_id")
 
 
-def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:
+def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:  # noqa: N803
     """Get the sub-diagram node IDs of a container node.
 
     Parameters:
@@ -311,7 +311,7 @@ def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:
     return attrs.get("sub_diagram_ids", [])
 
 
-def get_connectivity(G: nx.DiGraph, container_node: int) -> dict | None:
+def get_connectivity(G: nx.DiGraph, container_node: int) -> dict | None:  # noqa: N803
     """Get the connectivity dictionary of a CompositionDiagram container node.
 
     Parameters:
@@ -333,7 +333,7 @@ def get_connectivity(G: nx.DiGraph, container_node: int) -> dict | None:
     return attrs.get("connectivity")
 
 
-def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | None:
+def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | None:  # noqa: N803
     """Get the contracted connections of a ContractedDiagram container node.
 
     Parameters:
@@ -360,7 +360,7 @@ def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | Non
     }
 
 
-def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:
+def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:  # noqa: N803
     """Get all nodes that belong to a specific container.
 
     This includes both proper nodes and nested container nodes.
@@ -382,9 +382,9 @@ def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:
 
 def _convert_diagram_to_graph(
     diagram: Diagram,
-    G: nx.DiGraph,
+    G: nx.DiGraph,  # noqa: N803
     container_id: int | None,
-    is_root: bool = False,
+    is_root: bool = False,  # noqa: FBT001, FBT002
 ) -> int:
     """Convert a diagram to graph nodes and return the root node ID.
 
@@ -407,7 +407,7 @@ def _convert_diagram_to_graph(
     -------
     int
         The node ID of the root diagram in the graph, or -1 if the diagram
-        has no representation (e.g., ScalarDiagram).
+        has no representation.
     """
     if isinstance(diagram, ProperDiagram):
         return _add_proper_node(diagram, G, container_id)
@@ -417,13 +417,12 @@ def _convert_diagram_to_graph(
         return _add_tensor_node(diagram, G, container_id, is_root)
     if isinstance(diagram, ContractedDiagram):
         return _add_contracted_node(diagram, G, container_id, is_root)
-    # ScalarDiagram or other types: no nodes
     return -1
 
 
 def _add_proper_node(
     diagram: ProperDiagram,
-    G: nx.DiGraph,
+    G: nx.DiGraph,  # noqa: N803
     container_id: int | None,
 ) -> int:
     """Add a proper diagram as a node in the graph.
@@ -469,9 +468,9 @@ def _add_proper_node(
 
 def _add_composition_node(
     diagram: CompositionDiagram,
-    G: nx.DiGraph,
+    G: nx.DiGraph,  # noqa: N803
     container_id: int | None,
-    is_root: bool = False,
+    is_root: bool = False,  # noqa: FBT001, FBT002
 ) -> int:
     """Add a CompositionDiagram as a container node in the graph.
 
@@ -547,7 +546,7 @@ def _add_composition_node(
         right_diagram = diagram.diagrams[left_idx + 1]
 
         # Group connections by (src_node, tgt_node) to combine them
-        connections_by_node = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
+        connections_by_node: dict[tuple, list] = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
 
         # conn maps: output port of left → input port of right
         for out_port, in_port in conn.items():
@@ -585,9 +584,9 @@ def _add_composition_node(
 
 def _add_tensor_node(
     diagram: TensorDiagram,
-    G: nx.DiGraph,
+    G: nx.DiGraph,  # noqa: N803
     container_id: int | None,
-    is_root: bool = False,
+    is_root: bool = False,  # noqa: FBT001, FBT002
 ) -> int:
     """Add a TensorDiagram as a container node in the graph.
 
@@ -664,11 +663,11 @@ def _add_tensor_node(
     return node_id
 
 
-def _add_contracted_node(
+def _add_contracted_node(  # noqa: C901
     diagram: ContractedDiagram,
-    G: nx.DiGraph,
+    G: nx.DiGraph,  # noqa: N803
     container_id: int | None,
-    is_root: bool = False,
+    is_root: bool = False,  # noqa: FBT001, FBT002
 ) -> int:
     """Add a ContractedDiagram as a container node in the graph.
 
@@ -761,7 +760,7 @@ def _add_contracted_node(
     )
 
     # Group I1→I2 connections by (src_node, tgt_node)
-    i1_i2_connections = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
+    i1_i2_connections: dict[tuple, list] = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
 
     # Add internal edges: I1 (outputs of first) → I2 (inputs of second)
     for out_idx, in_idx in zip(diagram.I1, diagram.I2, strict=False):
@@ -789,7 +788,7 @@ def _add_contracted_node(
         )
 
     # Group J2→J1 connections by (src_node, tgt_node)
-    j2_j1_connections = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
+    j2_j1_connections: dict[tuple, list] = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
 
     # Add internal edges: J2 (outputs of second) → J1 (inputs of first)
     for out_idx, in_idx in zip(diagram.J2, diagram.J1, strict=False):
@@ -824,7 +823,7 @@ def _add_contracted_node(
 # =========================================================================
 
 
-def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:
+def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
     """Reconstruct a diagram from a graph node.
 
     Parameters:
@@ -863,7 +862,7 @@ def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:
     raise ValueError(msg)
 
 
-def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:
+def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
     """Reconstruct a proper diagram from a graph node.
 
     Parameters:
@@ -905,7 +904,7 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:
     raise ValueError(msg)
 
 
-def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:
+def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
     """Reconstruct a CompositionDiagram from a graph node.
 
     Parameters:
@@ -965,7 +964,7 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:
     return CompositionDiagram(sub_diagrams, connectivity)
 
 
-def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:
+def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
     """Reconstruct a TensorDiagram from a graph node.
 
     Parameters:
@@ -989,7 +988,7 @@ def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:
     return TensorDiagram(sub_diagrams)
 
 
-def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:
+def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
     """Reconstruct a ContractedDiagram from a graph node.
 
     Parameters:
@@ -1012,10 +1011,10 @@ def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:
     attrs = G.nodes[node_id]
     first_id = attrs.get("first_id")
     second_id = attrs.get("second_id")
-    I1 = attrs.get("I1", [])
-    I2 = attrs.get("I2", [])
-    J1 = attrs.get("J1", [])
-    J2 = attrs.get("J2", [])
+    I1 = attrs.get("I1", [])  # noqa: N806
+    I2 = attrs.get("I2", [])  # noqa: N806
+    J1 = attrs.get("J1", [])  # noqa: N806
+    J2 = attrs.get("J2", [])  # noqa: N806
 
     if first_id is None or second_id is None:
         msg = f"ContractedDiagram node {node_id} missing first_id or second_id"
