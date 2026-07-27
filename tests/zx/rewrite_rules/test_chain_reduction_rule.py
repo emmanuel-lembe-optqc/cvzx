@@ -222,7 +222,7 @@ class TestChainReductionRule(unittest.TestCase):
         gate_type, value = self.rule.get_gate_info(self.q_mixed)
         assert gate_type == "Q"
         assert value[0] == self.phase_mixed
-        assert value[1] == None
+        assert value[1] is None
 
     def test_get_gate_info_p_spider_monomial(self):
         """P-spider with monomial phase returns ('P', (phase, degree, num_inputs, num_outputs))."""
@@ -245,31 +245,31 @@ class TestChainReductionRule(unittest.TestCase):
         gate_type, value = self.rule.get_gate_info(self.p_mixed)
         assert gate_type == "P"
         assert value[0] == self.phase_mixed
-        assert value[1] == None
+        assert value[1] is None
 
     def test_get_gate_info_phase_rotation(self):
         """PhaseRotationGate returns ('R', theta)."""
         gate_type, value = self.rule.get_gate_info(self.ph_rot1)
         assert gate_type == "R"
-        assert value == math.pi / 4  # noqa: RUF069
+        assert math.isclose(value, math.pi / 4)
 
     def test_get_gate_info_beamsplitter(self):
         """BeamsplitterGate returns ('BS', theta)."""
         gate_type, value = self.rule.get_gate_info(self.bs1)
         assert gate_type == "BS"
-        assert value == math.pi / 4  # noqa: RUF069
+        assert math.isclose(value, math.pi / 4)
 
     def test_get_gate_info_squeezing(self):
         """SqueezingGate returns ('Sq', tau)."""
         gate_type, value = self.rule.get_gate_info(self.sq1)
         assert gate_type == "Sq"
-        assert value == 2.0  # noqa: RUF069
+        assert math.isclose(value, 2.0)
 
     def test_get_gate_info_displacement(self):
         """DisplacementGate returns ('D', alpha)."""
         gate_type, value = self.rule.get_gate_info(self.disp1)
         assert gate_type == "D"
-        assert value == 1.0 + 0.5j  # noqa: RUF069
+        assert value == 1.0 + 0.5j
 
     def test_get_gate_info_fourier(self):
         """Fourier returns ('F', 'F')."""
@@ -292,8 +292,8 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_swap_returns_none(self):
         """Swap returns None (not reducible)."""
         gate_type, value = self.rule.get_gate_info(self.swap)
-        assert gate_type == None
-        assert value == None
+        assert gate_type is None
+        assert value is None
 
     # -------------------------------------------------------------------------
     # 2. Testing match() and find_chains_in_composition()
@@ -464,14 +464,14 @@ class TestChainReductionRule(unittest.TestCase):
 
     def test_match_contracted(self):
         """ContractedDiagram does not create chains at its level."""
-        contracted = ContractedDiagram(self.q_x2_2, self.q_x2_3, [], [], [], [])
+        contracted = ContractedDiagram(self.q_x2_2, self.q_x2_3, [0], [0], [], [])
         matches = self.rule.match(contracted)
         assert len(matches) == 0
 
     def test_match_contracted_with_composition1(self):
         """Chain inside a composition that is inside a ContractedDiagram should match."""
         comp = CompositionDiagram([self.fourier, self.p_x2_2, self.p_x2_3])
-        contracted = ContractedDiagram(comp, self.swap, [], [], [], [])
+        contracted = ContractedDiagram(comp, self.swap, [0], [0], [], [])
         matches = self.rule.match(contracted)
         m = {
             "path": [0],
@@ -486,7 +486,7 @@ class TestChainReductionRule(unittest.TestCase):
     def test_match_contracted_with_composition2(self):
         """Chain inside a composition that is inside a ContractedDiagram should match."""
         comp = CompositionDiagram([self.fourier, self.p_x2_2, self.p_x2_3])
-        contracted = ContractedDiagram(self.swap, comp, [], [], [], [])
+        contracted = ContractedDiagram(self.swap, comp, [0], [0], [], [])
         matches = self.rule.match(contracted)
         m = {
             "path": [1],
@@ -599,7 +599,7 @@ class TestChainReductionRule(unittest.TestCase):
         values = [2.0, 3.0]
         result = self.rule.reduce_chain("Sq", values)
         assert isinstance(result, SqueezingGate)
-        assert result.tau == 6.0
+        assert math.isclose(result.theta, 6.0)
 
     def test_reduce_sq_chain_to_identity(self):
         """Sq(τ) ∘ Sq(1/τ) → identity."""
@@ -608,7 +608,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert result == self.id_q
 
     def test_reduce_d_chain(self):
-        """Reduce D(α) ∘ D(β) → D(α+β)."""
+        """Reduce D(a) ∘ D(β) → D(a+β)."""
         values = [1.0 + 0.5j, 2.0 + 1.0j]
         result = self.rule.reduce_chain("D", values)
         assert isinstance(result, DisplacementGate)

@@ -1,7 +1,7 @@
 """CV ZX calculus rewrite rules and applications.
 
 This module implements the 10 basic rewrite rules from [3] Sec. IV.A,
-the derived rules from Sec. IV.B, and the applications from Sec. V.
+and the derived rules from Sec. IV.B.
 
 References:
 -----------
@@ -688,7 +688,7 @@ class ChainReductionRule(RewriteRule):
             total = 1.0
             for v in values:
                 total *= v
-            if total == 1.0:  # noqa: RUF069
+            if total == 1.0:
                 return identity
             return SqueezingGate(total)
 
@@ -795,7 +795,7 @@ class ChainReductionRule(RewriteRule):
                         break
 
                 # Record the chain if it has at least 2 gates
-                if len(values) >= 2:
+                if len(values) >= 2:  # noqa: PLR2004
                     chains.append({"start": start, "end": j, "gate_type": gate_type, "values": values})
 
                 i = max(i + 1, j)
@@ -841,7 +841,7 @@ class BialgebraRule(RewriteRule):
     p_spider_2x1 = PSpider(2, 1, ZxPoly({}))
     p_spider_1x2 = PSpider(1, 2, ZxPoly({}))
 
-    def match(self, diagram: Diagram, path: list[int] | None = None, parent: Diagram | None = None) -> list[list[int]]:  # noqa: C901
+    def match(self, diagram: Diagram, path: list[int] | None = None, parent: Diagram | None = None) -> list[list[int]]:  # noqa: ARG002, C901
         """Find all matches of the bialgebra rule in the diagram.
 
         The pattern to match is:

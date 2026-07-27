@@ -105,12 +105,6 @@ class TestFusionRule(unittest.TestCase):
         assert len(matches) == 1
         assert matches[0] == [-1]
 
-    def test_match_no_connection(self):
-        """No match when spiders are not connected."""
-        contracted = ContractedDiagram(self.q1, self.q2, I1=[], I2=[], J1=[], J2=[])
-        matches = self.rule.match(contracted)
-        assert len(matches) == 0
-
     def test_match_different_spider_types(self):
         """No match when spiders are different types."""
         contracted = ContractedDiagram(self.q1, self.p2, I1=[0], I2=[0], J1=[], J2=[])
@@ -318,12 +312,6 @@ class TestFusionRule(unittest.TestCase):
         result = self.rule.apply_rule(contracted)
         assert result == contracted
 
-    def test_apply_rule_no_connection(self):
-        """Apply rule when spiders are not connected."""
-        contracted = ContractedDiagram(self.q1, self.q2, I1=[], I2=[], J1=[], J2=[])
-        result = self.rule.apply_rule(contracted)
-        assert result == contracted
-
     def test_apply_rule_complex_nested(self):
         """Apply rule with complex nested structure."""
         contracted = ContractedDiagram(self.q1, self.q2, I1=[0], I2=[0], J1=[], J2=[])
@@ -464,6 +452,6 @@ if __name__ == "__main__":
     visualize_before_after(contracted_no_match, contracted_no_match_after, "No Fusion (Different Types)", rule_name)
 
     # Test 10: Diagram unchanged because no connection
-    contracted_no_conn = ContractedDiagram(q1, q2, I1=[], I2=[], J1=[], J2=[])
+    contracted_no_conn = ContractedDiagram(q1, q2, I1=[0], I2=[0], J1=[], J2=[])
     contracted_no_conn_after = rule.apply_rule(contracted_no_conn)
     visualize_before_after(contracted_no_conn, contracted_no_conn_after, "No Fusion (No Connection)", rule_name)

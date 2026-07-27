@@ -851,6 +851,7 @@ class ContractedDiagram(Diagram):
         ------
         ValueError: If I1, J1, I2, or J2 contains duplicate indices
                     If |I1| != |I2| or |J1| != |J2|
+                    If |I1| = |I2| = |J1| = |J2| = 0
                     If I1 indices are out of range for first diagram outputs
                     If I2 indices are out of range for second diagram inputs
                     If J1 indices are out of range for first diagram inputs
@@ -888,6 +889,11 @@ class ContractedDiagram(Diagram):
         if len(J1) != len(J2):
             msg_0 = f"J1 length ({len(J1)}) must equal J2 length ({len(J2)})"
             raise ValueError(msg_0)
+
+        # Validate I1, I2, J1 and J2 are not all empty
+        if not I1 and not I2 and not J1 and not J2:
+            msg = "A contraction diagam must have at least one contraction link."
+            raise ValueError(msg)
 
         # Validate I1 indices are within first's outputs
         for idx in self.I1:

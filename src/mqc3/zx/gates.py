@@ -936,7 +936,7 @@ def create_compact_diagram(label: str, num_inputs: int, num_outputs: int, decomp
 
 
 def expand_all(diagram: Diagram) -> Diagram:
-    """Recursively expand all CompactDiagram instances in a diagram.
+    """Recursively expand all two mode diagrams instances in a diagram.
 
     Parameters:
     ----------
@@ -948,7 +948,7 @@ def expand_all(diagram: Diagram) -> Diagram:
     Diagram
         The expanded diagram with all CompactDiagram expanded.
     """
-    if isinstance(diagram, CompactDiagram):
+    if isinstance(diagram, (BeamsplitterGate, ControlledSumGate, ControlledZGate)):
         return diagram.expand()
 
     if isinstance(diagram, CompositionDiagram):
