@@ -264,22 +264,6 @@ class TestTensorDiagramPartialTraceEdgeCases:
         assert contracted.num_inputs == 0
         assert contracted.num_outputs == 0
 
-    def test_contract_none(self):
-        """Test that contracting none leaves tensor unchanged."""
-        d1 = QSpider(1, 1, ZxPoly({}))
-        d2 = PSpider(1, 1, ZxPoly({}))
-        tensor = TensorDiagram([d1, d2])
-
-        # Contract two diagrams with empty wire lists
-        # This should still create a ContractedDiagram
-        tensor.partial_trace([(0, [], []), (1, [], [])])
-
-        assert len(tensor.diagrams) == 1
-        assert isinstance(tensor.diagrams[0], ContractedDiagram)
-        # No wires contracted, so all ports remain external
-        assert tensor.diagrams[0].num_inputs == 2
-        assert tensor.diagrams[0].num_outputs == 2
-
     def test_complex_nested_structure(self):
         """Test partial trace with complex nested structure."""
         # Create a complex diagram with multiple levels

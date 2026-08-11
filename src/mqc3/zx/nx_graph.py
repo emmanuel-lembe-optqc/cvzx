@@ -14,6 +14,8 @@ Key design decisions:
     - All port connections are stored as edges with port information
 """
 
+from copy import deepcopy
+
 import networkx as nx
 
 from mqc3.zx.base_gates import (
@@ -29,6 +31,15 @@ from mqc3.zx.base_gates import (
     Swap,
     TensorDiagram,
     ZxPoly,
+)
+from mqc3.zx.gates import (
+    BeamsplitterGate,
+    CompactDiagram,
+    ControlledSumGate,
+    ControlledZGate,
+    DisplacementGate,
+    PhaseRotationGate,
+    SqueezingGate,
 )
 
 
@@ -53,14 +64,14 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
     nx.DiGraph
         Directed graph representation of the diagram with all nodes and edges.
     """
-    G = nx.DiGraph()  # noqa: N806
-    root_id = _convert_diagram_to_graph(diagram, G, container_id=None, is_root=True)
+    graph = nx.DiGraph()
+    root_id = _convert_diagram_to_graph(deepcopy(diagram), graph, container_id=None, is_root=True)
 
     # Mark the root node
     if root_id is not None and root_id != -1:
-        G.nodes[root_id]["is_root"] = True
+        graph.nodes[root_id]["is_root"] = True
 
-    return G
+    return graph
 
 
 def to_diagram(G: nx.DiGraph) -> Diagram:  # noqa: N803
@@ -127,7 +138,7 @@ def find_node_by_external_output(
         or (None, None) if not found.
     """
     # If it's a proper diagram, return its node ID and the port
-    if isinstance(diagram, ProperDiagram):
+    if isinstance(diagram, (ProperDiagram, CompactDiagram)):
         return diagram.id, ext_port
 
     # If it's a container diagram, get its node attributes
@@ -185,7 +196,7 @@ def find_node_by_external_input(
         or (None, None) if not found.
     """
     # If it's a proper diagram, return its node ID and the port
-    if isinstance(diagram, ProperDiagram):
+    if isinstance(diagram, (ProperDiagram, CompactDiagram)):
         return diagram.id, ext_port
 
     # If it's a container diagram, get its node attributes
@@ -409,7 +420,7 @@ def _convert_diagram_to_graph(
         The node ID of the root diagram in the graph, or -1 if the diagram
         has no representation.
     """
-    if isinstance(diagram, ProperDiagram):
+    if isinstance(diagram, (ProperDiagram, CompactDiagram)):
         return _add_proper_node(diagram, G, container_id)
     if isinstance(diagram, CompositionDiagram):
         return _add_composition_node(diagram, G, container_id, is_root)
@@ -421,7 +432,7 @@ def _convert_diagram_to_graph(
 
 
 def _add_proper_node(
-    diagram: ProperDiagram,
+    diagram: ProperDiagram | CompactDiagram,
     G: nx.DiGraph,  # noqa: N803
     container_id: int | None,
 ) -> int:
@@ -432,7 +443,7 @@ def _add_proper_node(
 
     Parameters:
     ----------
-    diagram : ProperDiagram
+    diagram : ProperDiagram | CompactDiagram
         The proper diagram to add as a node.
     G : nx.DiGraph
         The graph to add the node to (modified in place).
@@ -448,12 +459,24 @@ def _add_proper_node(
 
     phase = getattr(diagram, "phase", None)
     node_type = diagram.__class__.__name__
+    kind = "proper" if isinstance(diagram, ProperDiagram) else "compact"
 
+    if isinstance(diagram, DisplacementGate):
+        phase = getattr(diagram, "alpha", None)
+        # TO-DO I need to add a special attribute for feedforwarding
+    elif isinstance(diagram, PhaseRotationGate):
+        phase = getattr(diagram, "theta", None)
+    elif isinstance(diagram, SqueezingGate):
+        phase = getattr(diagram, "tau", None)
+    elif isinstance(diagram, BeamsplitterGate):
+        phase = getattr(diagram, "theta", None)
+    elif isinstance(diagram, (ControlledSumGate, ControlledZGate)):
+        phase = getattr(diagram, "gain", None)
     G.add_node(
         node_id,
         id=node_id,
         type=node_type,
-        kind="proper",
+        kind=kind,
         phase=phase,
         n_inputs=diagram.num_inputs,
         n_outputs=diagram.num_outputs,
@@ -554,7 +577,6 @@ def _add_composition_node(
             src_node, src_internal_port = find_node_by_external_output(left_diagram, out_port, G)
             # Find the proper node in right diagram for this input port
             tgt_node, tgt_internal_port = find_node_by_external_input(right_diagram, in_port, G)
-
             if src_node is not None and tgt_node is not None:
                 key = (src_node, tgt_node)
                 if key not in connections_by_node:
@@ -846,7 +868,7 @@ def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N80
     attrs = G.nodes[node_id]
     kind = attrs.get("kind")
 
-    if kind == "proper":
+    if kind in {"proper", "compact"}:
         return _reconstruct_proper_node(G, node_id)
     if kind == "container":
         container_type = attrs.get("container_type")
@@ -862,7 +884,7 @@ def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N80
     raise ValueError(msg)
 
 
-def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
+def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C901, N803, PLR0911
     """Reconstruct a proper diagram from a graph node.
 
     Parameters:
@@ -900,6 +922,18 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N
         return FourierInv()
     if node_type == "Fourier2":
         return Fourier2()
+    if node_type == "DisplacementGate":
+        return DisplacementGate(phase)
+    if node_type == "PhaseRotationGate":
+        return PhaseRotationGate(phase)
+    if node_type == "SqueezingGate":
+        return SqueezingGate(phase)
+    if node_type == "BeamsplitterGate":
+        return BeamsplitterGate(phase)
+    if node_type == "ControlledSumGate":
+        return ControlledSumGate(phase)
+    if node_type == "ControlledZGate":
+        return ControlledZGate(phase)
     msg = f"Unknown proper node type: {node_type}"
     raise ValueError(msg)
 

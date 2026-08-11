@@ -599,7 +599,7 @@ class TestChainReductionRule(unittest.TestCase):
         values = [2.0, 3.0]
         result = self.rule.reduce_chain("Sq", values)
         assert isinstance(result, SqueezingGate)
-        assert math.isclose(result.theta, 6.0)
+        assert math.isclose(result.tau, 6.0)
 
     def test_reduce_sq_chain_to_identity(self):
         """Sq(τ) ∘ Sq(1/τ) → identity."""

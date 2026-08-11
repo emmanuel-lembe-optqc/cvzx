@@ -309,20 +309,7 @@ class TestIdentityRule(unittest.TestCase):
         assert new2.diagrams[0] == self.non_id_p
         assert new2.diagrams[1] == self.sq_gate
 
-    def test_apply_single_nested_composition_deep(self):
-        """Apply single to deeply nested composition."""
-        new = self.rule.apply_single(self.tensor1, [1, 2])
-        assert isinstance(new, TensorDiagram)
-        assert len(new.diagrams) == 2
-        assert new.diagrams[0] == self.id_q
-        comp1_new = new.diagrams[1]
-        assert isinstance(comp1_new, CompositionDiagram)
-        assert len(comp1_new.diagrams) == 3
-        assert comp1_new.diagrams[0] == self.non_id_p
-        assert comp1_new.diagrams[1] == self.sq_gate
-        assert comp1_new.diagrams[2] == self.id_p
-
-    def test_apply_single_nested_tensor(self):
+    def test_apply_single_complex_composition4(self):
         """Apply single to nested tensor structure."""
         new = self.rule.apply_single(self.comp2, [1, 1, 1])
         assert isinstance(new, CompositionDiagram)
@@ -338,7 +325,20 @@ class TestIdentityRule(unittest.TestCase):
         assert inner_comp_new.diagrams[0] == self.fourier
         assert inner_comp_new.diagrams[1] == self.id_p
 
-    def test_apply_single_nested_tensor_multiple(self):
+    def test_apply_single_nested_composition_deep(self):
+        """Apply single to deeply nested composition."""
+        new = self.rule.apply_single(self.tensor1, [1, 2])
+        assert isinstance(new, TensorDiagram)
+        assert len(new.diagrams) == 2
+        assert new.diagrams[0] == self.id_q
+        comp1_new = new.diagrams[1]
+        assert isinstance(comp1_new, CompositionDiagram)
+        assert len(comp1_new.diagrams) == 3
+        assert comp1_new.diagrams[0] == self.non_id_p
+        assert comp1_new.diagrams[1] == self.sq_gate
+        assert comp1_new.diagrams[2] == self.id_p
+
+    def test_apply_single_nested_composition_multiple(self):
         """Apply single to nested tensor structure removing multiple identities."""
         new1 = self.rule.apply_single(self.comp2, [1, 1, 1])
         new2 = self.rule.apply_single(new1, [1, 1, 1])
