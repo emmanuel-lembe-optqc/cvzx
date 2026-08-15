@@ -3,6 +3,7 @@
 import operator
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import count
 
@@ -1198,13 +1199,16 @@ class CompositionDiagram(Diagram):
         # Composition
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            old_connectivity = other.connectivity
-            old_connectivity[len(diagrams) - 1] = connectivity
-            return CompositionDiagram([*diagrams, self], old_connectivity)
+            new_connectivity = deepcopy(other.connectivity)
+            size = len(diagrams)
+            new_connectivity[size - 1] = connectivity
+            for key, value in self.connectivity.items():
+                new_connectivity[size + key + 1] = value
+            return CompositionDiagram([*diagrams, self], new_connectivity)
         diagrams = list(self.diagrams)
-        old_connectivity = self.connectivity
-        old_connectivity[len(diagrams) - 1] = connectivity
-        return CompositionDiagram([other, *diagrams], old_connectivity)
+        new_connectivity = {key + 1: value for key, value in self.connectivity.items()}
+        new_connectivity[0] = connectivity
+        return CompositionDiagram([other, *diagrams], new_connectivity)
 
     def conjugate(self) -> Diagram:
         """Conjugate reverses composition order.

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from sympy import I, cos, exp, sin, symbols
+from sympy import pi as sym_pi
 
 from mqc3.zx.base_gates import (
     CompositionDiagram,
@@ -56,12 +58,16 @@ def save_and_close(diagram: Diagram, filename: str, title: str = ""):
     print(f"Saved: {filepath}")
 
 
-def compact_gates_test():  # noqa: PLR0914
+def compact_gates_test():  # noqa: PLR0914, PLR0915
     """Test visualization of all gates in compact form."""
     print("Testing compact gate visualization...")
 
-    # 1. Single gates (compact form)
-    gates = [
+    # Define symbolic variables
+    a, b, c, d, e, theta, phi, gamma_sym = symbols("a b c d e theta phi gamma", real=True)
+    alpha_sym = a + I * b  # Complex symbolic parameter for displacement
+
+    # 1. Single gates - Numeric versions (compact form)
+    gates_numeric = [
         DisplacementGate(alpha=1.0 + 0.5j),
         PhaseRotationGate(theta=np.pi / 4),
         SqueezingGate(tau=0.5),
@@ -74,39 +80,76 @@ def compact_gates_test():  # noqa: PLR0914
         CubicPhaseGate(gamma=0.1),
     ]
 
-    for gate in gates:
+    for gate in gates_numeric:
         filename = f"{gate.__class__.__name__}_compact.png"
-        save_and_close(gate, filename, f"{gate!r} (compact)")
+        # save_and_close(gate, filename, f"{gate!r} (compact)")
 
-    # 2. Test CompactDiagram.compose with connectivity
+    # 2. Single gates - Parametric versions
+    gates_parametric = [
+        DisplacementGate(alpha=alpha_sym, parametric=True),
+        DisplacementGate(alpha=exp(I * theta), parametric=True),
+        PhaseRotationGate(theta=theta, parametric=True),
+        PhaseRotationGate(theta=sin(theta) + cos(theta), parametric=True),
+        SqueezingGate(tau=a, parametric=True),
+        SqueezingGate(tau=exp(-b), parametric=True),
+        ControlledSumGate(gain=c, control=1, target=2, parametric=True),
+        ControlledSumGate(gain=d, control=2, target=1, parametric=True),
+        ControlledZGate(gain=e, parametric=True),
+        ControlledZGate(gain=sin(theta) + 1, parametric=True),
+        BeamsplitterGate(theta=phi, parametric=True),
+        BeamsplitterGate(theta=sym_pi / 4 + theta, parametric=True),
+        CubicPhaseGate(gamma=gamma_sym, parametric=True),
+        CubicPhaseGate(gamma=sin(theta) * 0.5, parametric=True),
+    ]
+
+    for gate in gates_parametric:
+        filename = f"{gate.__class__.__name__}_parametric_compact.png"
+        save_and_close(gate, filename, f"{gate!r} (parametric compact)")
+
+    # 3. Test CompactDiagram.compose with connectivity
     print("\n" + "=" * 60)
     print("Testing CompactDiagram.compose with connectivity")
     print("=" * 60)
 
-    # Create some compact gates
+    # Create some compact gates (numeric and parametric)
     D = DisplacementGate(alpha=1.0 + 0.5j)  # noqa: N806
+    D_sym = DisplacementGate(alpha=alpha_sym, parametric=True)  # noqa: N806
     R = PhaseRotationGate(theta=np.pi / 4)  # noqa: N806
+    R_sym = PhaseRotationGate(theta=theta, parametric=True)  # noqa: N806
     Sq = SqueezingGate(tau=0.5)  # noqa: N806
+    Sq_sym = SqueezingGate(tau=a, parametric=True)  # noqa: N806
     BS = BeamsplitterGate(theta=np.pi / 4)  # noqa: N806
+    BS_sym = BeamsplitterGate(theta=phi, parametric=True)  # noqa: N806
     CS = ControlledSumGate(gain=2.0, control=2, target=1)  # noqa: N806
+    CS_sym = ControlledSumGate(gain=c, control=2, target=1, parametric=True)  # noqa: N806
     CZ = ControlledZGate(gain=1.0)  # noqa: N806
+    CZ_sym = ControlledZGate(gain=e, parametric=True)  # noqa: N806
 
     # Test 1: Simple composition with non-trivial connectivity (1 input, 1 output)
-    # D has 1 input, 1 output; R has 1 input, 1 output
-    # Connectivity: map input 0 of D to output 0 of R (only possible)
     comp1 = D.compose(R, connectivity={0: 0})
     save_and_close(comp1, "Compact_compose_D_R_conn.png", "D ∘ R with connectivity (0→0)")
 
+    # Test 1b: Parametric version
+    comp1_sym = D_sym.compose(R_sym, connectivity={0: 0})
+    save_and_close(comp1_sym, "Compact_compose_D_sym_R_sym_conn.png", "D(a) ∘ R(θ) with connectivity (0→0)")
+
     # Test 2: Composition with swapped connectivity (if arities allow)
-    # Create a diagram with 2 inputs and 2 outputs
-    # We can use a CompactDiagram from a tensor product
     D_tensor = D.tensor(D)  # noqa: N806
     R_tensor = R.tensor(R)  # noqa: N806
 
-    # Connectivity: swap the wires (0→1, 1→0)
     comp2 = D_tensor.compose(R_tensor, connectivity={0: 1, 1: 0})
     save_and_close(
         comp2, "Compact_compose_tensor_swapped_conn.png", "(D⊗D) ∘ (R⊗R) with swapped connectivity (0→1, 1→0)"
+    )
+
+    # Test 2b: Parametric version
+    D_sym_tensor = D_sym.tensor(D_sym)  # noqa: N806
+    R_sym_tensor = R_sym.tensor(R_sym)  # noqa: N806
+    comp2_sym = D_sym_tensor.compose(R_sym_tensor, connectivity={0: 1, 1: 0})
+    save_and_close(
+        comp2_sym,
+        "Compact_compose_tensor_swapped_conn_sym.png",
+        "(D(a)⊗D(a)) ∘ (R(θ)⊗R(θ)) with swapped connectivity (0→1, 1→0)",
     )
 
     # Test 3: Connectivity with identity (0→0, 1→1) for comparison
@@ -116,14 +159,22 @@ def compact_gates_test():  # noqa: PLR0914
     )
 
     # Test 4: CompactDiagram with CompositionDiagram connectivity
-    comp_diag = CS.compose(CZ)  # CompositionDiagram
-    BS_compact = BS  # CompactDiagram  # noqa: N806
+    comp_diag = CS.compose(CZ)
+    BS_compact = BS  # noqa: N806
 
     comp4 = comp_diag.compose(BS_compact)
-    save_and_close(comp4, "Compact_compose_CompDiagram_BS_conn.png", "(D ∘ R) ∘ BS with connectivity (0→0)")
+    save_and_close(comp4, "Compact_compose_CompDiagram_BS_conn.png", "(CS ∘ CZ) ∘ BS with connectivity (0→0)")
+
+    # Test 4b: Parametric version
+    comp_diag_sym = CS_sym.compose(CZ_sym)
+    comp4_sym = comp_diag_sym.compose(BS_sym)
+    save_and_close(
+        comp4_sym,
+        "Compact_compose_CompDiagram_BS_conn_sym.png",
+        "(CS(c) ∘ CZ(e)) ∘ BS(φ) with connectivity (0→0)",
+    )
 
     # Test 5: Non-trivial connectivity with 2-input, 2-output diagrams
-    # Create two 2-mode gates
     R_tensor = R.tensor(R)  # noqa: N806
     Sq_tensor = Sq.tensor(Sq)  # noqa: N806
 
@@ -134,8 +185,17 @@ def compact_gates_test():  # noqa: PLR0914
         "(R⊗R) ∘ (Sq⊗Sq) with reverse connectivity (0→1, 1→0)",
     )
 
-    # Test 6: Connectivity with partial mapping
+    # Test 5b: Parametric version
+    R_sym_tensor = R_sym.tensor(R_sym)  # noqa: N806
+    Sq_sym_tensor = Sq_sym.tensor(Sq_sym)  # noqa: N806
+    comp5_sym = R_sym_tensor.compose(Sq_sym_tensor, connectivity={0: 1, 1: 0})
+    save_and_close(
+        comp5_sym,
+        "Compact_compose_R_tensor_Sq_tensor_reverse_conn_sym.png",
+        "(R(θ)⊗R(θ)) ∘ (Sq(a)⊗Sq(a)) with reverse connectivity (0→1, 1→0)",
+    )
 
+    # Test 6: Connectivity with partial mapping
     phase = ZxPoly({2: 2})
     q_spider = QSpider(2, 1, phase)
     compact_q = CompactDiagram("Q2x1", 2, 1, q_spider)
@@ -146,7 +206,6 @@ def compact_gates_test():  # noqa: PLR0914
     save_and_close(comp6, "Compact_compose_different_arities_conn.png", "Q(2→1) ∘ Q(1→2) with connectivity (0→0, 1→1)")
 
     # Test 7: Connectivity with expansion
-    # Compose with expand_self=True
     comp7 = compact_q.compose(compact_q_1x2, connectivity={0: 1, 1: 0}, expand_self=True)
     save_and_close(
         comp7,
@@ -161,7 +220,12 @@ def expanded_gates_test():
     """Test visualization of gates after expansion."""
     print("Testing expanded gate visualization...")
 
-    gates = [
+    # Define symbolic variables
+    a, b, theta, phi, gamma_sym = symbols("a b theta phi gamma", real=True)
+    alpha_sym = a + I * b
+
+    # Numeric gates
+    gates_numeric = [
         DisplacementGate(alpha=1.0 + 0.5j),
         PhaseRotationGate(theta=np.pi / 4),
         SqueezingGate(tau=0.5),
@@ -171,34 +235,33 @@ def expanded_gates_test():
         CubicPhaseGate(gamma=0.1),
     ]
 
-    for gate in gates:
+    for gate in gates_numeric:
         expanded = gate.expand()
         filename = f"{gate.__class__.__name__}_expanded.png"
         save_and_close(expanded, filename, f"{gate!r} (expanded)")
 
+    # Parametric gates
+    gates_parametric = [
+        DisplacementGate(alpha=alpha_sym, parametric=True),
+        PhaseRotationGate(theta=theta, parametric=True),
+        SqueezingGate(tau=a, parametric=True),
+        ControlledSumGate(gain=b, control=1, target=2, parametric=True),
+        ControlledZGate(gain=phi, parametric=True),
+        BeamsplitterGate(theta=theta, parametric=True),
+        CubicPhaseGate(gamma=gamma_sym, parametric=True),
+        # Complex parametric gates
+        DisplacementGate(alpha=exp(I * theta), parametric=True),
+        PhaseRotationGate(theta=sin(theta) + cos(theta), parametric=True),
+        SqueezingGate(tau=exp(-a), parametric=True),
+        ControlledZGate(gain=sin(phi) + 1, parametric=True),
+        BeamsplitterGate(theta=sym_pi / 4 + theta, parametric=True),
+        CubicPhaseGate(gamma=sin(theta) * 0.5, parametric=True),
+    ]
 
-def composed_gates_test():
-    """Test visualization of composed gates (compact and expanded)."""
-    print("Testing composed gate visualization...")
-
-    R = PhaseRotationGate(theta=np.pi / 4)  # noqa: N806
-    Sq = SqueezingGate(tau=0.5)  # noqa: N806
-    BS = BeamsplitterGate(theta=np.pi / 4)  # noqa: N806
-
-    # Compact composition
-    circuit = R.compose(Sq)
-    save_and_close(circuit, "Compact_composition.png", "Compact: Sq ∘ R")
-
-    # Expanded composition
-    expanded = expand_all(circuit)
-    save_and_close(expanded, "Expanded_composition.png", "Expanded: Sq ∘ R")
-
-    # More complex circuit
-    circuit2 = R.compose(Sq).tensor(BS)
-    save_and_close(circuit2, "Compact_complex_circuit.png", "Compact: (Sq ∘ R) ⊗ BS")
-
-    expanded2 = expand_all(circuit2)
-    save_and_close(expanded2, "Expanded_complex_circuit.png", "Expanded: (Sq ∘ R) ⊗ BS")
+    for gate in gates_parametric:
+        expanded = gate.expand()
+        filename = f"{gate.__class__.__name__}_parametric_expanded.png"
+        save_and_close(expanded, filename, f"{gate!r} (parametric expanded)")
 
 
 def with_custom_config_test():
@@ -212,6 +275,10 @@ def with_custom_config_test():
         fontsize=12,
     )
 
+    # Define symbolic variables
+    a, theta = symbols("a theta", real=True)
+
+    # Numeric version
     R = PhaseRotationGate(theta=np.pi / 4)  # noqa: N806
     Sq = SqueezingGate(tau=0.5)  # noqa: N806
     circuit = R.compose(Sq)
@@ -223,6 +290,17 @@ def with_custom_config_test():
     fig.savefig(filepath, dpi=150)
     plt.close(fig)
     print(f"Saved: {filepath}")
+
+    # Parametric version
+    R_sym = PhaseRotationGate(theta=theta, parametric=True)  # noqa: N806
+    Sq_sym = SqueezingGate(tau=a, parametric=True)  # noqa: N806
+    circuit_sym = R_sym.compose(Sq_sym)
+
+    fig_sym = visualizer.visualize(circuit_sym, title="Custom Config: Sq(a) ∘ R(θ)")
+    filepath_sym = OUTPUT_DIR / "Custom_config_parametric.png"
+    fig_sym.savefig(filepath_sym, dpi=150)
+    plt.close(fig_sym)
+    print(f"Saved: {filepath_sym}")
 
 
 def compact_diagram_label_validation_test():
@@ -242,25 +320,38 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     print("Testing create_compact_diagram")
     print("=" * 60)
 
+    # Define symbolic variables
+    a, b, c, theta, phi = symbols("a b c theta phi", real=True)
+
     # ------------------------------------------------------------------------
     # Setup: Build complex diagrams from test_visualize_base_gates
     # ------------------------------------------------------------------------
 
     phase_poly_simple = ZxPoly({1: 2, 2: 4})
     phase_poly_complex = ZxPoly({1: 2, 3: 4, 5: 7})
+    # Symbolic phase polynomials
+    phase_poly_sym_simple = ZxPoly({1: a, 2: b})
+    phase_poly_sym_complex = ZxPoly({1: c, 3: theta, 5: phi})
 
     fourier = Fourier()
     inverse_fourier = FourierInv()
     fourier_squared = Fourier2()
     swap = Swap()
+
+    # Numeric spiders
     q_spider_3x3 = QSpider(3, 3, phase_poly_simple)
     q_spider_5x5 = QSpider(5, 5, phase_poly_simple)
     p_spider_3x2 = PSpider(3, 2, phase_poly_simple)
     p_spider_5x5 = PSpider(5, 5, phase_poly_simple)
     q_spider_4x3 = QSpider(4, 3, phase_poly_simple)
 
+    # Parametric spiders
+    q_spider_3x3_sym = QSpider(3, 3, phase_poly_sym_simple)
+    q_spider_5x5_sym = QSpider(5, 5, phase_poly_sym_complex)
+    p_spider_5x5_sym = PSpider(5, 5, phase_poly_sym_complex)
+
     # ------------------------------------------------------------------------
-    # 1. Big complex diagram
+    # 1. Big complex diagram (numeric)
     # ------------------------------------------------------------------------
 
     large_tensor = fourier.tensor(fourier_squared)
@@ -284,13 +375,35 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     save_and_close(compact_large, "compact_big_complex.png", "Compact Big Complex Diagram")
 
     # Test expansion: expand() should return the original diagram
-    expanded_large = compact_large.expand()
-    # Compare by checking if they are equivalent (or the same object)
-    # Since expand() returns the decomposition stored in compact_large,
-    # it should be the same as final_large_diagram if we stored it correctly
+    expanded_large = expand_all(compact_large)
     assert expanded_large == final_large_diagram
 
-    save_and_close(compact_large.expand(), "original_big_complex.png", "Original Big Complex Diagram")
+    save_and_close(final_large_diagram, "original_big_complex.png", "Original Big Complex Diagram")
+
+    # ------------------------------------------------------------------------
+    # 1b. Big complex diagram (parametric)
+    # ------------------------------------------------------------------------
+
+    large_tensor_sym = fourier.tensor(fourier_squared)
+    large_tensor_sym = large_tensor_sym.tensor(fourier_squared)
+
+    # Use parametric spiders
+    nested_composition_block_sym = CompositionDiagram([q_spider_3x3_sym, q_spider_3x3_sym])
+    nested_composition_block_sym = nested_composition_block_sym.compose(q_spider_3x3_sym)
+    nested_composition_block_sym = nested_composition_block_sym.compose(q_spider_3x3_sym)
+
+    large_composition_sym = swap_tensor_fourier.compose(nested_composition_block_sym)
+    final_large_diagram_sym = fourier.tensor(large_composition_sym)
+
+    compact_large_sym = create_compact_diagram("BigSym", 4, 4, final_large_diagram_sym)
+    save_and_close(compact_large_sym, "compact_big_complex_sym.png", "Compact Big Complex Diagram (Parametric)")
+
+    expanded_large_sym = expand_all(compact_large_sym)
+    assert expanded_large_sym == final_large_diagram_sym
+
+    save_and_close(
+        final_large_diagram_sym, "original_big_complex_sym.png", "Original Big Complex Diagram (Parametric)"
+    )
 
     # ------------------------------------------------------------------------
     # 2. Full circuit: (F⊗F) ∘ Swap ∘ (F⊗F)
@@ -301,12 +414,10 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     right_tensor = fourier.tensor(fourier)
     full_circuit = middle_swap.compose(right_tensor)
 
-    # Compact the full circuit
     compact_full = create_compact_diagram("Full", 2, 2, full_circuit)
     save_and_close(compact_full, "compact_full_circuit.png", "Compact Full Circuit")
 
-    # Test expansion
-    expanded_full = compact_full.expand()
+    expanded_full = expand_all(compact_full)
     assert expanded_full == full_circuit
     save_and_close(full_circuit, "original_full_circuit.png", "Original Full Circuit")
 
@@ -314,17 +425,20 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     # 3. Contracted diagrams inside Composition Diagrams
     # ------------------------------------------------------------------------
 
-    # Create contracted diagrams from visualize_base_gates
-    # Contract QSpider_5x5 with PSpider_5x5
+    # Numeric contracted diagrams
     contracted_diagram_1 = ContractedDiagram(q_spider_5x5, p_spider_5x5, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4])
-    # Contract Swap with InverseFourier (no feedback connections)
     contracted_diagram_2 = ContractedDiagram(swap, inverse_fourier, [0], [0], [], [])
-    # Contract QSpider_4x3 with Swap
     contracted_diagram_3 = ContractedDiagram(q_spider_4x3, swap, [1], [1], [0, 2], [0, 1])
-    # Contract Fourier2 with PSpider_3x2
     contracted_diagram_4 = ContractedDiagram(fourier_squared, p_spider_3x2, [0], [1], [0], [0])
 
-    # Build composition with contracted diagrams
+    # Parametric contracted diagrams
+    contracted_diagram_1_sym = ContractedDiagram(
+        q_spider_5x5_sym, p_spider_5x5_sym, [0, 1, 4], [1, 2, 3], [0, 1, 2], [1, 2, 4]
+    )
+    contracted_diagram_2_sym = ContractedDiagram(swap, inverse_fourier, [0], [0], [], [])
+    contracted_diagram_3_sym = ContractedDiagram(q_spider_4x3, swap, [1], [1], [0, 2], [0, 1])
+
+    # Build composition with contracted diagrams (numeric)
     tensor_block_1 = swap.tensor(fourier)
     tensor_block_1 = tensor_block_1.tensor(fourier_squared)
 
@@ -332,7 +446,13 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     composition_with_contracted_1 = tensor_block_1.compose(composition_with_contracted_1)
     tensor_block_2 = fourier_squared.tensor(inverse_fourier)
 
-    # Test different compositions with contracted diagrams
+    # Build composition with contracted diagrams (parametric)
+    tensor_block_1_sym = swap.tensor(fourier)
+    tensor_block_1_sym = tensor_block_1_sym.tensor(fourier_squared)
+
+    composition_with_contracted_1_sym = contracted_diagram_1_sym.compose(tensor_block_1_sym)
+    composition_with_contracted_1_sym = tensor_block_1_sym.compose(composition_with_contracted_1_sym)
+
     test_cases = [
         ("contracted_comp_1", composition_with_contracted_1, 4, 4),
         ("contracted_comp_2", contracted_diagram_2.compose(tensor_block_2), 2, 2),
@@ -344,8 +464,22 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
         compact = create_compact_diagram(name[:5], num_in, num_out, diagram)
         save_and_close(compact, f"compact_{name}.png", f"Compact {name}")
 
-        # Test expansion
-        expanded = compact.expand()
+        expanded = expand_all(compact)
+        assert expanded == diagram, f"Expanded {name} does not match original"
+        save_and_close(expanded, f"original_{name}.png", f"Original {name}")
+
+    # Parametric test cases
+    test_cases_sym = [
+        ("contracted_comp_1_sym", composition_with_contracted_1_sym, 4, 4),
+        ("contracted_comp_2_sym", contracted_diagram_2_sym.compose(tensor_block_2), 2, 2),
+        ("contracted_comp_3_sym", tensor_block_2.compose(contracted_diagram_3_sym), 3, 2),
+    ]
+
+    for name, diagram, num_in, num_out in test_cases_sym:
+        compact = create_compact_diagram(name[:5], num_in, num_out, diagram)
+        save_and_close(compact, f"compact_{name}.png", f"Compact {name}")
+
+        expanded = expand_all(compact)
         assert expanded == diagram, f"Expanded {name} does not match original"
         save_and_close(expanded, f"original_{name}.png", f"Original {name}")
 
@@ -353,6 +487,7 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     # 4. Contracted diagrams inside Tensor Diagrams
     # ------------------------------------------------------------------------
 
+    # Numeric
     q_spider_5x5_large = QSpider(5, 5, 20 * (phase_poly_simple + phase_poly_complex))
 
     large_tensor_with_contracted = contracted_diagram_1.tensor(q_spider_5x5_large)
@@ -362,16 +497,41 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     compact_tensor_contracted = create_compact_diagram("Tc", 11, 11, large_tensor_with_contracted)
     save_and_close(compact_tensor_contracted, "compact_tensor_contracted.png", "Compact Tensor with Contracted")
 
-    expanded_tensor = compact_tensor_contracted.expand()
+    expanded_tensor = expand_all(compact_tensor_contracted)
     assert expanded_tensor == large_tensor_with_contracted
     save_and_close(expanded_tensor, "original_tensor_contracted.png", "Original Tensor with Contracted")
+
+    # Parametric
+    q_spider_5x5_large_sym = QSpider(5, 5, 20 * (phase_poly_sym_simple + phase_poly_sym_complex))
+
+    large_tensor_with_contracted_sym = contracted_diagram_1_sym.tensor(q_spider_5x5_large_sym)
+    large_tensor_with_contracted_sym = p_spider_5x5_sym.tensor(large_tensor_with_contracted_sym)
+    large_tensor_with_contracted_sym = contracted_diagram_2_sym.tensor(large_tensor_with_contracted_sym)
+
+    compact_tensor_contracted_sym = create_compact_diagram("TcSym", 11, 11, large_tensor_with_contracted_sym)
+    save_and_close(
+        compact_tensor_contracted_sym,
+        "compact_tensor_contracted_sym.png",
+        "Compact Tensor with Contracted (Parametric)",
+    )
+
+    expanded_tensor_sym = expand_all(compact_tensor_contracted_sym)
+    assert expanded_tensor_sym == large_tensor_with_contracted_sym
+    save_and_close(
+        expanded_tensor_sym, "original_tensor_contracted_sym.png", "Original Tensor with Contracted (Parametric)"
+    )
 
 
 def conjugate_gates_test():
     """Test conjugation of gates."""
     print("Testing gate conjugation...")
 
-    gates = [
+    # Define symbolic variables
+    a, b, theta, phi, gamma_sym = symbols("a b theta phi gamma", real=True)
+    alpha_sym = a + I * b
+
+    # Numeric gates
+    gates_numeric = [
         DisplacementGate(alpha=1.0 + 0.5j),
         PhaseRotationGate(theta=np.pi / 4),
         SqueezingGate(tau=0.5),
@@ -381,25 +541,46 @@ def conjugate_gates_test():
         CubicPhaseGate(gamma=0.1),
     ]
 
-    for gate in gates:
+    for gate in gates_numeric:
         print()
         conjugated = gate.conjugate()
         filename = f"{gate.__class__.__name__}_conjugate.png"
         save_and_close(conjugated, filename, f"{gate!r}†")
 
-        # Verify conjugation consistency: (gate†)† = gate
         double_conj = conjugated.conjugate()
         if isinstance(double_conj, type(gate)):
             print(f"✅ {gate.__class__.__name__} conjugation consistent")
         else:
             print(f"❌ {gate.__class__.__name__} conjugation failed")
 
+    # Parametric gates
+    gates_parametric = [
+        DisplacementGate(alpha=alpha_sym, parametric=True),
+        PhaseRotationGate(theta=theta, parametric=True),
+        SqueezingGate(tau=a, parametric=True),
+        ControlledSumGate(gain=b, parametric=True),
+        ControlledZGate(gain=phi, parametric=True),
+        BeamsplitterGate(theta=theta, parametric=True),
+        CubicPhaseGate(gamma=gamma_sym, parametric=True),
+    ]
+
+    for gate in gates_parametric:
+        print()
+        conjugated = gate.conjugate()
+        filename = f"{gate.__class__.__name__}_parametric_conjugate.png"
+        save_and_close(conjugated, filename, f"{gate!r}† (parametric)")
+
+        double_conj = conjugated.conjugate()
+        if isinstance(double_conj, type(gate)):
+            print(f"✅ {gate.__class__.__name__} conjugation consistent (parametric)")
+        else:
+            print(f"❌ {gate.__class__.__name__} conjugation failed (parametric)")
+
 
 def run_all_tests():
     """Run all test functions."""
     compact_gates_test()
     expanded_gates_test()
-    composed_gates_test()
     with_custom_config_test()
     compact_diagram_label_validation_test()
     conjugate_gates_test()
