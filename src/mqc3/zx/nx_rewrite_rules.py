@@ -274,7 +274,7 @@ def is_wiring_node_from_attrs(attrs: dict) -> bool:
     if phase is None:
         return False
 
-    return phase.is_zero()
+    return phase.is_zero
 
 
 def apply_rule_to_diagram(rule: RewriteRule, diagram: Diagram) -> Diagram:

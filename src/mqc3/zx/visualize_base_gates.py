@@ -1556,7 +1556,7 @@ class DiagramVisualizer:
         """
         if isinstance(phase, str):
             return phase
-        if phase.is_zero():
+        if phase.is_zero:
             return ""
         terms = []
         max_size = 20

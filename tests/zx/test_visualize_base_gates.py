@@ -8,6 +8,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytest
+from sympy import I, cos, exp, sin, symbols
 
 from mqc3.zx.base_gates import (
     CompositionDiagram,
@@ -99,27 +100,52 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     # 1. Single proper diagrams (unchanged)
     # ========================================================================
 
-    phase_poly_simple = ZxPoly({1: 2, 2: 4})
-    phase_poly_complex = ZxPoly({1: 2, 3: 4, 5: 7})
+    # Define symbolic variables for phase parameters
+    a, b, c, d, e, f, g, h, i, j, k, l0, m, n = symbols("a b c d e f g h i j k l m n", real=True)
+    theta1, theta2 = symbols("theta1 theta2", real=True)
+    phi1, phi2 = symbols("phi1 phi2", real=True)
 
+    # Define different symbolic phase polynomials for each spider
+    phase_poly_simple = ZxPoly({2: 4})
+    phase_poly_complex = ZxPoly({0: a * sin(theta1), 1: b * cos(theta1), 3: d, 5: c})
+
+    # Q-Spider phases (simple: linear + quadratic)
+    phase_q_1x1 = ZxPoly({0: sin(theta1), 1: cos(theta1)})
+    phase_q_2x2 = ZxPoly({0: sin(theta2), 1: cos(theta2)})
+    phase_q_3x2 = ZxPoly({1: e, 2: f})  # e*x + f*x²
+    phase_q_4x3 = ZxPoly({1: g, 2: h})  # g*x + h*x²
+    phase_q_5x5 = ZxPoly({1: i, 2: j})  # i*x + j*x²
+
+    # Alternative: Use trigonometric phases for some Q-spiders
+
+    # P-Spider phases (more complex: linear + cubic + quintic)
+    phase_p_1x1 = ZxPoly({0: exp(I * phi1), 1: exp(-I * phi1)})
+    phase_p_2x2 = ZxPoly({0: exp(I * phi2), 1: exp(-I * phi2)})
+    phase_p_3x2 = ZxPoly({1: g, 3: h, 5: i})  # g*x + h*x³ + i*x⁵
+    phase_p_3x4 = ZxPoly({1: j, 3: k, 5: l0})  # j*x + k*x³ + l*x⁵
+    phase_p_5x5 = ZxPoly({1: m, 3: n, 5: 7})  # m*x + n*x³ + 7*x⁵ (mixing symbolic and numeric)
+
+    # Alternative: Use exponential phases for some P-spiders
+
+    # Create gates
     fourier = Fourier()
     fourier_squared = Fourier2()
     inverse_fourier = FourierInv()
     swap = Swap()
 
-    # Q-Spiders with different arities and phases
-    q_spider_1x1 = QSpider(1, 1, phase_poly_simple)
-    q_spider_2x2 = QSpider(2, 2, phase_poly_simple)
-    q_spider_3x2 = QSpider(3, 2, phase_poly_simple)
-    q_spider_4x3 = QSpider(4, 3, phase_poly_simple)
-    q_spider_5x5 = QSpider(5, 5, phase_poly_simple)
+    # Q-Spiders with different arities and phases (each has unique phase)
+    q_spider_1x1 = QSpider(1, 1, phase_q_1x1)
+    q_spider_2x2 = QSpider(2, 2, phase_q_2x2)
+    q_spider_3x2 = QSpider(3, 2, phase_q_3x2)
+    q_spider_4x3 = QSpider(4, 3, phase_q_4x3)
+    q_spider_5x5 = QSpider(5, 5, phase_q_5x5)
 
-    # P-Spiders with different arities and phases
-    p_spider_1x1 = PSpider(1, 1, phase_poly_complex)
-    p_spider_2x2 = PSpider(2, 2, phase_poly_simple)
-    p_spider_3x2 = PSpider(3, 2, phase_poly_simple)
-    p_spider_3x4 = PSpider(3, 4, phase_poly_simple)
-    p_spider_5x5 = PSpider(5, 5, phase_poly_simple)
+    # P-Spiders with different arities and phases (each has unique phase)
+    p_spider_1x1 = PSpider(1, 1, phase_p_1x1)
+    p_spider_2x2 = PSpider(2, 2, phase_p_2x2)
+    p_spider_3x2 = PSpider(3, 2, phase_p_3x2)
+    p_spider_3x4 = PSpider(3, 4, phase_p_3x4)
+    p_spider_5x5 = PSpider(5, 5, phase_p_5x5)
 
     save_and_close(fourier, "Fourier.png", "Fourier")
     save_and_close(fourier_squared, "Fourier2.png", "Fourier2")

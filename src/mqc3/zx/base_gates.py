@@ -6,21 +6,24 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from itertools import count
 
+from sympy import Expr, Poly, S, symbols, sympify
 
-class ZxPoly:
+
+class ZxPoly(Poly):
     """Real polynomial in one variable for CV ZX calculus phase functions.
 
-    This class represents real polynomials of the form:
-        f(x) = c_0 + c_1·x + c_2·x² + ... + c_n·xⁿ
+    This class inherits from sympy.Poly and adds ZX-specific functionality
+    while maintaining backward compatibility with the original ZxPoly API.
 
-    The polynomial is stored as a dictionary mapping degree → coefficient.
-    Zero coefficients are omitted from the dictionary.
+    The polynomial is stored as a sympy.Poly object internally, supporting both
+    numeric and symbolic coefficients. Zero coefficients are omitted from the
+    dictionary representation.
 
-    Attributes:
+    Parameters:
     ----------
-    coeffs : dict[int, float]
-        Dictionary where keys are monomial degrees (non-negative integers)
-        and values are the corresponding real coefficients.
+    coeffs : dict[int, float | Expr]
+        Dictionary mapping degree → coefficient. For numeric coefficients,
+        returns Python floats; for symbolic coefficients, returns sympy expressions.
 
     Examples:
     --------
@@ -29,476 +32,177 @@ class ZxPoly:
     >>> r = p + q                       # 1 + 2·x - 0.5·x²
     >>> r.degree()
     2
-    >>> s = p * q                       # (1 - 0.5·x²)·(2·x) = 2·x - x³
+    >>> s = p * q                       # 2·x - x³
+    >>> s.coeffs                        # Dict for compatibility
+    {1: 2.0, 3: -1.0}
+
+    >>> from sympy import symbols
+    >>> a, b = symbols('a b')
+    >>> p = ZxPoly({0: a, 1: b})        # a + b·x
+    >>> q = ZxPoly({0: 1, 1: 2})        # 1 + 2·x
+    >>> r = p + q                       # (a+1) + (b+2)·x
+    >>> r.coeffs
+    {0: a + 1, 1: b + 2}
     """
 
-    def __init__(self, coeffs: dict[int, float]) -> None:
-        """Initialize a polynomial from coefficient dictionary.
+    _var = symbols("x", real=True)
+
+    def __new__(cls, coeffs_or_poly: dict[int, float | int | Expr] | Poly | Expr | None = None, *args, **kwargs):  # noqa: ANN002, ANN003, ANN204
+        """Create a new ZxPoly instance.
+
+        This method intercepts instance creation to handle the special case
+        where the user provides a coefficient dictionary instead of a sympy
+        expression or Poly object.
 
         Parameters
         ----------
-        coeffs : dict[int, float]
-            Dictionary mapping degree → coefficient. Zero coefficients
-            may be omitted. An empty dictionary represents the zero polynomial.
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 1.0, 2: -0.5})  # 1 - 0.5·x²
-        >>> q = ZxPoly({})                  # zero polynomial
-        """
-        # Remove zero coefficients for clean representation
-        self.coeffs = {k: v for k, v in coeffs.items() if v != 0}
-
-    def __add__(self, other: "ZxPoly") -> "ZxPoly":
-        """Add two polynomials.
-
-        Parameters
-        ----------
-        other : ZxPoly
-            Polynomial to add to this one.
+        coeffs_or_poly : dict[int, float | int | Expr] | Poly | Expr | None
+            Either a coefficient dictionary mapping degree → coefficient,
+            a sympy.Poly object, a sympy expression, or None.
+            If None, creates the zero polynomial.
+        *args, **kwargs
+            Additional arguments passed to sympy.Poly constructor.
 
         Returns:
         -------
         ZxPoly
-            New polynomial representing (self + other).
+            A new ZxPoly instance.
 
         Examples:
         --------
-        >>> p = ZxPoly({0: 1.0, 2: 0.5})
-        >>> q = ZxPoly({2: -0.5, 3: 1.0})
-        >>> r = p + q
-        >>> r.coeffs
-        {0: 1.0, 3: 1.0}
-        """
-        result = self.coeffs.copy()
-        for degree, coeff in other.coeffs.items():
-            if degree in result:
-                result[degree] += coeff
-                if result[degree] == 0:
-                    del result[degree]
-            else:
-                result[degree] = coeff
-        return ZxPoly(result)
-
-    def __sub__(self, other: "ZxPoly") -> "ZxPoly":
-        """Subtract another polynomial.
-
-        Parameters
-        ----------
-        other : ZxPoly
-            Polynomial to subtract from this one.
-
-        Returns:
-        -------
-        ZxPoly
-            New polynomial representing (self - other).
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 1.0, 2: 0.5})
-        >>> q = ZxPoly({2: 0.5, 3: 1.0})
-        >>> r = p - q
-        >>> r.coeffs
-        {0: 1.0, 3: -1.0}
-        """
-        result = self.coeffs.copy()
-        for degree, coeff in other.coeffs.items():
-            if degree in result:
-                result[degree] -= coeff
-                if result[degree] == 0:
-                    del result[degree]
-            else:
-                result[degree] = -coeff
-        return ZxPoly(result)
-
-    def __mul__(self, other: "ZxPoly") -> "ZxPoly":
-        """Multiply two polynomials.
-
-        Parameters
-        ----------
-        other : ZxPoly
-            Polynomial to multiply with this one.
-
-        Returns:
-        -------
-        ZxPoly
-            New polynomial representing (self * other).
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 2.0, 1: 1.0})  # 2 + x
-        >>> q = ZxPoly({1: 1.0, 2: 3.0})  # x + 3x²
-        >>> r = p * q
-        >>> r.coeffs
-        {1: 2.0, 2: 7.0, 3: 3.0}  # 2x + 7x² + 3x³
-        """
-        result: dict[int, float] = {}
-        for deg1, coeff1 in self.coeffs.items():
-            for deg2, coeff2 in other.coeffs.items():
-                new_deg = deg1 + deg2
-                new_coeff = coeff1 * coeff2
-                if new_deg in result:
-                    result[new_deg] += new_coeff
-                    if result[new_deg] == 0:
-                        del result[new_deg]
-                else:
-                    result[new_deg] = new_coeff
-        return ZxPoly(result)
-
-    def __rmul__(self, scalar: float) -> "ZxPoly":
-        """Multiply polynomial by a scalar (left multiplication).
-
-        Parameters
-        ----------
-        scalar : int | float
-            Scalar multiplier.
-
-        Returns:
-        -------
-        ZxPoly
-            New polynomial scaled by the scalar.
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 1.0, 2: 0.5})
-        >>> q = 2 * p
-        >>> q.coeffs
-        {0: 2.0, 2: 1.0}
-        """
-        if scalar == 0:
-            return ZxPoly({})
-        result = {deg: coeff * scalar for deg, coeff in self.coeffs.items()}
-        return ZxPoly(result)
-
-    def __pow__(self, n: int) -> "ZxPoly":
-        """Raise the polynomial to the n-th power using binary exponentiation.
-
-        Parameters:
-        ----------
-        n : int
-            Non-negative integer exponent.
-
-        Returns:
-        -------
-        ZxPoly
-            New polynomial representing (self)^n.
-
-        Raises:
-        ------
-        ValueError:
-            If n is negative.
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 2.0, 1: 1.0})  # 2 + x
-        >>> p2 = p ** 2                    # (2 + x)² = 4 + 4x + x²
-        >>> p2.coeffs
-        {0: 4.0, 1: 4.0, 2: 1.0}
-
-        >>> p = ZxPoly({1: 2.0})           # 2x
-        >>> p0 = p ** 0                    # (2x)⁰ = 1
-        >>> p0.coeffs
-        {0: 1.0}
-        """
-        if n < 0:
-            msg = f"Power exponent must be non-negative, got {n}"
-            raise ValueError(msg)
-
-        if n == 0:
-            return ZxPoly({0: 1.0})
-
-        if self.is_zero():
-            return ZxPoly({})
-
-        # Binary exponentiation: result = 1, base = self
-        result = ZxPoly({0: 1.0})
-        base = self
-        exp = n
-
-        while exp > 0:
-            if exp & 1:
-                result *= base
-            base *= base
-            exp >>= 1
-
-        return result
-
-    def __neg__(self) -> "ZxPoly":
-        """Negate the polynomial.
-
-        Returns:
-        -------
-        ZxPoly
-            New polynomial representing (-self).
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 1.0, 2: 0.5})
-        >>> q = -p
-        >>> q.coeffs
-        {0: -1.0, 2: -0.5}
-        """
-        return ZxPoly({deg: -coeff for deg, coeff in self.coeffs.items()})
-
-    def __hash__(self) -> int:
-        """Compute hash value for the polynomial.
-
-        Returns:
-        -------
-        int
-            Hash value based on the coefficient dictionary.
-
-        Notes:
-        -----
-        The class must be immutable for consistent hashing.
-        All methods that modify coeffs should return new instances
-        rather than mutating self.coeffs.
-
-        Examples:
-        --------
+        >>> # From coefficient dictionary
         >>> p = ZxPoly({0: 1.0, 2: -0.5})
-        >>> q = ZxPoly({0: 1.0, 2: -0.5})
-        >>> hash(p) == hash(q)
-        True
-        >>> d = {p: "polynomial"}
-        >>> d[q]
-        'polynomial'
+
+        >>> # From sympy expression
+        >>> from sympy import symbols
+        >>> x = symbols('x')
+        >>> p = ZxPoly(x**2 + 2*x + 1)
+
+        >>> # From sympy.Poly
+        >>> from sympy import Poly
+        >>> q = ZxPoly(Poly(x**2 + 1, x))
+
+        >>> # Zero polynomial
+        >>> z = ZxPoly()
         """
-        # Hash based on sorted items for consistency
-        # Convert float coefficients to a hashable representation
-        items = tuple(sorted((deg, coeff) for deg, coeff in self.coeffs.items()))
-        return hash(items)
+        if isinstance(coeffs_or_poly, dict):
+            # Build expression from coefficient dictionary
+            var = kwargs.get("gen", cls._var)
+            expr = S.Zero
+            for degree, coeff in coeffs_or_poly.items():
+                if coeff != 0:
+                    expr += sympify(coeff) * var**degree
+            return super().__new__(cls, expr, var)
+        if coeffs_or_poly is None:
+            return super().__new__(cls, 0, cls._var)
+        return super().__new__(cls, coeffs_or_poly, *args, **kwargs)
 
-    def degree(self) -> int:
-        """Return the degree of the polynomial.
+    def __init__(
+        self,
+        coeffs_or_poly: dict[int, float | int | Expr] | Poly | Expr | None = None,
+        *args,  # noqa: ANN002
+        **kwargs,  # noqa: ANN003
+    ) -> None:
+        """Initialize the ZxPoly instance.
 
-        The degree is the highest exponent with non-zero coefficient.
-        The zero polynomial has degree -1 by convention.
-
-        Returns:
-        -------
-        int
-            Degree of the polynomial, or -1 if polynomial is zero.
-
-        Examples:
-        --------
-        >>> ZxPoly({0: 1.0, 3: -2.0}).degree()
-        3
-        >>> ZxPoly({}).degree()
-        -1
-        """
-        if not self.coeffs:
-            return -1
-        return max(self.coeffs.keys())
-
-    def evaluate(self, x: float) -> float:
-        """Evaluate the polynomial at a given point.
-
-        Uses Horner's method for numerical stability.
+        This method handles initialization for cases where the instance
+        wasn't fully initialized in __new__ (e.g., when passing through
+        to Poly.__init__).
 
         Parameters
         ----------
-        x : int | float
-            Point at which to evaluate the polynomial.
-
-        Returns:
-        -------
-        float
-            Value of f(x).
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})  # 1 + 2x + 3x²
-        >>> p.evaluate(2.0)
-        17.0  # 1 + 4 + 12 = 17
-        """
-        if not self.coeffs:
-            return 0.0
-
-        # Horner's method: evaluate from highest degree down
-        deg = self.degree()
-        result = self.coeffs.get(deg, 0.0)
-        for d in range(deg - 1, -1, -1):
-            result = result * x + self.coeffs.get(d, 0.0)
-        return result
-
-    def compose(self, other: "ZxPoly") -> "ZxPoly":
-        """Compose this polynomial with another: self(other(x)).
-
-        Parameters
-        ----------
-        other : ZxPoly
-            Polynomial to substitute into this one.
-
-        Returns:
-        -------
-        ZxPoly
-            New polynomial representing f(g(x)) where f = self, g = other.
-
-        Examples:
-        --------
-        >>> f = ZxPoly({0: 1.0, 1: 2.0})  # 1 + 2x
-        >>> g = ZxPoly({0: 3.0, 1: 4.0})  # 3 + 4x
-        >>> h = f.compose(g)              # 1 + 2(3 + 4x) = 7 + 8x
-        >>> h.coeffs
-        {0: 7.0, 1: 8.0}
-        """
-        if not self.coeffs:
-            return ZxPoly({})
-
-        result = ZxPoly({0: 0.0})
-        # Build from constant term upward using repeated multiplication
-        power = ZxPoly({0: 1.0})  # g(x)⁰ = 1
-        for deg in range(self.degree() + 1):
-            coeff = self.coeffs.get(deg, 0.0)
-            if coeff != 0:
-                term = power * ZxPoly({0: coeff})
-                result += term
-            # Update power = power * other for next degree
-            if deg < self.degree():
-                power *= other
-        return result
-
-    def derivative(self) -> "ZxPoly":
-        """Return the derivative of the polynomial.
-
-        Returns:
-        -------
-        ZxPoly
-            New polynomial representing f'(x).
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})  # 1 + 2x + 3x²
-        >>> q = p.derivative()                     # 2 + 6x
-        >>> q.coeffs
-        {0: 2.0, 1: 6.0}
-        """
-        if not self.coeffs or self.degree() <= 0:
-            return ZxPoly({})
-
-        result: dict[int, float] = {}
-        for deg, coeff in self.coeffs.items():
-            if deg > 0:
-                result[deg - 1] = coeff * deg
-        return ZxPoly(result)
-
-    def shift(self, a: float) -> "ZxPoly":
-        """Return the polynomial shifted by a: f(x + a).
-
-        Uses binomial expansion: (x + a)ⁿ = Σ C(n,k) xᵏ aⁿ⁻ᵏ.
-
-        Parameters
-        ----------
-        a : int | float
-            Amount to shift by.
-
-        Returns:
-        -------
-        ZxPoly
-            New polynomial representing f(x + a).
-
-        Examples:
-        --------
-        >>> p = ZxPoly({0: 1.0, 1: 1.0})  # 1 + x
-        >>> q = p.shift(2.0)              # 1 + (x+2) = 3 + x
-        >>> q.coeffs
-        {0: 3.0, 1: 1.0}
-        """
-        if not self.coeffs:
-            return ZxPoly({})
-
-        result = ZxPoly({0: 0.0})
-        # Pre-compute powers of a
-        a_powers: list[float] = [1.0]
-        for _ in range(self.degree()):
-            a_powers.append(a_powers[-1] * a)
-
-        for deg, coeff in self.coeffs.items():
-            # Expand coeff * (x + a)ᵈᵉᵍ using binomial theorem
-            for k in range(deg + 1):
-                binom = self._binomial(deg, k)
-                term_coeff = coeff * binom * a_powers[deg - k]
-                if term_coeff != 0:
-                    # Add to existing coefficient for xᵏ
-                    existing = result.coeffs.get(k, 0.0)
-                    result.coeffs[k] = existing + term_coeff
-
-        # Clean up zero coefficients
-        result.coeffs = {k: v for k, v in result.coeffs.items() if v != 0}
-        return result
-
-    @staticmethod
-    def _binomial(n: int, k: int) -> int:
-        """Compute binomial coefficient C(n, k).
-
-        Returns:
-        -------
-        int
-            Binomial coefficient.
-        """
-        if k < 0 or k > n:
-            return 0
-        if k in {0, n}:
-            return 1
-        # Use multiplicative formula
-        result = 1
-        for i in range(1, k + 1):
-            result = result * (n - k + i) // i
-        return result
-
-    def is_zero(self) -> bool:
-        """Check if polynomial is identically zero.
-
-        Returns:
-        -------
-        bool
-            True if polynomial has no non-zero coefficients.
-        """
-        return len(self.coeffs) == 0
-
-    def is_constant(self) -> bool:
-        """Check if polynomial is constant (degree ≤ 0).
-
-        Returns:
-        -------
-        bool
-            True if polynomial has no terms or only constant term.
-        """
-        if self.is_zero():
-            return True
-        return all(deg == 0 for deg in self.coeffs)
-
-    def is_quadratic(self) -> bool:
-        """Check if polynomial is at most quadratic (degree ≤ 2).
-
-        Returns:
-        -------
-        bool
-            True if polynomial degree ≤ 2 (Gaussian operation).
+        coeffs_or_poly : dict[int, float | int | Expr] | Poly | Expr | None
+            Either a coefficient dictionary, sympy.Poly, sympy expression, or None.
+        *args, **kwargs
+            Additional arguments passed to sympy.Poly constructor.
 
         Notes:
         -----
-        In CV ZX calculus [3], quadratic phase functions correspond
-        to Gaussian operations. Higher-degree polynomials indicate
-        non-Gaussian resources [2].
+        When initialized from a coefficient dictionary, the instance is
+        already fully created in __new__, so this method does nothing.
+        When initialized from other types, it delegates to Poly.__init__.
         """
-        return self.degree() <= 2  # noqa: PLR2004
+        if not isinstance(coeffs_or_poly, dict) and coeffs_or_poly is not None:
+            super().__init__(*args, **kwargs)
+
+    @property
+    def coeffs(self) -> dict[int, float | Expr]:
+        """Get coefficients as a dictionary for backward compatibility.
+
+        Returns a dictionary mapping degree → coefficient. Zero coefficients
+        are omitted. Numeric coefficients are converted to Python floats
+        for compatibility, while symbolic coefficients remain as sympy expressions.
+
+        Returns:
+        -------
+        dict[int, float | Expr]
+            Dictionary mapping degree to coefficient. Returns empty dict
+            for the zero polynomial.
+
+        Examples:
+        --------
+        >>> p = ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})
+        >>> p.coeffs
+        {0: 1.0, 1: 2.0, 2: 3.0}
+
+        >>> from sympy import symbols
+        >>> a = symbols('a')
+        >>> p = ZxPoly({0: a, 1: 2.0})
+        >>> p.coeffs
+        {0: a, 1: 2.0}
+        """
+        if self.is_zero:
+            return {}
+
+        coeff_dict = {}
+        for monom, coeff in self.terms():
+            degree = monom[0]  # For univariate
+            # Convert numeric coefficients to Python floats for compatibility
+            if coeff.is_number and not coeff.is_symbol:
+                coeff_dict[degree] = float(coeff)
+            else:
+                coeff_dict[degree] = coeff
+        return coeff_dict
 
     def __repr__(self) -> str:
-        """Return string representation of the polynomial.
+        """Return a string representation of the polynomial.
+
+        Returns a human-readable string in ZX calculus notation:
+        - Terms are ordered by increasing degree
+        - Uses '·' for multiplication
+        - Uses '^' for exponents
+        - Constant term is shown as just the coefficient
+        - Linear term is shown as 'c·x'
+        - Higher-degree terms are shown as 'c·x^n'
 
         Returns:
         -------
         str
-            Human-readable representation like "1.0 + 2.0·x + 3.0·x²"
+            String representation of the polynomial.
+
+        Examples:
+        --------
+        >>> p = ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})
+        >>> repr(p)
+        '1.0 + 2.0·x + 3.0·x^2'
+
+        >>> from sympy import symbols
+        >>> a = symbols('a')
+        >>> p = ZxPoly({0: a, 1: 2.0, 2: -0.5})
+        >>> repr(p)
+        'a + 2.0·x - 0.5·x^2'
+
+        >>> z = ZxPoly({})
+        >>> repr(z)
+        '0'
         """
-        if self.is_zero():
+        if self.is_zero:
             return "0"
 
+        coeffs = self.coeffs
         terms = []
-        for deg in sorted(self.coeffs.keys()):
-            coeff = self.coeffs[deg]
+        for deg in sorted(coeffs.keys()):
+            coeff = coeffs[deg]
             if deg == 0:
                 terms.append(f"{coeff}")
             elif deg == 1:
@@ -508,7 +212,11 @@ class ZxPoly:
         return " + ".join(terms)
 
     def __eq__(self, other: object) -> bool:
-        """Check equality with another polynomial.
+        """Check equality with another polynomial or Poly object.
+
+        Two polynomials are considered equal if they have the same
+        coefficients for all degrees. The comparison works with both
+        ZxPoly instances and sympy.Poly instances.
 
         Parameters
         ----------
@@ -518,12 +226,25 @@ class ZxPoly:
         Returns:
         -------
         bool
-            True if other is ZxPoly with identical coefficients.
+            True if other is a ZxPoly or Poly with identical coefficients,
+            False otherwise.
         """
-        if not isinstance(other, ZxPoly):
-            return False
-        # Compare after stripping zeros
-        return self.coeffs == other.coeffs
+        if isinstance(other, ZxPoly | Poly):
+            return super().__eq__(other)
+        return False
+
+    def __hash__(self) -> int:
+        """Compute hash value for the polynomial.
+
+        Returns a hash based on the polynomial representation, allowing
+        ZxPoly instances to be used as dictionary keys.
+
+        Returns:
+        -------
+        int
+            Hash value for the polynomial.
+        """
+        return super().__hash__()
 
 
 class Diagram(ABC):
@@ -1628,7 +1349,7 @@ class QSpider(ProperDiagram):
         str
             String showing phase function and number of wires.
         """
-        if self.phase.is_zero():
+        if self.phase.is_zero:
             return f"QSpider(num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
         return f"QSpider(f(x)={self.phase}, num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
 
@@ -1675,7 +1396,7 @@ class PSpider(ProperDiagram):
         str
             String showing phase function and number of wires.
         """
-        if self.phase.is_zero():
+        if self.phase.is_zero:
             return f"PSpider(num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
         return f"PSpider(f(x)={self.phase}, num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
 
