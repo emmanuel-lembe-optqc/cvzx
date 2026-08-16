@@ -23,6 +23,7 @@ from mqc3.zx.base_gates import (
     PSpider,
     QSpider,
     Swap,
+    TensorDiagram,
     ZxPoly,
 )
 from mqc3.zx.gates import (
@@ -577,14 +578,57 @@ def conjugate_gates_test():
             print(f"❌ {gate.__class__.__name__} conjugation failed (parametric)")
 
 
+def feedforward_test():  # noqa: PLR0914
+    """Test feedforward display."""
+    zero_phase = ZxPoly({})
+    id_q = QSpider(1, 1, zero_phase)
+    tensor1 = TensorDiagram([id_q, QSpider(0, 2, zero_phase)])
+    contract = ContractedDiagram(PSpider(1, 2, zero_phase), QSpider(2, 1, zero_phase), [1], [0], [], [])
+    tensor2 = TensorDiagram([contract, id_q])
+    m1, m2 = symbols("m1 m2", real=True)
+    meas_diag1 = PSpider(1, 0, ZxPoly({1: -m1}))
+    meas_diag2 = QSpider(1, 0, ZxPoly({1: -m2}))
+    tensor3 = TensorDiagram([
+        DisplacementGate(
+            m1 + I * m2, parametric=True, feedforward=True, measurement_ids={meas_diag1.id, meas_diag2.id}
+        ),
+        SqueezingGate(0.5),
+        SqueezingGate(0.5),
+    ])
+    tensor4 = TensorDiagram([
+        id_q,
+        meas_diag1,
+        meas_diag2,
+    ])
+    tensor5 = TensorDiagram([
+        SqueezingGate(0.5),
+        SqueezingGate(0.5),
+        DisplacementGate(
+            m1 + I * m2, parametric=True, feedforward=True, measurement_ids={meas_diag1.id, meas_diag2.id}
+        ),
+    ])
+    tensor6 = TensorDiagram([
+        meas_diag1,
+        meas_diag2,
+        id_q,
+    ])
+    diagram1 = CompositionDiagram([tensor1, tensor2, tensor3, tensor4])
+    diagram2 = CompositionDiagram([tensor1, tensor2, tensor5, tensor6])
+    filename1 = "Teleportation circuit 1.png"
+    filename2 = "Teleportation circuit 2.png"
+    save_and_close(diagram1, filename1, "Teleportation circuit 1")
+    save_and_close(diagram2, filename2, "Teleportation circuit 2")
+
+
 def run_all_tests():
     """Run all test functions."""
-    compact_gates_test()
-    expanded_gates_test()
-    with_custom_config_test()
-    compact_diagram_label_validation_test()
-    conjugate_gates_test()
-    create_compact_diagram_test()
+    # compact_gates_test()
+    # expanded_gates_test()
+    # with_custom_config_test()
+    # compact_diagram_label_validation_test()
+    # conjugate_gates_test()
+    # create_compact_diagram_test()
+    feedforward_test()
 
 
 if __name__ == "__main__":

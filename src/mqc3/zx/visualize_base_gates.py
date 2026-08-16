@@ -46,6 +46,7 @@ from mqc3.zx.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
+from mqc3.zx.nx_graph import GateRegister, to_graph
 
 
 @dataclass
@@ -140,6 +141,11 @@ class DiagramVisualizer:
         ax.set_aspect("equal")
         ax.axis("off")
 
+        # Build the graph corresponding to diagram
+        self.reg = GateRegister()
+        self.graph = to_graph(diagram)
+        self.reg.build_from_graph(self.graph)
+
         if title:
             ax.set_title(title, fontsize=self.config.fontsize)
 
@@ -155,7 +161,7 @@ class DiagramVisualizer:
             ax.text(
                 0.5, 0.5, f"Unknown diagram type: {type(diagram)}", ha="center", va="center", transform=ax.transAxes
             )
-
+        self._draw_feedforward(ax)
         plt.tight_layout()
         return fig
 
@@ -401,6 +407,9 @@ class DiagramVisualizer:
             output_positions, init_input_positions, radius = self._draw_fourier(
                 ax, x, y, diagram, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs
             )
+        # Register the position of nodes and its radius
+        self.graph.nodes[diagram.id]["pos"] = (x, y)
+        self.graph.nodes[diagram.id]["radius"] = radius
         return output_positions, init_input_positions, radius
 
     def _draw_composition(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0917
@@ -1540,6 +1549,41 @@ class DiagramVisualizer:
             ax.add_patch(output1)
         return output_positions, init_input_positions, radius
 
+    def _draw_feedforward(self, ax: plt.axes) -> None:
+        """Draw the classical link corresponding to feedforwards.
+
+        Parameters:
+        ----------
+        ax : plt.Axes
+            Matplotlib axes
+        diagram: Diagram
+            Input diagram.
+        """
+        for node_id in self.reg.displacement_gates:
+            if self.graph.nodes[node_id]["feedforward"]:
+                x2, y2 = self.graph.nodes[node_id]["pos"]
+                r2 = self.graph.nodes[node_id]["radius"]
+                for meas_node in self.graph.nodes[node_id]["measurement_ids"]:
+                    x1, y1 = self.graph.nodes[meas_node]["pos"]
+                    r1 = self.graph.nodes[meas_node]["radius"]
+                    # Depending of the relative vertical position we change the
+                    # edges of the arrow of the classical link
+                    pos1 = (x1 + r1, y1 + r1)
+                    pos2 = (x2 - r2, y2 - r2)
+                    if y1 > y2:
+                        pos1 = (x1 + r1, y1 - r1)
+                        pos2 = (x2 - r2, y2 + r2)
+                    arrow = patches.FancyArrowPatch(
+                        pos1,
+                        pos2,
+                        arrowstyle="->",
+                        linestyle="dashed",
+                        ec="green",
+                        mutation_scale=20,
+                        linewidth=self.config.wire_width,
+                    )
+                    ax.add_patch(arrow)
+
     def _format_phase(self, phase: ZxPoly | str) -> str:  # noqa: PLR0912
         """Format phase polynomial or Compact Diagram label for display.
 
@@ -1758,3 +1802,34 @@ def is_wiring_diagram(diagram: Diagram) -> bool:
         and not diagram.phase.coeffs
         and diagram.num_inputs == diagram.num_outputs
     )
+
+
+if __name__ == "__main__":
+    from sympy import I, symbols
+
+    from mqc3.zx.gates import DisplacementGate, SqueezingGate
+
+    zero_phase = ZxPoly({})
+    id_q = QSpider(1, 1, zero_phase)
+    tensor1 = TensorDiagram([id_q, QSpider(0, 2, zero_phase)])
+    contract = ContractedDiagram(PSpider(1, 2, zero_phase), QSpider(2, 1, zero_phase), [1], [0], [], [])
+    tensor2 = TensorDiagram([contract, id_q])
+    m1, m2 = symbols("m1 m2", real=True)
+    meas_diag1 = PSpider(1, 0, ZxPoly({1: -m1}))
+    meas_diag2 = QSpider(1, 0, ZxPoly({1: -m2}))
+    tensor3 = TensorDiagram([
+        DisplacementGate(
+            m1 + I * m2, parametric=True, feedforward=True, measurement_ids={meas_diag1.id, meas_diag2.id}
+        ),
+        SqueezingGate(0.5),
+        SqueezingGate(0.5),
+    ])
+    tensor4 = TensorDiagram([
+        id_q,
+        meas_diag1,
+        meas_diag2,
+    ])
+    diagram = CompositionDiagram([tensor1, tensor2, tensor3, tensor4])
+    fig = visualize(diagram, title="feedforward")
+    fig.savefig("feedforward", dpi=150, bbox_inches="tight")
+    plt.close(fig)

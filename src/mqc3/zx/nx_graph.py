@@ -43,6 +43,239 @@ from mqc3.zx.gates import (
 )
 
 
+class GateRegister:
+    """Registry for tracking specific gate types and nodes in a CV ZX graph.
+
+    The GateRegister maintains sets of node IDs for different gate types,
+    enabling O(1) lookups instead of O(N) scans of the entire graph.
+    This is essential for performance in large circuits.
+
+    The registry tracks:
+        - Proper nodes: Q/P spiders, squeezing, displacement, rotation, Fourier gates
+        - Terminals: input states (0→1) and measurements (1→0)
+        - Containers: tensor, composition, and contracted diagrams
+
+    The registry must be kept in sync with the graph. Whenever the graph is
+    modified (nodes added, removed, or changed), the registry must be updated
+    accordingly using `add_node()`, `remove_node()`, or rebuilding from scratch.
+
+    Parameters:
+    ----------
+        squeezing_gates set[int]: Node IDs of squeezing gates (Sq)
+        displacement_gates set[int]: Node IDs of displacement gates (D)
+        rotation_gates set[int]: Node IDs of phase rotation gates (R)
+        fourier_gates set[int]: Node IDs of Fourier gates (F, F†, F²)
+        identity_spiders set[int]: Node IDs of identity spiders (zero phase, 1→1)
+        input_states set[int]: Node IDs of input states (0 inputs, 1 output)
+        measurement_nodes set[int]: Node IDs of measurements (1 input, 0 outputs)
+        contracted_diagrams set[int]: Node IDs of ContractedDiagram containers
+        tensor_nodes set[int]: Node IDs of TensorDiagram containers
+        composition_nodes set[int]: Node IDs of CompositionDiagram containers
+    """
+
+    def __init__(self) -> None:
+        """Initialize an empty GateRegister with all sets empty."""
+        self.squeezing_gates: set[int] = set()
+        self.displacement_gates: set[int] = set()
+        self.rotation_gates: set[int] = set()
+        self.fourier_gates: set[int] = set()
+        self.identity_spiders: set[int] = set()
+        self.input_states: set[int] = set()
+        self.measurement_nodes: set[int] = set()
+        self.contracted_diagrams: set[int] = set()
+        self.tensor_nodes: set[int] = set()
+        self.composition_nodes: set[int] = set()
+
+    def add_node(self, node_id: int, attrs: dict) -> None:  # noqa: C901
+        """Add a node to the appropriate sets based on its attributes.
+
+        This method inspects the node's attributes and adds its ID to the
+        corresponding sets based on its type, kind, and container type.
+
+        Parameters:
+        ----------
+        node_id : int
+            The ID of the node to add.
+        attrs : dict
+            The node's attributes from the graph, containing at least 'kind',
+            and optionally 'type', 'container_type', 'n_inputs', 'n_outputs',
+            and 'phase'.
+
+        Notes:
+        -----
+        - Container nodes (kind='container') are added to container-specific sets.
+        - Proper nodes (kind='proper') are added to gate-type-specific sets.
+        - Identity spiders are detected using `_is_identity_spider()`.
+        - Input states have n_inputs=0, n_outputs=1.
+        - Measurements have n_inputs=1, n_outputs=0.
+        """
+        gate_type = attrs.get("type")
+        kind = attrs.get("kind")
+        container_type = attrs.get("container_type")
+
+        # Ignore nodes that are neither proper nor container
+        if kind not in {"proper", "container", "compact"}:
+            return
+
+        # Handle container nodes
+        if kind == "container":
+            if container_type == "tensor":
+                self.tensor_nodes.add(node_id)
+            elif container_type == "composition":
+                self.composition_nodes.add(node_id)
+            elif container_type == "contracted":
+                self.contracted_diagrams.add(node_id)
+            return
+
+        # Handle proper nodes
+        # Gate types
+        if gate_type == "SqueezingGate":
+            self.squeezing_gates.add(node_id)
+        elif gate_type == "DisplacementGate":
+            self.displacement_gates.add(node_id)
+        elif gate_type == "PhaseRotationGate":
+            self.rotation_gates.add(node_id)
+        elif gate_type in {"Fourier", "FourierInv", "Fourier2"}:
+            self.fourier_gates.add(node_id)
+
+        # Identity spiders
+        if self._is_identity_spider(attrs):
+            self.identity_spiders.add(node_id)
+
+        # Terminals
+        if self._is_input_state(attrs):
+            self.input_states.add(node_id)
+        elif self._is_measurement(attrs):
+            self.measurement_nodes.add(node_id)
+
+    def remove_node(self, node_id: int) -> None:
+        """Remove a node from all sets.
+
+        This method removes the given node ID from every set in the registry.
+        It uses `discard()` to safely handle cases where the node is not present.
+
+        Parameters:
+        ----------
+        node_id : int
+            The ID of the node to remove from the registry.
+        """
+        self.squeezing_gates.discard(node_id)
+        self.displacement_gates.discard(node_id)
+        self.rotation_gates.discard(node_id)
+        self.fourier_gates.discard(node_id)
+        self.identity_spiders.discard(node_id)
+        self.input_states.discard(node_id)
+        self.measurement_nodes.discard(node_id)
+        self.contracted_diagrams.discard(node_id)
+        self.tensor_nodes.discard(node_id)
+        self.composition_nodes.discard(node_id)
+
+    def copy(self) -> "GateRegister":
+        """Create a shallow copy of the register.
+
+        Returns:
+        -------
+        GateRegister
+            A new GateRegister instance with copies of all sets.
+
+        Notes:
+        -----
+        This is useful for parallelization where each partition needs its
+        own independent registry that can be modified without affecting others.
+        The copy is shallow (sets are copied, but the contained integers are immutable).
+        """
+        new_reg = GateRegister()
+        new_reg.squeezing_gates = self.squeezing_gates.copy()
+        new_reg.displacement_gates = self.displacement_gates.copy()
+        new_reg.rotation_gates = self.rotation_gates.copy()
+        new_reg.fourier_gates = self.fourier_gates.copy()
+        new_reg.identity_spiders = self.identity_spiders.copy()
+        new_reg.input_states = self.input_states.copy()
+        new_reg.measurement_nodes = self.measurement_nodes.copy()
+        new_reg.contracted_diagrams = self.contracted_diagrams.copy()
+        new_reg.tensor_nodes = self.tensor_nodes.copy()
+        new_reg.composition_nodes = self.composition_nodes.copy()
+        return new_reg
+
+    def clear(self) -> None:
+        """Clear all sets in the registry.
+
+        This removes all node IDs from every set, effectively resetting
+        the registry to an empty state.
+        """
+        self.squeezing_gates.clear()
+        self.displacement_gates.clear()
+        self.rotation_gates.clear()
+        self.fourier_gates.clear()
+        self.identity_spiders.clear()
+        self.input_states.clear()
+        self.measurement_nodes.clear()
+        self.contracted_diagrams.clear()
+        self.tensor_nodes.clear()
+        self.composition_nodes.clear()
+
+    def build_from_graph(self, graph: nx.DiGraph) -> None:
+        """Build the entire registry from a graph.
+
+        This clears all sets and then adds every node in the graph
+        using `add_node()`. This is useful when the graph has been
+        extensively modified and the registry may be out of sync.
+
+        Parameters:
+        ----------
+        graph : nx.DiGraph
+            The graph to rebuild the registry from.
+
+        Notes:
+        -----
+        This operation is O(N) where N is the number of nodes in the graph.
+        It should be used sparingly; incremental updates are preferred.
+        """
+        self.clear()
+        for node_id, attrs in graph.nodes(data=True):
+            self.add_node(node_id, attrs)
+
+    def _is_identity_spider(self, attrs: dict) -> bool:
+        """Check if node attributes represent an identity spider.
+
+        Returns:
+        -------
+        bool
+        """
+        node_type = attrs.get("type")
+        if node_type not in {"QSpider", "PSpider"}:
+            return False
+
+        n_inputs = attrs.get("n_inputs", 0)
+        n_outputs = attrs.get("n_outputs", 0)
+        if n_inputs != 1 or n_outputs != 1:
+            return False
+
+        phase = attrs.get("phase")
+        if phase is None:
+            return False
+
+        return phase.is_zero
+
+    def _is_input_state(self, attrs: dict) -> bool:
+        """Check if a node is an input state.
+
+        Returns:
+        -------
+        bool
+        """
+        return attrs.get("n_inputs") == 0 and attrs.get("n_outputs") == 1
+
+    def _is_measurement(self, attrs: dict) -> bool:
+        """Check if a node is a measurement.
+
+        Returns:
+        -------
+        bool
+        """
+        return attrs.get("n_inputs") == 1 and attrs.get("n_outputs") == 0
+
+
 def to_graph(diagram: Diagram) -> nx.DiGraph:
     """Convert a CV ZX diagram to a directed graph representation.
 
@@ -461,10 +694,7 @@ def _add_proper_node(
     node_type = diagram.__class__.__name__
     kind = "proper" if isinstance(diagram, ProperDiagram) else "compact"
 
-    if isinstance(diagram, DisplacementGate):
-        phase = getattr(diagram, "alpha", None)
-        # TO-DO I need to add a special attribute for feedforwarding
-    elif isinstance(diagram, PhaseRotationGate):
+    if isinstance(diagram, PhaseRotationGate):
         phase = getattr(diagram, "theta", None)
     elif isinstance(diagram, SqueezingGate):
         phase = getattr(diagram, "tau", None)
@@ -486,6 +716,27 @@ def _add_proper_node(
         external_inputs=list(range(diagram.num_inputs)),
         external_outputs=list(range(diagram.num_outputs)),
     )
+
+    if isinstance(diagram, DisplacementGate):
+        phase = getattr(diagram, "alpha", None)
+        feedforward = getattr(diagram, "feedforward", None)
+        measurement_ids = getattr(diagram, "measurement_ids", None)
+        G.add_node(
+            node_id,
+            id=node_id,
+            type=node_type,
+            kind=kind,
+            phase=phase,
+            feedforward=feedforward,
+            measurement_ids=measurement_ids,
+            n_inputs=diagram.num_inputs,
+            n_outputs=diagram.num_outputs,
+            diagram=diagram,
+            container_id=container_id,
+            # Store external port mappings
+            external_inputs=list(range(diagram.num_inputs)),
+            external_outputs=list(range(diagram.num_outputs)),
+        )
     return node_id
 
 

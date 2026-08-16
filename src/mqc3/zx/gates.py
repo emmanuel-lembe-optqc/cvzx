@@ -295,6 +295,11 @@ class DisplacementGate(CompactDiagram):
         Displacement amplitude. Can be numeric or symbolic.
     parametric : bool
         If True, treat alpha as symbolic parameter. Default False.
+    feedforward : bool
+        If True, means the displacement is linked to a measurement.
+    measurement_ids : set[int] | None
+        Measurement diagrams linked to this displacement gate when used as
+        feedforward.
     label : str
         String label for the gate.
     _num_inputs : int
@@ -320,6 +325,11 @@ class DisplacementGate(CompactDiagram):
     >>> # Substitute parameters
     >>> D_sub = D.substitute_parameters({a: 0.5, b: 0.3})
 
+    >>> from base_gates import QSpider, ZxPoly
+    >>> m = symbols('m', real=True)
+    >>> meas = QSpider(1, 0, ZxPoly({1: m}))
+    >>> D = Displacement(m + I*2, parametric=True, feedforward=True, measurement_ids = {meas.id})
+
     References:
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.1, Eq. (57)
@@ -327,6 +337,8 @@ class DisplacementGate(CompactDiagram):
 
     alpha: float | int | complex | Expr
     parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     label: str = field(init=False)
     _num_inputs: int = field(default=1, init=False)
     _num_outputs: int = field(default=1, init=False)
