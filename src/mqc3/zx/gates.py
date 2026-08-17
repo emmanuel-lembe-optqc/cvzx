@@ -515,7 +515,7 @@ class DisplacementGate(CompactDiagram):
             raise TypeError(msg_0)
 
     def __post_init__(self) -> None:
-        """Initialize the displacement gate and validate parameters."""
+        """Initialize the displacement gate and validate parameters."""  # noqa: DOC501
         # Convert numeric alpha to sympy if parametric
         if self.parametric and not isinstance(self.alpha, Expr):
             self.alpha = sympify(self.alpha)
@@ -532,6 +532,14 @@ class DisplacementGate(CompactDiagram):
         else:
             self.label = f"D({self.alpha:.2f})"
 
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
         super().__post_init__()
 
     def _get_re_im(self) -> tuple[float | int | complex | Expr, float | int | complex | Expr]:

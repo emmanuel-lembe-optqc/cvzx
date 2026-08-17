@@ -14,6 +14,7 @@ import networkx as nx
 
 from mqc3.zx.base_gates import Diagram
 from mqc3.zx.nx_graph import (
+    GateRegister,
     to_diagram,
     to_graph,
 )
@@ -78,7 +79,7 @@ class RewriteRule(ABC):
             A match returned by `match()`.
         """
 
-    def apply_rule(self, G: nx.DiGraph) -> nx.DiGraph:  # noqa: N803
+    def apply_rule(self, G: nx.DiGraph, registry: GateRegister) -> nx.DiGraph:  # noqa: N803
         """Apply a rule to the entire graph.
 
         Parameters:
@@ -86,13 +87,16 @@ class RewriteRule(ABC):
         diagram : Diagram
             The diagram to modify.
 
+        registry : GateRegister
+            Registry for tracking specific gate types and nodes in a CV ZX graph.
+
         Returns:
         -------
         Diagram
             The modified diagram.
         """
         # Find all matches
-        matches = self.match(G)
+        matches = self.match(G, registry)
 
         if not matches:
             return G
@@ -162,13 +166,16 @@ class IdentityRule(RewriteRule):
     After removal, containers with a single element are flattened.
     """
 
-    def match(self, G: nx.DiGraph) -> list[dict]:  # noqa: N803
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
         """Find all identity spiders in the graph.
 
         Parameters:
         ----------
-        G : nx.DiGraph
+        graph : nx.DiGraph
             The graph to search.
+
+        registry : GateRegister
+            Registry for tracking specific gate types and nodes in a CV ZX graph.
 
         Returns:
         -------
@@ -179,11 +186,12 @@ class IdentityRule(RewriteRule):
         """
         matches = []
 
-        for node, attrs in G.nodes(data=True):
+        for node in registry.identity_spiders:
+            attrs = graph.nodes[node]
             if (
                 attrs.get("kind") == "proper"
                 and is_wiring_node_from_attrs(attrs)
-                and G.nodes[attrs["container_id"]]["container_type"] == "composition"
+                and graph.nodes[attrs["container_id"]]["container_type"] == "composition"
             ):
                 matches.append({
                     "node_id": node,
@@ -197,7 +205,7 @@ class IdentityRule(RewriteRule):
 
         Parameters:
         ----------
-        G : nx.DiGraph
+        graph : nx.DiGraph
             The graph to modify.
         match : dict
             Match containing 'node_id' and 'container_id'.
@@ -241,6 +249,208 @@ class IdentityRule(RewriteRule):
             graph.nodes[container_id]["sub_diagram_ids"].pop(idx)
             if len(sub_ids) == 1:
                 self._flatten_container(graph, container_id)
+
+
+class FusionRule(RewriteRule):
+    r"""Fusion rule (f) from [3] Eq. (70) & (71) - Graph-based version.
+
+    Two same-type spiders connected by wires can be fused into a single spider.
+    For Q-spiders: two q-spiders connected by wires can be fused with phase addition.
+    For P-spiders: two p-spiders connected by wires can be fused with phase addition.
+
+    The rule applies when:
+    - Both spiders are the same type (both Q or both P)
+    - They are in a ContractedDiagram container
+    - They are connected via some wires (I1 and I2 matching J1 and J2)
+    - The resulting spider has:
+        inputs = inputs of first + inputs of second (minus connected wires)
+        outputs = outputs of first + outputs of second (minus connected wires)
+    - Phase is the sum of the two phases
+
+    The rule applies to ContractedDiagram containers anywhere in the graph.
+    After fusion, containers with a single element are flattened.
+    """
+
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:  # noqa: PLR0914
+        """Find all ContractedDiagram containers containing fusible spiders.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+
+        registry : GateRegister
+            Registry for tracking specific gate types and nodes in a CV ZX graph.
+
+        Returns:
+        -------
+        list[dict]
+            List of matches, each containing:
+            - 'contracted_id': the node ID of the ContractedDiagram
+            - 'first_id': the node ID of the first spider
+            - 'second_id': the node ID of the second spider
+            - 'kept_first_inputs': list of input indices kept from first spider
+            - 'kept_second_inputs': list of input indices kept from second spider
+            - 'kept_first_outputs': list of output indices kept from first spider
+            - 'kept_second_outputs': list of output indices kept from second spider
+            - 'J1': connections from first spider outputs to second spider inputs
+            - 'I1': connections from second spider outputs to first spider inputs
+            - 'J2': connections from first spider inputs to second spider outputs
+            - 'I2': connections from second spider inputs to first spider outputs
+        """
+        matches = []
+
+        for node in registry.contracted_diagrams:
+            # Check if this is a ContractedDiagram container
+            # Get the first and second diagrams
+            attrs = graph.nodes[node]
+            first_id = attrs.get("first_id")
+            second_id = attrs.get("second_id")
+
+            if first_id is None or second_id is None:
+                continue
+
+            # Check if both are spiders (QSpider or PSpider)
+            first_attrs = graph.nodes[first_id]
+            second_attrs = graph.nodes[second_id]
+
+            first_type = first_attrs.get("type")
+            second_type = second_attrs.get("type")
+
+            # Both must be spiders of the same type
+            if not (first_type in {"QSpider", "PSpider"} and second_type in {"QSpider", "PSpider"}):
+                continue
+
+            if first_type != second_type:
+                continue
+
+            # Get the connectivity information
+            J1 = attrs.get("J1", [])  # first outputs to second inputs  # noqa: N806
+            I1 = attrs.get("I1", [])  # second outputs to first inputs  # noqa: N806
+            J2 = attrs.get("J2", [])  # first inputs to second outputs  # noqa: N806
+            I2 = attrs.get("I2", [])  # second inputs to first outputs  # noqa: N806
+
+            # Check if there is at least one connection between the spiders
+            has_connection = (len(J1) > 0 and len(J2) > 0) or (len(I1) > 0 and len(I2) > 0)
+
+            if not has_connection:
+                continue
+
+            # Get kept inputs and outputs
+            kept_first_inputs = attrs.get("kept_first_inputs", [])
+            kept_second_inputs = attrs.get("kept_second_inputs", [])
+            kept_first_outputs = attrs.get("kept_first_outputs", [])
+            kept_second_outputs = attrs.get("kept_second_outputs", [])
+
+            # Store the match
+            matches.append({
+                "contracted_id": node,
+                "first_id": first_id,
+                "second_id": second_id,
+                "first_type": first_type,
+                "kept_first_inputs": kept_first_inputs,
+                "kept_second_inputs": kept_second_inputs,
+                "kept_first_outputs": kept_first_outputs,
+                "kept_second_outputs": kept_second_outputs,
+                "J1": J1,
+                "I1": I1,
+                "J2": J2,
+                "I2": I2,
+            })
+
+        return matches
+
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # noqa: PLR0914
+        """Fuse two same-type spiders in a ContractedDiagram in-place.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        match : dict
+            Match containing the ContractedDiagram and spider information.
+        """
+        contracted_id = match["contracted_id"]
+        first_id = match["first_id"]
+        second_id = match["second_id"]
+        first_type = match["first_type"]
+
+        # Get attributes
+        contracted_attrs = graph.nodes[contracted_id]
+        first_attrs = graph.nodes[first_id]
+        second_attrs = graph.nodes[second_id]
+
+        # Get phases and sum them
+        first_phase = first_attrs.get("phase")
+        second_phase = second_attrs.get("phase")
+
+        if first_phase is None or second_phase is None:
+            return  # Cannot fuse without phases
+
+        # Compute new phase (sum of both phases)
+        new_phase = first_phase + second_phase
+
+        # Compute new arities
+        # Inputs = kept inputs from first + kept inputs from second
+        # (minus connected wires which are removed)
+        new_n_inputs = len(match["kept_first_inputs"]) + len(match["kept_second_inputs"])
+        new_n_outputs = len(match["kept_first_outputs"]) + len(match["kept_second_outputs"])
+
+        # Determine spider type
+        fused_type = "QSpider" if first_type == "QSpider" else "PSpider"
+
+        # Get parent container info before modifying
+        parent_container_id = contracted_attrs.get("container_id")
+        is_root = contracted_attrs.get("is_root", False)
+
+        # Contract the two spiders into one
+        # This preserves all connections from both nodes
+        nx.contracted_nodes(graph, first_id, second_id, self_loops=False, copy=False)
+        del graph.nodes[first_id]["contraction"]
+
+        # Now update the contracted node (first_id) with fused attributes
+        graph.nodes[first_id].update({
+            "type": fused_type,
+            "n_inputs": new_n_inputs,
+            "n_outputs": new_n_outputs,
+            "phase": new_phase,
+            "container_id": parent_container_id,
+            "is_root": is_root,
+        })
+
+        # Now remove the ContractedDiagram container
+        # First, update the parent container to point to first_id instead of contracted_id
+        if parent_container_id is not None and parent_container_id in graph.nodes:
+            parent_attrs = graph.nodes[parent_container_id]
+            parent_type = parent_attrs.get("container_type")
+
+            if parent_type in {"composition", "tensor"}:
+                # Replace in sub_diagram_ids
+                sub_ids = parent_attrs.get("sub_diagram_ids", [])
+                if contracted_id in sub_ids:
+                    idx = sub_ids.index(contracted_id)
+                    sub_ids[idx] = first_id
+                    graph.nodes[parent_container_id]["sub_diagram_ids"] = sub_ids
+                    # Update container_id of the fused spider
+                    graph.nodes[first_id]["container_id"] = parent_container_id
+
+            elif parent_type == "contracted":
+                # Replace in first_id or second_id
+                if parent_attrs.get("first_id") == contracted_id:
+                    parent_attrs["first_id"] = first_id
+                elif parent_attrs.get("second_id") == contracted_id:
+                    parent_attrs["second_id"] = first_id
+                # Update container_id of the fused spider
+                graph.nodes[first_id]["container_id"] = parent_container_id
+
+        else:
+            # ContractedDiagram was root
+            graph.nodes[first_id]["is_root"] = True
+            graph.nodes[first_id]["container_id"] = None
+
+        # Remove the ContractedDiagram container node
+        if contracted_id in graph.nodes:
+            graph.remove_node(contracted_id)
 
 
 def is_wiring_node_from_attrs(attrs: dict) -> bool:
@@ -293,5 +503,7 @@ def apply_rule_to_diagram(rule: RewriteRule, diagram: Diagram) -> Diagram:
         The modified diagram.
     """
     graph = to_graph(diagram)
-    rule.apply_rule(graph)
+    register = GateRegister()
+    register.build_from_graph(graph)
+    rule.apply_rule(graph, register)
     return to_diagram(graph)

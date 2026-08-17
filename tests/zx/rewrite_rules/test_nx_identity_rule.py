@@ -29,7 +29,7 @@ from mqc3.zx.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
-from mqc3.zx.nx_graph import to_diagram, to_graph
+from mqc3.zx.nx_graph import GateRegister, to_diagram, to_graph
 from mqc3.zx.nx_rewrite_rules import IdentityRule, apply_rule_to_diagram
 
 
@@ -109,7 +109,9 @@ class TestIdentityRule(unittest.TestCase):
         """Identity inside a CompositionDiagram should be matched."""
         comp = CompositionDiagram([self.id_q, self.fourier])
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 1
         assert matches[0]["node_id"] == self.id_q.id
         assert matches[0]["container_id"] == comp.id
@@ -118,7 +120,9 @@ class TestIdentityRule(unittest.TestCase):
         """Identity inside a CompositionDiagram should be matched."""
         comp = CompositionDiagram([self.fourier, self.id_p, self.fourier_inv])
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 1
         assert matches[0]["node_id"] == self.id_p.id
 
@@ -126,7 +130,9 @@ class TestIdentityRule(unittest.TestCase):
         """Multiple identities should be matched."""
         comp = CompositionDiagram([self.fourier, self.id_p, self.fourier_inv, self.id_q])
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 2
         node_ids = [m["node_id"] for m in matches]
         assert self.id_p.id in node_ids
@@ -137,7 +143,9 @@ class TestIdentityRule(unittest.TestCase):
         inner = CompositionDiagram([self.id_q, self.fourier])
         outer = CompositionDiagram([inner, self.fourier2])
         graph = to_graph(outer)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 1
         assert matches[0]["node_id"] == self.id_q.id
         # The identity is inside the inner composition
@@ -148,7 +156,9 @@ class TestIdentityRule(unittest.TestCase):
         """Identity inside a TensorDiagram should be matched (graph sees all nodes)."""
         tensor = TensorDiagram([self.id_q, self.fourier, self.id_q3x3])
         graph = to_graph(tensor)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         # In the graph, identities inside tensors ARE visible
         # The identity rule matches any identity spider regardless of container
         assert len(matches) == 0
@@ -158,7 +168,9 @@ class TestIdentityRule(unittest.TestCase):
         comp = CompositionDiagram([self.non_id_p_3x3, TensorDiagram([self.beam_splitter1, self.id_q])])
         tensor = TensorDiagram([self.id_q, comp, self.non_id_q_3x3])
         graph = to_graph(tensor)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 0
 
     def test_match_compos_in_tensor(self):
@@ -167,9 +179,15 @@ class TestIdentityRule(unittest.TestCase):
         graph2 = to_graph(self.tensor2)
         graph3 = to_graph(self.tensor3)
 
-        matches1 = self.rule.match(graph1)
-        matches2 = self.rule.match(graph2)
-        matches3 = self.rule.match(graph3)
+        reg1 = GateRegister()
+        reg1.build_from_graph(graph1)
+        matches1 = self.rule.match(graph1, reg1)
+        reg2 = GateRegister()
+        reg2.build_from_graph(graph2)
+        matches2 = self.rule.match(graph2, reg2)
+        reg3 = GateRegister()
+        reg3.build_from_graph(graph3)
+        matches3 = self.rule.match(graph3, reg3)
 
         # tensor1: id_q and id_p in comp1
         assert len(matches1) == 2
@@ -184,7 +202,9 @@ class TestIdentityRule(unittest.TestCase):
         """Identity as first or second of ContractedDiagram should be matched (graph sees all)."""
         contracted = ContractedDiagram(self.id_q, self.fourier, [0], [0], [], [])
         graph = to_graph(contracted)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 0
 
     def test_match_contracted_with_composition1(self):
@@ -192,7 +212,9 @@ class TestIdentityRule(unittest.TestCase):
         comp = CompositionDiagram([self.id_q, self.fourier])
         contracted = ContractedDiagram(comp, self.swap, [0], [0], [], [])
         graph = to_graph(contracted)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 1
         assert matches[0]["node_id"] == self.id_q.id
 
@@ -201,7 +223,9 @@ class TestIdentityRule(unittest.TestCase):
         comp = CompositionDiagram([self.id_q, self.fourier])
         contracted = ContractedDiagram(self.swap, comp, [0], [0], [], [])
         graph = to_graph(contracted)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 1
         assert matches[0]["node_id"] == self.id_q.id
 
@@ -209,7 +233,9 @@ class TestIdentityRule(unittest.TestCase):
         """Non identity spiders should not be matched."""
         comp = CompositionDiagram([self.non_id_q, self.fourier])
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         assert len(matches) == 0
 
     # -------------------------------------------------------------------------
@@ -247,7 +273,9 @@ class TestIdentityRule(unittest.TestCase):
         """Removing identity from a two element composition leaves the other."""
         comp = CompositionDiagram([self.id_q, self.fourier])
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, Fourier)
@@ -257,7 +285,9 @@ class TestIdentityRule(unittest.TestCase):
         """Remove identity that is not at index 0."""
         comp = CompositionDiagram([self.fourier, self.id_q, self.sq_gate])
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -270,7 +300,9 @@ class TestIdentityRule(unittest.TestCase):
         """Remove identity that is not at index 0."""
         comp = CompositionDiagram([self.fourier, self.ph_rot, self.id_q])
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -284,7 +316,9 @@ class TestIdentityRule(unittest.TestCase):
         inner = CompositionDiagram([self.id_q, self.fourier])
         outer = CompositionDiagram([inner, self.ph_rot])
         graph = to_graph(outer)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -297,7 +331,9 @@ class TestIdentityRule(unittest.TestCase):
         """Apply single to complex composition from self.comp1."""
         comp = self.comp1
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         # Remove first identity (id_q at index 2)
         matches_by_id = {m["node_id"]: m for m in matches}
         self.rule.apply_single(graph, matches_by_id[self.id_q.id])
@@ -313,7 +349,9 @@ class TestIdentityRule(unittest.TestCase):
         """Remove second identity from comp1."""
         comp = self.comp1
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
         self.rule.apply_single(graph, matches_by_id[self.id_p.id])
         result = to_diagram(graph)
@@ -328,7 +366,9 @@ class TestIdentityRule(unittest.TestCase):
         """Apply single to nested tensor structure."""
         comp = self.comp2
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
         idx = comp.diagrams[1].diagrams[1].diagrams[1].id
         self.rule.apply_single(graph, matches_by_id[idx])
@@ -351,7 +391,9 @@ class TestIdentityRule(unittest.TestCase):
         """Apply single to nested tensor structure removing multiple identities."""
         comp = self.comp2
         graph = to_graph(comp)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
         idx = comp.diagrams[1].diagrams[1].diagrams[1].id
         self.rule.apply_single(graph, matches_by_id[idx])
@@ -371,7 +413,9 @@ class TestIdentityRule(unittest.TestCase):
         """Apply single to deeply nested composition."""
         tensor = self.tensor1
         graph = to_graph(tensor)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
         idx = tensor.diagrams[1].diagrams[2].id
         self.rule.apply_single(graph, matches_by_id[idx])
@@ -392,7 +436,9 @@ class TestIdentityRule(unittest.TestCase):
         comp = CompositionDiagram([self.id_q, self.fourier])
         contracted = ContractedDiagram(comp, self.swap, [0], [0], [], [])
         graph = to_graph(contracted)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
         idx = contracted.diagrams[0].diagrams[0].id
         self.rule.apply_single(graph, matches_by_id[idx])
@@ -406,7 +452,9 @@ class TestIdentityRule(unittest.TestCase):
         comp = CompositionDiagram([self.id_q, self.fourier])
         contracted = ContractedDiagram(self.swap, comp, [0], [0], [], [])
         graph = to_graph(contracted)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
         idx = contracted.diagrams[1].diagrams[0].id
         self.rule.apply_single(graph, matches_by_id[idx])
@@ -420,7 +468,9 @@ class TestIdentityRule(unittest.TestCase):
         q_spider = QSpider(10, 10, self.phase_poly)
         contracted = ContractedDiagram(self.tensor2, q_spider, [1, 2, 3], [4, 5, 6], [0, 1, 2, 6], [1, 3, 5, 7])
         graph = to_graph(contracted)
-        matches = self.rule.match(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
         idx = contracted.diagrams[0].diagrams[1].diagrams[2].id
         self.rule.apply_single(graph, matches_by_id[idx])
@@ -446,7 +496,9 @@ class TestIdentityRule(unittest.TestCase):
         comp2 = CompositionDiagram([self.id_p, self.disp])
         outer = CompositionDiagram([comp1, comp2])
         graph = to_graph(outer)
-        self.rule.apply_rule(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        self.rule.apply_rule(graph, reg)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
@@ -457,7 +509,9 @@ class TestIdentityRule(unittest.TestCase):
         """If no identity present, apply_rule should return the original diagram."""
         comp = CompositionDiagram([self.fourier, self.ph_rot])
         graph = to_graph(comp)
-        self.rule.apply_rule(graph)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        self.rule.apply_rule(graph, reg)
         result = to_diagram(graph)
         assert result == comp
 
