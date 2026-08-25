@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 
 import networkx as nx
 
-from mqc3.zx.base_gates import Diagram
+from mqc3.zx.base_gates import Diagram, ZxPoly
 from mqc3.zx.nx_graph import (
     GateRegister,
     to_diagram,
@@ -393,8 +393,8 @@ class FusionRule(RewriteRule):
         # Compute new arities
         # Inputs = kept inputs from first + kept inputs from second
         # (minus connected wires which are removed)
-        new_n_inputs = len(match["kept_first_inputs"]) + len(match["kept_second_inputs"])
-        new_n_outputs = len(match["kept_first_outputs"]) + len(match["kept_second_outputs"])
+        new_num_inputs = len(match["kept_first_inputs"]) + len(match["kept_second_inputs"])
+        new_num_outputs = len(match["kept_first_outputs"]) + len(match["kept_second_outputs"])
 
         # Determine spider type
         fused_type = "QSpider" if first_type == "QSpider" else "PSpider"
@@ -411,8 +411,8 @@ class FusionRule(RewriteRule):
         # Now update the contracted node (first_id) with fused attributes
         graph.nodes[first_id].update({
             "type": fused_type,
-            "n_inputs": new_n_inputs,
-            "n_outputs": new_n_outputs,
+            "num_inputs": new_num_inputs,
+            "num_outputs": new_num_outputs,
             "phase": new_phase,
             "container_id": parent_container_id,
             "is_root": is_root,
@@ -453,6 +453,511 @@ class FusionRule(RewriteRule):
             graph.remove_node(contracted_id)
 
 
+class ChainReductionRule(RewriteRule):
+    """Simplifies chains of identical gates using algebraic identities - Graph-based version.
+
+    Reduces adjacent same-type gates in CompositionDiagram:
+    - Q(u(x)) ∘ Q(v(x)) → Q((u+v)(x))  (any polynomials, no degree restriction)
+    - P(u(x)) ∘ P(v(x)) → P((u+v)(x))  (any polynomials, no degree restriction)
+    - R(θ) ∘ R(φ) → R(θ+φ)
+    - BS(θ) ∘ BS(φ) → BS(θ+φ)
+    - Sq(τ) ∘ Sq(κ) → Sq(τ·κ)
+    - D(a) ∘ D(β) → D(a+β)
+    - F ∘ F → F², F ∘ F ∘ F ∘ F → I, etc.
+    - Finv ∘ Finv → F², Finv ∘ Finv ∘ Finv ∘ Finv → I, etc.
+    - F ∘ Finv → I, Finv ∘ F → I
+    - F² ∘ F² → I, F² ∘ F² ∘ F² → F², etc.
+    - ControlledZGate(g1) ∘ ControlledZGate(g2) → ControlledZGate(g1+g2)
+    - ControlledSumGate(i,j,g1) ∘ ControlledSumGate(i,j,g2) → ControlledSumGate(i,j,g1+g2)
+    """
+
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+        """Find all chains of reducible gates in CompositionDiagram containers.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+        registry : GateRegister
+            Registry for tracking specific gate types and nodes.
+
+        Returns:
+        -------
+        list[dict]
+            List of matches, each containing:
+            - 'container_id': the node ID of the CompositionDiagram
+            - 'gate_type': type of gates in the chain
+            - 'values': list of values for each gate in the chain
+            - 'node_ids': list of node IDs in the chain (in order)
+        """
+        matches = []
+
+        # Iterate over all CompositionDiagram containers
+        for container_id in registry.composition_nodes:
+            attrs = graph.nodes[container_id]
+            sub_ids = attrs.get("sub_diagram_ids", [])
+
+            if not sub_ids:
+                continue
+
+            # Find chains in this CompositionDiagram
+            chains = self.find_chains_in_composition(graph, sub_ids)
+
+            matches.extend(
+                {
+                    "container_id": container_id,
+                    "gate_type": chain["gate_type"],
+                    "values": chain["values"],
+                    "node_ids": chain["node_ids"],
+                    "gate_info": chain["gate_info"],
+                }
+                for chain in chains
+            )
+
+        return matches
+
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
+        """Apply chain reduction to a specific match in-place.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        match : dict
+            Match containing chain information.
+        """
+        container_id = match["container_id"]
+        gate_type = match["gate_type"]
+        values = match["values"]
+        node_ids = match["node_ids"]
+        gate_info = match["gate_info"]
+
+        # Get container attributes
+        container_attrs = graph.nodes[container_id]
+        sub_ids = container_attrs.get("sub_diagram_ids", [])
+
+        # Reduce the chain based on gate type
+        reduced_gate = self.reduce_chain(gate_type, values, gate_info)
+
+        # Get the first node in the chain (will absorb the others)
+        first_node = node_ids[0]
+
+        # Contract all nodes in the chain into the first node
+        for i in range(1, len(node_ids), 1):
+            nx.contracted_nodes(graph, first_node, node_ids[i], self_loops=False, copy=False)
+            if "contraction" in graph.nodes[first_node]:
+                del graph.nodes[first_node]["contraction"]
+
+        # Update the first node with reduced gate attributes
+        self._update_node_for_reduced_gate(graph, first_node, reduced_gate, container_attrs)
+
+        # Update sub_diagram_ids: keep only the first node, remove the rest
+        new_sub_ids = []
+        removed_connectivity = []
+        for i, sub_id in enumerate(sub_ids):
+            if sub_id in node_ids:
+                if sub_id == first_node:
+                    new_sub_ids.append(first_node)
+                else:
+                    removed_connectivity.append(i - 1)
+                # Skip other nodes in chain
+            else:
+                new_sub_ids.append(sub_id)
+
+        graph.nodes[container_id]["sub_diagram_ids"] = new_sub_ids
+        graph.nodes[container_id]["sub_diagram_indices"] = list(range(len(new_sub_ids)))
+        # Update connectivity
+        self._update_connectivity_after_reduction(graph, container_id, removed_connectivity)
+
+        # Flatten if container has only one element
+        if len(new_sub_ids) == 1:
+            self._flatten_container(graph, container_id)
+
+    def find_chains_in_composition(self, graph: nx.DiGraph, sub_ids: list[int]) -> list[dict]:
+        """Find all maximal chains of reducible gates in a CompositionDiagram.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph containing the nodes.
+        sub_ids : list[int]
+            List of sub-diagram IDs in the composition.
+        container_id : int
+            The container node ID.
+
+        Returns:
+        -------
+        list[dict]
+            List of chains, each containing:
+            - 'start_node': first node in the chain
+            - 'gate_type': type of gates
+            - 'values': list of values for each gate
+            - 'node_ids': list of node IDs in order
+        """
+        chains = []
+        i = 0
+
+        while i < len(sub_ids):
+            node_id = sub_ids[i]
+            gate_type, value, gate_info = self.get_gate_info(graph, node_id)
+            if gate_type is not None:
+                values = [value]
+                node_ids = [node_id]
+                j = i + 1
+
+                # Check if this is a reducible chain
+                while j < len(sub_ids):
+                    next_node_id = sub_ids[j]
+                    next_type, next_value, next_gate_info = self.get_gate_info(graph, next_node_id)
+                    if self.can_chain(gate_type, value, gate_info, next_type, next_value, next_gate_info):
+                        values.append(next_value)
+                        node_ids.append(next_node_id)
+                        j += 1
+                        # {F, Finv} chains are only of size 2
+                        if {value, next_value} == {"F", "Finv"}:
+                            gate_type = "F_pair"
+                            break
+                    else:
+                        next_node_id = sub_ids[j - 1]
+                        next_type, next_value, next_gate_info = self.get_gate_info(graph, next_node_id)
+                        break
+
+                # Record the chain if it has at least 2 gates
+                if len(values) >= 2:  # noqa: PLR2004
+                    if gate_type in {"Q", "P"}:
+                        gate_info["num_outputs"] = next_gate_info["num_outputs"]
+                    chains.append({
+                        "gate_type": gate_type,
+                        "values": values,
+                        "node_ids": node_ids,
+                        "gate_info": gate_info,
+                    })
+
+                i = max(i + 1, j)
+            else:
+                i += 1
+
+        return chains
+
+    def get_gate_info(self, graph: nx.DiGraph, node_id: int) -> tuple[str | None, any, dict | None]:  # noqa: C901, PLR0911
+        """Extract gate type and value from a node.
+
+        Returns:
+        -------
+        tuple[str | None, any, dict | None]
+            (gate_type, value, gate_info)
+            gate_type: 'Q', 'P', 'R', 'BS', 'Sq', 'D', 'F', 'F2', 'ControlledZGate', 'ControlledSumGate', or None
+            value: the parameter value (phase polynomial, angle, etc.)
+            gate_info: additional info (arities, control/target, etc.)
+        """
+        attrs = graph.nodes[node_id]
+        node_type = attrs.get("type")
+
+        # Q-Spider
+        if node_type == "QSpider":
+            phase = attrs.get("phase")
+            num_inputs = attrs.get("num_inputs")
+            num_outputs = attrs.get("num_outputs")
+            return ("Q", phase, {"num_inputs": num_inputs, "num_outputs": num_outputs})
+
+        # P-Spider
+        if node_type == "PSpider":
+            phase = attrs.get("phase")
+            num_inputs = attrs.get("num_inputs")
+            num_outputs = attrs.get("num_outputs")
+            return ("P", phase, {"num_inputs": num_inputs, "num_outputs": num_outputs})
+
+        # Phase Rotation Gate
+        if node_type == "PhaseRotationGate":
+            theta = attrs.get("phase")
+            return ("R", theta, None)
+
+        # Beamsplitter Gate
+        if node_type == "BeamsplitterGate":
+            theta = attrs.get("phase")
+            return ("BS", theta, None)
+
+        # Squeezing Gate
+        if node_type == "SqueezingGate":
+            tau = attrs.get("phase")
+            return ("Sq", tau, None)
+
+        # Displacement Gate
+        if node_type == "DisplacementGate":
+            alpha = attrs.get("phase")
+            return ("D", alpha, None)
+
+        # Fourier Gates
+        if node_type == "Fourier":
+            return ("F", "F", None)
+        if node_type == "FourierInv":
+            return ("F", "Finv", None)
+        if node_type == "Fourier2":
+            return ("F2", "F2", None)
+
+        # Controlled-Z Gate
+        if node_type == "ControlledZGate":
+            gain = attrs.get("phase")
+            return ("CZ", gain, None)
+
+        # Controlled-Sum Gate
+        if node_type == "ControlledSumGate":
+            gain = attrs.get("phase")
+            control = attrs.get("control")
+            target = attrs.get("target", 1)
+            return ("CSUM", gain, {"control": control, "target": target})
+
+        return (None, None, None)
+
+    def can_chain(  # noqa: PLR0911, PLR0913, PLR0917
+        self,
+        gate_type: str,
+        value: any,
+        gate_info: dict | None,
+        next_type: str | None,
+        next_value: any,
+        next_gate_info: dict | None,
+    ) -> bool:
+        """Check if two gates can be chained.
+
+        Returns:
+        -------
+        bool
+            True if the gates can be chained (reduced together).
+        """
+        if gate_type != next_type:
+            return False
+        # Q/P spiders: always chain (any polynomials)
+        if gate_type in {"Q", "P"}:
+            return True
+
+        # R, BS, D: always chain
+        if gate_type in {"R", "BS", "D", "Sq"}:
+            return True
+
+        # Fourier: only same type (F with F, Finv with Finv) or (F with Finv or Finv and F)
+        if gate_type == "F":
+            return value == next_value or {value, next_value} == {"F", "Finv"}
+
+        # F2: always chain
+        if gate_type == "F2":
+            return True
+
+        # ControlledZGate: always chain
+        if gate_type == "CZ":
+            return True
+
+        # ControlledSumGate: chain only if control and target are the same
+        if gate_type == "CSUM":
+            return (gate_info["control"] == next_gate_info["control"]) and (
+                gate_info["target"] == next_gate_info["target"]
+            )
+
+        return False
+
+    def reduce_chain(self, gate_type: str, values: list, gate_info: dict | None = None) -> dict | None:  # noqa: C901, PLR0911, PLR0912
+        """Reduce a chain of gates to a single gate.
+
+        Parameters:
+        ----------
+        gate_type : str
+            Type of gates in the chain
+        values : list
+            List of values for each gate in the chain
+        gate_info : dict | None
+            Useful information about the gate to reduce.
+
+        Returns:
+        -------
+        dict | None
+            Dictionary with reduced gate attributes, or None if identity.
+            Contains: 'type', and type-specific fields.
+        """
+        zero_phase = ZxPoly({})
+        id_q = {
+            "type": "QSpider",
+            "phase": zero_phase,
+            "num_inputs": 1,
+            "num_outputs": 1,
+        }
+        id_q2 = {
+            "type": "QSpider",
+            "phase": zero_phase,
+            "num_inputs": 2,
+            "num_outputs": 2,
+        }
+
+        if gate_type == "Q":
+            total_phase = zero_phase
+            for v in values:
+                total_phase += v
+            return {
+                "type": "QSpider",
+                "phase": total_phase,
+                "num_inputs": gate_info["num_inputs"],
+                "num_outputs": gate_info["num_outputs"],
+            }
+
+        # P-Spider: sum phases
+        if gate_type == "P":
+            total_phase = ZxPoly({})
+            for v in values:
+                total_phase += v
+            return {
+                "type": "PSpider",
+                "phase": total_phase,
+                "num_inputs": gate_info["num_inputs"],
+                "num_outputs": gate_info["num_outputs"],
+            }
+
+        # R: sum angles
+        if gate_type == "R":
+            total = sum(values)
+            if total == 0:
+                return id_q
+            return {"type": "PhaseRotationGate", "theta": total}
+
+        # BS: sum angles
+        if gate_type == "BS":
+            total = sum(values)
+            if total == 0:
+                return id_q2
+            return {"type": "BeamsplitterGate", "theta": total}
+
+        # Sq: multiply
+        if gate_type == "Sq":
+            total = 1.0
+            for v in values:
+                total *= v
+            if total == 1.0:  # noqa: RUF069
+                return id_q
+            return {"type": "SqueezingGate", "tau": total}
+
+        # D: sum
+        if gate_type == "D":
+            total = sum(values)
+            if total == 0:
+                return id_q
+            return {"type": "DisplacementGate", "alpha": total}
+
+        # F: Fourier rules
+        if gate_type == "F":
+            n = len(values)
+            remainder = n % 4
+            if remainder == 0:
+                return id_q
+            if remainder == 1:
+                return {"type": "Fourier" if values[0] == "F" else "FourierInv"}
+            if remainder == 2:  # noqa: PLR2004
+                return {"type": "Fourier2"}
+            # Remainder == 3
+            return {"type": "FourierInv" if values[0] == "F" else "Fourier"}
+
+        # F2: parity
+        if gate_type == "F2":
+            if len(values) % 2 == 0:
+                return id_q
+            return {"type": "Fourier2"}
+
+        # F_pair
+        if gate_type == "F_pair":
+            return id_q
+
+        # ControlledZGate: sum gains
+        if gate_type == "CZ":
+            total = sum(values)
+            if total == 0:
+                return id_q2
+            return {"type": "ControlledZGate", "gain": total}
+
+        # ControlledSumGate: sum gains (only if control/target same)
+        if gate_type == "CSUM":
+            # Check that all ControlledSumGate gates have same control and target
+            # We need to get this from the graph
+            total = sum(values)
+            if total == 0:
+                return id_q2
+            # Control/target info will be preserved from the first gate
+            return {
+                "type": "ControlledSumGate",
+                "gain": total,
+                "control": gate_info["control"],
+                "target": gate_info["target"],
+            }
+
+        return None
+
+    def _update_node_for_reduced_gate(
+        self, graph: nx.DiGraph, node_id: int, reduced_gate: dict, container_attrs: dict
+    ) -> None:
+        """Update a node with reduced gate attributes."""
+        gate_type = reduced_gate["type"]
+
+        # Base attributes
+        updates = {
+            "type": gate_type,
+            "container_id": container_attrs.get("container_id"),
+        }
+
+        # Type-specific attributes
+        if gate_type in {"QSpider", "PSpider"}:
+            updates["phase"] = reduced_gate["phase"]
+            updates["num_inputs"] = reduced_gate["num_inputs"]
+            updates["num_outputs"] = reduced_gate["num_outputs"]
+
+        elif gate_type in {"PhaseRotationGate", "BeamsplitterGate"}:
+            updates["phase"] = reduced_gate["theta"]
+
+        elif gate_type == "SqueezingGate":
+            updates["phase"] = reduced_gate["tau"]
+
+        elif gate_type == "DisplacementGate":
+            updates["phase"] = reduced_gate["alpha"]
+
+        elif gate_type in {"Fourier", "FourierInv", "Fourier2"}:
+            pass  # No additional attributes
+
+        elif gate_type == "ControlledZGate":
+            updates["phase"] = reduced_gate["gain"]
+            updates["num_inputs"] = 2
+            updates["num_outputs"] = 2
+
+        elif gate_type == "ControlledSumGate":
+            updates["phase"] = reduced_gate["gain"]
+            updates["num_inputs"] = 2
+            updates["num_outputs"] = 2
+            updates["control"] = reduced_gate["control"]
+            updates["target"] = reduced_gate["target"]
+
+        graph.nodes[node_id].update(updates)
+
+    def _update_connectivity_after_reduction(
+        self, graph: nx.DiGraph, container_id: int, removed_connectivity: list[int]
+    ) -> None:
+        """Update connectivity after removing nodes from a composition."""
+        attrs = graph.nodes[container_id]
+        if "connectivity" not in attrs:
+            return
+        connectivity = attrs["connectivity"]
+        new_connectivity = {}
+        # Build mapping from old indices to new indices
+        removed_set = set(removed_connectivity)
+        index_map = {}
+        new_idx = 0
+        for old_idx in range(len(connectivity)):
+            if old_idx not in removed_set:
+                index_map[old_idx] = new_idx
+                new_idx += 1
+
+        # Remap connectivity
+        for old_idx, targets in connectivity.items():
+            if old_idx not in removed_set:
+                new_idx = index_map[old_idx]
+                new_connectivity[new_idx] = targets
+
+        attrs["connectivity"] = new_connectivity
+
+
 def is_wiring_node_from_attrs(attrs: dict) -> bool:
     """Check if a node's attributes represent a wiring (identity) diagram.
 
@@ -475,9 +980,9 @@ def is_wiring_node_from_attrs(attrs: dict) -> bool:
     if node_type not in {"QSpider", "PSpider"}:
         return False
 
-    n_inputs = attrs.get("n_inputs", 0)
-    n_outputs = attrs.get("n_outputs", 0)
-    if n_inputs != 1 or n_outputs != 1:
+    num_inputs = attrs.get("num_inputs", 0)
+    num_outputs = attrs.get("num_outputs", 0)
+    if num_inputs != 1 or num_outputs != 1:
         return False
 
     phase = attrs.get("phase")

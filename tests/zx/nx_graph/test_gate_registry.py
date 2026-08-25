@@ -48,7 +48,7 @@ class TestGateRegister:
         """Test adding a squeezing gate node."""
         reg = GateRegister()
         node_id = 1
-        attrs = {"kind": "compact", "type": "SqueezingGate", "n_inputs": 1, "n_outputs": 1}
+        attrs = {"kind": "compact", "type": "SqueezingGate", "num_inputs": 1, "num_outputs": 1}
 
         reg.add_node(node_id, attrs)
         assert node_id in reg.squeezing_gates
@@ -60,7 +60,7 @@ class TestGateRegister:
         """Test adding a displacement gate node."""
         reg = GateRegister()
         node_id = 2
-        attrs = {"kind": "compact", "type": "DisplacementGate", "n_inputs": 1, "n_outputs": 1}
+        attrs = {"kind": "compact", "type": "DisplacementGate", "num_inputs": 1, "num_outputs": 1}
 
         reg.add_node(node_id, attrs)
         assert node_id in reg.displacement_gates
@@ -72,7 +72,7 @@ class TestGateRegister:
         """Test adding a phase rotation gate node."""
         reg = GateRegister()
         node_id = 3
-        attrs = {"kind": "compact", "type": "PhaseRotationGate", "n_inputs": 1, "n_outputs": 1}
+        attrs = {"kind": "compact", "type": "PhaseRotationGate", "num_inputs": 1, "num_outputs": 1}
 
         reg.add_node(node_id, attrs)
         assert node_id in reg.rotation_gates
@@ -111,8 +111,8 @@ class TestGateRegister:
         attrs_1 = {
             "kind": "proper",
             "type": "QSpider",
-            "n_inputs": 1,
-            "n_outputs": 1,
+            "num_inputs": 1,
+            "num_outputs": 1,
             "phase": ZxPoly({0: 0}),
         }
         reg.add_node(node_id_1, attrs_1)
@@ -123,8 +123,8 @@ class TestGateRegister:
         attrs_2 = {
             "kind": "proper",
             "type": "PSpider",
-            "n_inputs": 1,
-            "n_outputs": 1,
+            "num_inputs": 1,
+            "num_outputs": 1,
             "phase": ZxPoly({}),
         }
         reg.add_node(node_id_2, attrs_2)
@@ -137,8 +137,8 @@ class TestGateRegister:
         attrs = {
             "kind": "proper",
             "type": "QSpider",
-            "n_inputs": 1,
-            "n_outputs": 1,
+            "num_inputs": 1,
+            "num_outputs": 1,
             "phase": ZxPoly({1: 2.0}),
         }
 
@@ -152,8 +152,8 @@ class TestGateRegister:
         attrs = {
             "kind": "proper",
             "type": "QSpider",
-            "n_inputs": 2,
-            "n_outputs": 1,
+            "num_inputs": 2,
+            "num_outputs": 1,
             "phase": ZxPoly({0: 0}),
         }
 
@@ -164,7 +164,7 @@ class TestGateRegister:
         """Test adding an input state node."""
         reg = GateRegister()
         node_id = 11
-        attrs = {"kind": "proper", "n_inputs": 0, "n_outputs": 1}
+        attrs = {"kind": "proper", "num_inputs": 0, "num_outputs": 1}
 
         reg.add_node(node_id, attrs)
         assert node_id in reg.input_states
@@ -173,7 +173,7 @@ class TestGateRegister:
         """Test adding a measurement node."""
         reg = GateRegister()
         node_id = 12
-        attrs = {"kind": "proper", "n_inputs": 1, "n_outputs": 0}
+        attrs = {"kind": "proper", "num_inputs": 1, "num_outputs": 0}
 
         reg.add_node(node_id, attrs)
         assert node_id in reg.measurement_nodes
@@ -370,13 +370,13 @@ class TestGateRegister:
         graph = nx.DiGraph()
 
         # Add nodes with attributes
-        graph.add_node(1, kind="compact", type="SqueezingGate", n_inputs=1, n_outputs=1)
-        graph.add_node(2, kind="compact", type="DisplacementGate", n_inputs=1, n_outputs=1)
-        graph.add_node(3, kind="compact", type="PhaseRotationGate", n_inputs=1, n_outputs=1)
-        graph.add_node(4, kind="proper", type="Fourier", n_inputs=1, n_outputs=1)
-        graph.add_node(5, kind="proper", type="QSpider", n_inputs=1, n_outputs=1, phase=ZxPoly({0: 0}))
-        graph.add_node(6, kind="proper", n_inputs=0, n_outputs=1)
-        graph.add_node(7, kind="proper", n_inputs=1, n_outputs=0)
+        graph.add_node(1, kind="compact", type="SqueezingGate", num_inputs=1, num_outputs=1)
+        graph.add_node(2, kind="compact", type="DisplacementGate", num_inputs=1, num_outputs=1)
+        graph.add_node(3, kind="compact", type="PhaseRotationGate", num_inputs=1, num_outputs=1)
+        graph.add_node(4, kind="proper", type="Fourier", num_inputs=1, num_outputs=1)
+        graph.add_node(5, kind="proper", type="QSpider", num_inputs=1, num_outputs=1, phase=ZxPoly({0: 0}))
+        graph.add_node(6, kind="proper", num_inputs=0, num_outputs=1)
+        graph.add_node(7, kind="proper", num_inputs=1, num_outputs=0)
         graph.add_node(8, kind="container", container_type="tensor")
         graph.add_node(9, kind="container", container_type="composition")
         graph.add_node(10, kind="container", container_type="contracted")
@@ -418,8 +418,8 @@ class TestGateRegister:
 
         # Create a new graph
         graph = nx.DiGraph()
-        graph.add_node(1, kind="compact", type="PhaseRotationGate", n_inputs=1, n_outputs=1)
-        graph.add_node(2, kind="proper", type="Fourier2", n_inputs=1, n_outputs=1)
+        graph.add_node(1, kind="compact", type="PhaseRotationGate", num_inputs=1, num_outputs=1)
+        graph.add_node(2, kind="proper", type="Fourier2", num_inputs=1, num_outputs=1)
 
         # Rebuild
         reg.build_from_graph(graph)
@@ -439,8 +439,8 @@ class TestGateRegister:
         attrs = {
             "kind": "compact",
             "type": "DisplacementGate",
-            "n_inputs": 1,
-            "n_outputs": 1,
+            "num_inputs": 1,
+            "num_outputs": 1,
             "feedforward": True,
             "measurement_id": 42,
         }
@@ -456,11 +456,11 @@ class TestGateRegister:
 
         test_cases = [
             # Zero polynomial (empty dict)
-            {"kind": "proper", "type": "QSpider", "n_inputs": 1, "n_outputs": 1, "phase": ZxPoly({})},
+            {"kind": "proper", "type": "QSpider", "num_inputs": 1, "num_outputs": 1, "phase": ZxPoly({})},
             # Zero constant
-            {"kind": "proper", "type": "PSpider", "n_inputs": 1, "n_outputs": 1, "phase": ZxPoly({0: 0})},
+            {"kind": "proper", "type": "PSpider", "num_inputs": 1, "num_outputs": 1, "phase": ZxPoly({0: 0})},
             # Zero polynomial after simplification
-            {"kind": "proper", "type": "QSpider", "n_inputs": 1, "n_outputs": 1, "phase": ZxPoly({1: 0, 2: 0})},
+            {"kind": "proper", "type": "QSpider", "num_inputs": 1, "num_outputs": 1, "phase": ZxPoly({1: 0, 2: 0})},
         ]
 
         for i, attrs in enumerate(test_cases):
@@ -473,9 +473,15 @@ class TestGateRegister:
         reg = GateRegister()
 
         test_cases = [
-            {"kind": "proper", "type": "QSpider", "n_inputs": 1, "n_outputs": 1, "phase": ZxPoly({1: 2.0})},
-            {"kind": "proper", "type": "PSpider", "n_inputs": 1, "n_outputs": 1, "phase": ZxPoly({2: 0.5})},
-            {"kind": "proper", "type": "QSpider", "n_inputs": 1, "n_outputs": 1, "phase": ZxPoly({0: 1.0, 1: 2.0})},
+            {"kind": "proper", "type": "QSpider", "num_inputs": 1, "num_outputs": 1, "phase": ZxPoly({1: 2.0})},
+            {"kind": "proper", "type": "PSpider", "num_inputs": 1, "num_outputs": 1, "phase": ZxPoly({2: 0.5})},
+            {
+                "kind": "proper",
+                "type": "QSpider",
+                "num_inputs": 1,
+                "num_outputs": 1,
+                "phase": ZxPoly({0: 1.0, 1: 2.0}),
+            },
         ]
 
         for i, attrs in enumerate(test_cases):
@@ -489,8 +495,8 @@ class TestGateRegister:
         node_id = 300
         attrs = {
             "kind": "proper",
-            "n_inputs": 0,
-            "n_outputs": 1,
+            "num_inputs": 0,
+            "num_outputs": 1,
             "type": "InputState",  # Extra attribute
             "label": "|0>",
         }
@@ -504,8 +510,8 @@ class TestGateRegister:
         node_id = 301
         attrs = {
             "kind": "proper",
-            "n_inputs": 1,
-            "n_outputs": 0,
+            "num_inputs": 1,
+            "num_outputs": 0,
             "type": "Measurement",  # Extra attribute
             "basis": "homodyne",
         }
@@ -539,8 +545,8 @@ class TestGateRegister:
                 i,
                 kind=kind,
                 type=gate_type,
-                n_inputs=1,
-                n_outputs=1,
+                num_inputs=1,
+                num_outputs=1,
                 phase=ZxPoly({0: 0}) if gate_type == "QSpider" else None,
             )
 

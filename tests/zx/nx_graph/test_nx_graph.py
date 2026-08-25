@@ -6,6 +6,8 @@ and that to_diagram correctly reconstructs the original diagrams.
 
 from math import pi
 
+from sympy import Expr, I, symbols
+
 from mqc3.zx.base_gates import (
     CompositionDiagram,
     ContractedDiagram,
@@ -69,6 +71,19 @@ class TestgraphraphConversion:
         self.ctrl_sum_gate = ControlledSumGate(gain=1.0, control=1, target=2)
         self.ctrl_z_gate = ControlledZGate(gain=1.0)
         self.beam_splitter = BeamsplitterGate(theta=pi / 4)
+
+        # Parametrized diagram
+        a, b, c, g1, g2, m, tau, theta = symbols("a b c g1 g2 m tau theta", real=True)
+        self.q_param = QSpider(1, 1, ZxPoly({1: a, 2: b}))
+        self.p_param = PSpider(1, 1, ZxPoly({1: a, 2: b}))
+        self.disp_param = DisplacementGate(alpha=1.0 + c * I, parametric=True)
+        self.meas = QSpider(1, 0, ZxPoly({1: m}))
+        self.disp_ff = DisplacementGate(alpha=m**2, parametric=True, feedforward=True, measurement_ids={self.meas.id})
+        self.ph_rot_param = PhaseRotationGate(theta, parametric=True)
+        self.sq_gate_param = SqueezingGate(tau, parametric=True)
+        self.ctrl_sum_gate_param = ControlledSumGate(gain=g1, control=1, target=2, parametric=True)
+        self.ctrl_z_gate_param = ControlledZGate(gain=g2, parametric=True)
+        self.beam_splitter_param = BeamsplitterGate(theta / 2, parametric=True)
 
         # Multiple arity spiders
         self.q_1x2 = QSpider(1, 2, self.phase_q)
@@ -134,13 +149,31 @@ class TestgraphraphConversion:
         assert attrs["type"] == "QSpider"
         assert attrs["kind"] == "proper"
         assert attrs["phase"] == self.phase_q
-        assert attrs["n_inputs"] == 1
-        assert attrs["n_outputs"] == 1
-        assert attrs["diagram"] == self.q1
+        assert attrs["num_inputs"] == 1
+        assert attrs["num_outputs"] == 1
         assert attrs["container_id"] is None
         assert attrs["is_root"]
 
         self._assert_roundtrip(self.q1)
+
+    def test_proper_qspider_param(self):
+        """Test conversion of a parametrized QSpider."""
+        graph = to_graph(self.q_param)
+
+        assert graph.number_of_nodes() == 1
+        assert graph.number_of_edges() == 0
+
+        attrs = graph.nodes[self.q_param.id]
+        assert attrs["id"] == self.q_param.id
+        assert attrs["type"] == "QSpider"
+        assert attrs["kind"] == "proper"
+        assert attrs["phase"] == self.q_param.phase
+        assert attrs["num_inputs"] == 1
+        assert attrs["num_outputs"] == 1
+        assert attrs["container_id"] is None
+        assert attrs["is_root"]
+
+        self._assert_roundtrip(self.q_param)
 
     def test_proper_pspider(self):
         """Test conversion of a single PSpider."""
@@ -153,6 +186,25 @@ class TestgraphraphConversion:
 
         self._assert_roundtrip(self.p1)
 
+    def test_proper_pspider_param(self):
+        """Test conversion of a parametrized PSpider."""
+        graph = to_graph(self.p_param)
+
+        assert graph.number_of_nodes() == 1
+        assert graph.number_of_edges() == 0
+
+        attrs = graph.nodes[self.p_param.id]
+        assert attrs["id"] == self.p_param.id
+        assert attrs["type"] == "PSpider"
+        assert attrs["kind"] == "proper"
+        assert attrs["phase"] == self.p_param.phase
+        assert attrs["num_inputs"] == 1
+        assert attrs["num_outputs"] == 1
+        assert attrs["container_id"] is None
+        assert attrs["is_root"]
+
+        self._assert_roundtrip(self.p_param)
+
     def test_proper_fourier(self):
         """Test conversion of a single Fourier gate."""
         graph = to_graph(self.fourier)
@@ -161,8 +213,8 @@ class TestgraphraphConversion:
         attrs = graph.nodes[self.fourier.id]
         assert attrs["type"] == "Fourier"
         assert attrs["phase"] is None
-        assert attrs["n_inputs"] == 1
-        assert attrs["n_outputs"] == 1
+        assert attrs["num_inputs"] == 1
+        assert attrs["num_outputs"] == 1
 
         self._assert_roundtrip(self.fourier)
 
@@ -173,8 +225,8 @@ class TestgraphraphConversion:
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.swap.id]
         assert attrs["type"] == "Swap"
-        assert attrs["n_inputs"] == 2
-        assert attrs["n_outputs"] == 2
+        assert attrs["num_inputs"] == 2
+        assert attrs["num_outputs"] == 2
 
         self._assert_roundtrip(self.swap)
 
@@ -184,8 +236,8 @@ class TestgraphraphConversion:
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.q_1x2.id]
-        assert attrs["n_inputs"] == 1
-        assert attrs["n_outputs"] == 2
+        assert attrs["num_inputs"] == 1
+        assert attrs["num_outputs"] == 2
         assert attrs["external_inputs"] == [0]
         assert attrs["external_outputs"] == [0, 1]
 
@@ -201,6 +253,38 @@ class TestgraphraphConversion:
         assert attrs["kind"] == "compact"
         assert attrs["phase"] == self.disp.alpha
 
+        self._assert_roundtrip(self.disp)
+
+    def test_displacement_param(self):
+        """Test conversion of a parametrized DisplacementGate."""
+        graph = to_graph(self.disp_param)
+
+        assert graph.number_of_nodes() == 1
+        attrs = graph.nodes[self.disp_param.id]
+        assert attrs["type"] == "DisplacementGate"
+        assert attrs["kind"] == "compact"
+        assert attrs["phase"] == self.disp_param.alpha
+        assert isinstance(attrs["phase"], Expr)
+        assert attrs["feedforward"] == self.disp_param.feedforward
+        assert attrs["measurement_ids"] == self.disp_param.measurement_ids
+
+        self._assert_roundtrip(self.disp_param)
+
+    def test_feedforward(self):
+        """Test conversion of a feedforward DisplacementGate."""
+        graph = to_graph(self.disp_ff)
+
+        assert graph.number_of_nodes() == 1
+        attrs = graph.nodes[self.disp_ff.id]
+        assert attrs["type"] == "DisplacementGate"
+        assert attrs["kind"] == "compact"
+        assert attrs["phase"] == self.disp_ff.alpha
+        assert isinstance(attrs["phase"], Expr)
+        assert attrs["feedforward"] == self.disp_ff.feedforward
+        assert attrs["measurement_ids"] == self.disp_ff.measurement_ids
+
+        self._assert_roundtrip(self.disp_ff)
+
     def test_rotation(self):
         """Test conversion of a PhaseRotationGate."""
         graph = to_graph(self.ph_rot)
@@ -210,6 +294,21 @@ class TestgraphraphConversion:
         assert attrs["type"] == "PhaseRotationGate"
         assert attrs["kind"] == "compact"
         assert attrs["phase"] == self.ph_rot.theta
+
+        self._assert_roundtrip(self.ph_rot)
+
+    def test_rotation_param(self):
+        """Test conversion of a parametrized PhaseRotationGate."""
+        graph = to_graph(self.ph_rot_param)
+
+        assert graph.number_of_nodes() == 1
+        attrs = graph.nodes[self.ph_rot_param.id]
+        assert attrs["type"] == "PhaseRotationGate"
+        assert attrs["kind"] == "compact"
+        assert attrs["phase"] == self.ph_rot_param.theta
+        assert isinstance(attrs["phase"], Expr)
+
+        self._assert_roundtrip(self.ph_rot_param)
 
     def test_squeezing(self):
         """Test conversion of a SqueezingGate."""
@@ -221,6 +320,21 @@ class TestgraphraphConversion:
         assert attrs["kind"] == "compact"
         assert attrs["phase"] == self.sq_gate.tau
 
+        self._assert_roundtrip(self.sq_gate)
+
+    def test_squeezing_param(self):
+        """Test conversion of a parametrized SqueezingGate."""
+        graph = to_graph(self.sq_gate_param)
+
+        assert graph.number_of_nodes() == 1
+        attrs = graph.nodes[self.sq_gate_param.id]
+        assert attrs["type"] == "SqueezingGate"
+        assert attrs["kind"] == "compact"
+        assert attrs["phase"] == self.sq_gate_param.tau
+        assert isinstance(attrs["phase"], Expr)
+
+        self._assert_roundtrip(self.sq_gate_param)
+
     def test_beamsplitter(self):
         """Test conversion of a BeamsplitterGate."""
         graph = to_graph(self.beam_splitter)
@@ -230,6 +344,21 @@ class TestgraphraphConversion:
         assert attrs["type"] == "BeamsplitterGate"
         assert attrs["kind"] == "compact"
         assert attrs["phase"] == self.beam_splitter.theta
+
+        self._assert_roundtrip(self.beam_splitter)
+
+    def test_beamsplitter_param(self):
+        """Test conversion of a parametrized BeamsplitterGate."""
+        graph = to_graph(self.beam_splitter_param)
+
+        assert graph.number_of_nodes() == 1
+        attrs = graph.nodes[self.beam_splitter_param.id]
+        assert attrs["type"] == "BeamsplitterGate"
+        assert attrs["kind"] == "compact"
+        assert attrs["phase"] == self.beam_splitter_param.theta
+        assert isinstance(attrs["phase"], Expr)
+
+        self._assert_roundtrip(self.beam_splitter_param)
 
     def test_controlledsumgate(self):
         """Test conversion of a ControlledSumGate."""
@@ -241,6 +370,21 @@ class TestgraphraphConversion:
         assert attrs["kind"] == "compact"
         assert attrs["phase"] == self.ctrl_sum_gate.gain
 
+        self._assert_roundtrip(self.ctrl_sum_gate)
+
+    def test_controlledsumgate_param(self):
+        """Test conversion of a parametrized ControlledSumGate."""
+        graph = to_graph(self.ctrl_sum_gate_param)
+
+        assert graph.number_of_nodes() == 1
+        attrs = graph.nodes[self.ctrl_sum_gate_param.id]
+        assert attrs["type"] == "ControlledSumGate"
+        assert attrs["kind"] == "compact"
+        assert attrs["phase"] == self.ctrl_sum_gate_param.gain
+        assert isinstance(attrs["phase"], Expr)
+
+        self._assert_roundtrip(self.ctrl_sum_gate_param)
+
     def test_controlledzgate(self):
         """Test conversion of a ControlledSumGate."""
         graph = to_graph(self.ctrl_z_gate)
@@ -250,6 +394,21 @@ class TestgraphraphConversion:
         assert attrs["type"] == "ControlledZGate"
         assert attrs["kind"] == "compact"
         assert attrs["phase"] == self.ctrl_z_gate.gain
+
+        self._assert_roundtrip(self.ctrl_z_gate)
+
+    def test_controlledzgate_param(self):
+        """Test conversion of a parametrized ControlledSumGate."""
+        graph = to_graph(self.ctrl_z_gate_param)
+
+        assert graph.number_of_nodes() == 1
+        attrs = graph.nodes[self.ctrl_z_gate_param.id]
+        assert attrs["type"] == "ControlledZGate"
+        assert attrs["kind"] == "compact"
+        assert attrs["phase"] == self.ctrl_z_gate_param.gain
+        assert isinstance(attrs["phase"], Expr)
+
+        self._assert_roundtrip(self.ctrl_z_gate_param)
 
     # =========================================================================
     # 2. Composition of Proper Diagrams Tests
@@ -719,8 +878,8 @@ class TestgraphraphConversion:
 
         # Check outer tensor port mappings
         outer_tensor_attrs = graph.nodes[root]
-        assert outer_tensor_attrs["n_inputs"] == final_large_conn.num_inputs
-        assert outer_tensor_attrs["n_outputs"] == final_large_conn.num_outputs
+        assert outer_tensor_attrs["num_inputs"] == final_large_conn.num_inputs
+        assert outer_tensor_attrs["num_outputs"] == final_large_conn.num_outputs
 
         # Find the composition container
         comp_node = None

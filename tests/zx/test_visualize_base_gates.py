@@ -339,26 +339,26 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     )
 
     # Connectivity variant 1
-    n_inputs_cd1 = contracted_diagram_1.num_inputs
-    n_outputs_tb1 = tensor_block_1.num_outputs
+    num_inputs_cd1 = contracted_diagram_1.num_inputs
+    num_outputs_tb1 = tensor_block_1.num_outputs
 
-    if n_inputs_cd1 == n_outputs_tb1 and n_inputs_cd1 >= 2:
+    if num_inputs_cd1 == num_outputs_tb1 and num_inputs_cd1 >= 2:
         # Create a cyclic permutation: 0->1, 1->2, ..., n-1->0
-        conn_cd1_tb1 = {i: (i + 1) % n_inputs_cd1 for i in range(n_inputs_cd1)}
+        conn_cd1_tb1 = {i: (i + 1) % num_inputs_cd1 for i in range(num_inputs_cd1)}
     else:
         # Fallback to identity
-        conn_cd1_tb1 = {i: i for i in range(min(n_inputs_cd1, n_outputs_tb1))}
+        conn_cd1_tb1 = {i: i for i in range(min(num_inputs_cd1, num_outputs_tb1))}
 
     # Also need connectivity for tensor_block_1.compose(composition_with_contracted_1)
     # This connects tensor_block_1 (outputs) to composition_with_contracted_1 (inputs)
     # We'll use a similar permutation
-    n_outputs_tb1_2 = tensor_block_1.num_outputs
-    n_inputs_cwc1 = composition_with_contracted_1.num_inputs
+    num_outputs_tb1_2 = tensor_block_1.num_outputs
+    num_inputs_cwc1 = composition_with_contracted_1.num_inputs
 
-    if n_outputs_tb1_2 == n_inputs_cwc1 and n_outputs_tb1_2 >= 2:
-        conn_tb1_cwc1 = {i: (i + 1) % n_outputs_tb1_2 for i in range(n_outputs_tb1_2)}
+    if num_outputs_tb1_2 == num_inputs_cwc1 and num_outputs_tb1_2 >= 2:
+        conn_tb1_cwc1 = {i: (i + 1) % num_outputs_tb1_2 for i in range(num_outputs_tb1_2)}
     else:
-        conn_tb1_cwc1 = {i: i for i in range(min(n_outputs_tb1_2, n_inputs_cwc1))}
+        conn_tb1_cwc1 = {i: i for i in range(min(num_outputs_tb1_2, num_inputs_cwc1))}
 
     # Build the composition with explicit connectivity
     composition_with_contracted_1_conn = contracted_diagram_1.compose(tensor_block_1, connectivity=conn_cd1_tb1)
@@ -373,14 +373,14 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     )
 
     # Connectivity variant 2
-    n_inputs_cd2 = contracted_diagram_2.num_inputs
-    n_outputs_tb2 = tensor_block_2.num_outputs
+    num_inputs_cd2 = contracted_diagram_2.num_inputs
+    num_outputs_tb2 = tensor_block_2.num_outputs
 
-    if n_inputs_cd2 == n_outputs_tb2 and n_inputs_cd2 >= 2:
+    if num_inputs_cd2 == num_outputs_tb2 and num_inputs_cd2 >= 2:
         # Reverse order: 0->n-1, 1->n-2, ...
-        conn_cd2_tb2 = {i: n_inputs_cd2 - 1 - i for i in range(n_inputs_cd2)}
+        conn_cd2_tb2 = {i: num_inputs_cd2 - 1 - i for i in range(num_inputs_cd2)}
     else:
-        conn_cd2_tb2 = {i: i for i in range(min(n_inputs_cd2, n_outputs_tb2))}
+        conn_cd2_tb2 = {i: i for i in range(min(num_inputs_cd2, num_outputs_tb2))}
 
     comp2_conn = contracted_diagram_2.compose(tensor_block_2, connectivity=conn_cd2_tb2)
 
@@ -391,21 +391,21 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     )
 
     # Connectivity variant 3
-    n_outputs_tb2_2 = tensor_block_2.num_outputs
-    n_inputs_cd3 = contracted_diagram_3.num_inputs
+    num_outputs_tb2_2 = tensor_block_2.num_outputs
+    num_inputs_cd3 = contracted_diagram_3.num_inputs
 
-    if n_outputs_tb2_2 == n_inputs_cd3 and n_outputs_tb2_2 >= 2:
+    if num_outputs_tb2_2 == num_inputs_cd3 and num_outputs_tb2_2 >= 2:
         # Swap pairs: 0->1, 1->0, 2->3, 3->2, ...
         conn_tb2_cd3 = {}
-        for i in range(n_outputs_tb2_2):
-            if i % 2 == 0 and i + 1 < n_outputs_tb2_2:
+        for i in range(num_outputs_tb2_2):
+            if i % 2 == 0 and i + 1 < num_outputs_tb2_2:
                 conn_tb2_cd3[i] = i + 1
             elif i % 2 == 1:
                 conn_tb2_cd3[i] = i - 1
             else:
                 conn_tb2_cd3[i] = i
     else:
-        conn_tb2_cd3 = {i: i for i in range(min(n_outputs_tb2_2, n_inputs_cd3))}
+        conn_tb2_cd3 = {i: i for i in range(min(num_outputs_tb2_2, num_inputs_cd3))}
 
     comp3_conn = tensor_block_2.compose(contracted_diagram_3, connectivity=conn_tb2_cd3)
 

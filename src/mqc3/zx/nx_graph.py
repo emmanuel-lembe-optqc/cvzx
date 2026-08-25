@@ -17,6 +17,7 @@ Key design decisions:
 from copy import deepcopy
 
 import networkx as nx
+from sympy import Expr
 
 from mqc3.zx.base_gates import (
     CompositionDiagram,
@@ -98,7 +99,7 @@ class GateRegister:
             The ID of the node to add.
         attrs : dict
             The node's attributes from the graph, containing at least 'kind',
-            and optionally 'type', 'container_type', 'n_inputs', 'n_outputs',
+            and optionally 'type', 'container_type', 'num_inputs', 'num_outputs',
             and 'phase'.
 
         Notes:
@@ -106,8 +107,8 @@ class GateRegister:
         - Container nodes (kind='container') are added to container-specific sets.
         - Proper nodes (kind='proper') are added to gate-type-specific sets.
         - Identity spiders are detected using `_is_identity_spider()`.
-        - Input states have n_inputs=0, n_outputs=1.
-        - Measurements have n_inputs=1, n_outputs=0.
+        - Input states have num_inputs=0, num_outputs=1.
+        - Measurements have num_inputs=1, num_outputs=0.
         """
         gate_type = attrs.get("type")
         kind = attrs.get("kind")
@@ -246,9 +247,9 @@ class GateRegister:
         if node_type not in {"QSpider", "PSpider"}:
             return False
 
-        n_inputs = attrs.get("n_inputs", 0)
-        n_outputs = attrs.get("n_outputs", 0)
-        if n_inputs != 1 or n_outputs != 1:
+        num_inputs = attrs.get("num_inputs", 0)
+        num_outputs = attrs.get("num_outputs", 0)
+        if num_inputs != 1 or num_outputs != 1:
             return False
 
         phase = attrs.get("phase")
@@ -264,7 +265,7 @@ class GateRegister:
         -------
         bool
         """
-        return attrs.get("n_inputs") == 0 and attrs.get("n_outputs") == 1
+        return attrs.get("num_inputs") == 0 and attrs.get("num_outputs") == 1
 
     def _is_measurement(self, attrs: dict) -> bool:
         """Check if a node is a measurement.
@@ -273,7 +274,7 @@ class GateRegister:
         -------
         bool
         """
-        return attrs.get("n_inputs") == 1 and attrs.get("n_outputs") == 0
+        return attrs.get("num_inputs") == 1 and attrs.get("num_outputs") == 0
 
 
 def to_graph(diagram: Diagram) -> nx.DiGraph:
@@ -303,6 +304,11 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
     # Mark the root node
     if root_id is not None and root_id != -1:
         graph.nodes[root_id]["is_root"] = True
+
+    # Remove diagram references
+    for _, attrs in graph.nodes(data=True):
+        if "diagram" in attrs:
+            del attrs["diagram"]
 
     return graph
 
@@ -702,20 +708,6 @@ def _add_proper_node(
         phase = getattr(diagram, "theta", None)
     elif isinstance(diagram, (ControlledSumGate, ControlledZGate)):
         phase = getattr(diagram, "gain", None)
-    G.add_node(
-        node_id,
-        id=node_id,
-        type=node_type,
-        kind=kind,
-        phase=phase,
-        n_inputs=diagram.num_inputs,
-        n_outputs=diagram.num_outputs,
-        diagram=diagram,
-        container_id=container_id,
-        # Store external port mappings
-        external_inputs=list(range(diagram.num_inputs)),
-        external_outputs=list(range(diagram.num_outputs)),
-    )
 
     if isinstance(diagram, DisplacementGate):
         phase = getattr(diagram, "alpha", None)
@@ -729,8 +721,42 @@ def _add_proper_node(
             phase=phase,
             feedforward=feedforward,
             measurement_ids=measurement_ids,
-            n_inputs=diagram.num_inputs,
-            n_outputs=diagram.num_outputs,
+            num_inputs=diagram.num_inputs,
+            num_outputs=diagram.num_outputs,
+            diagram=diagram,
+            container_id=container_id,
+            # Store external port mappings
+            external_inputs=list(range(diagram.num_inputs)),
+            external_outputs=list(range(diagram.num_outputs)),
+        )
+    elif isinstance(diagram, ControlledSumGate):
+        control = diagram.control
+        target = diagram.target
+        G.add_node(
+            node_id,
+            id=node_id,
+            type=node_type,
+            kind=kind,
+            phase=phase,
+            control=control,
+            target=target,
+            num_inputs=diagram.num_inputs,
+            num_outputs=diagram.num_outputs,
+            diagram=diagram,
+            container_id=container_id,
+            # Store external port mappings
+            external_inputs=list(range(diagram.num_inputs)),
+            external_outputs=list(range(diagram.num_outputs)),
+        )
+    else:
+        G.add_node(
+            node_id,
+            id=node_id,
+            type=node_type,
+            kind=kind,
+            phase=phase,
+            num_inputs=diagram.num_inputs,
+            num_outputs=diagram.num_outputs,
             diagram=diagram,
             container_id=container_id,
             # Store external port mappings
@@ -801,8 +827,8 @@ def _add_composition_node(
         kind="container",
         container_type="composition",
         phase=None,
-        n_inputs=diagram.num_inputs,
-        n_outputs=diagram.num_outputs,
+        num_inputs=diagram.num_inputs,
+        num_outputs=diagram.num_outputs,
         diagram=diagram,
         container_id=container_id,
         is_root=is_root,
@@ -920,8 +946,8 @@ def _add_tensor_node(
         kind="container",
         container_type="tensor",
         phase=None,
-        n_inputs=diagram.num_inputs,
-        n_outputs=diagram.num_outputs,
+        num_inputs=diagram.num_inputs,
+        num_outputs=diagram.num_outputs,
         diagram=diagram,
         container_id=container_id,
         is_root=is_root,
@@ -1015,8 +1041,8 @@ def _add_contracted_node(  # noqa: C901
         kind="container",
         container_type="contracted",
         phase=None,
-        n_inputs=diagram.num_inputs,
-        n_outputs=diagram.num_outputs,
+        num_inputs=diagram.num_inputs,
+        num_outputs=diagram.num_outputs,
         diagram=diagram,
         container_id=container_id,
         is_root=is_root,
@@ -1162,13 +1188,14 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C
     attrs = G.nodes[node_id]
     node_type = attrs.get("type")
     phase = attrs.get("phase")
-    n_inputs = attrs.get("n_inputs", 0)
-    n_outputs = attrs.get("n_outputs", 0)
+    num_inputs = attrs.get("num_inputs", 0)
+    num_outputs = attrs.get("num_outputs", 0)
+    is_parametric = isinstance(phase, Expr)
 
     if node_type == "QSpider":
-        return QSpider(n_inputs, n_outputs, phase if phase is not None else ZxPoly({}))
+        return QSpider(num_inputs, num_outputs, phase if phase is not None else ZxPoly({}))
     if node_type == "PSpider":
-        return PSpider(n_inputs, n_outputs, phase if phase is not None else ZxPoly({}))
+        return PSpider(num_inputs, num_outputs, phase if phase is not None else ZxPoly({}))
     if node_type == "Swap":
         return Swap()
     if node_type == "Fourier":
@@ -1178,17 +1205,21 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C
     if node_type == "Fourier2":
         return Fourier2()
     if node_type == "DisplacementGate":
-        return DisplacementGate(phase)
+        feedforward = attrs.get("feedforward")
+        measurement_ids = attrs.get("measurement_ids")
+        return DisplacementGate(phase, is_parametric, feedforward, measurement_ids)
     if node_type == "PhaseRotationGate":
-        return PhaseRotationGate(phase)
+        return PhaseRotationGate(phase, is_parametric)
     if node_type == "SqueezingGate":
-        return SqueezingGate(phase)
+        return SqueezingGate(phase, is_parametric)
     if node_type == "BeamsplitterGate":
-        return BeamsplitterGate(phase)
+        return BeamsplitterGate(phase, is_parametric)
     if node_type == "ControlledSumGate":
-        return ControlledSumGate(phase)
+        control = attrs.get("control")
+        target = attrs.get("target")
+        return ControlledSumGate(phase, control, target, is_parametric)
     if node_type == "ControlledZGate":
-        return ControlledZGate(phase)
+        return ControlledZGate(phase, is_parametric)
     msg = f"Unknown proper node type: {node_type}"
     raise ValueError(msg)
 
@@ -1216,7 +1247,6 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # no
     attrs = G.nodes[node_id]
     sub_diagram_ids = attrs.get("sub_diagram_ids", [])
     connectivity = attrs.get("connectivity", {})
-
     # Recursively reconstruct all sub-diagrams
     sub_diagrams = [_reconstruct_from_node(G, sub_id) for sub_id in sub_diagram_ids]
 

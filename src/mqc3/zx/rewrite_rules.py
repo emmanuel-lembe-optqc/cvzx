@@ -459,13 +459,13 @@ class ChainReductionRule(RewriteRule):
     - R(θ) ∘ R(φ) → R(θ+φ)
     - BS(θ) ∘ BS(φ) → BS(θ+φ)
     - Sq(τ) ∘ Sq(κ) → Sq(τ·κ)
-    - D(α) ∘ D(β) → D(α+β)
+    - D(a) ∘ D(β) → D(a+β)
     - F ∘ F → F², F ∘ F ∘ F ∘ F → I, etc.
     - Finv ∘ Finv → F², Finv ∘ Finv ∘ Finv ∘ Finv → I, etc.
     - F ∘ Finv → I, Finv ∘ F → I
     - F² ∘ F² → I, F² ∘ F² ∘ F² → F², etc.
 
-    """  # noqa: RUF002
+    """
 
     def match(self, diagram: Diagram, path: list[int] | None = None, parent: Diagram | None = None) -> list[dict]:  # noqa: ARG002, C901
         """Find maximal chains of reducible gates in CompositionDiagram.
