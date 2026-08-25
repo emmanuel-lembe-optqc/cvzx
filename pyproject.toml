@@ -3,14 +3,17 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mqc3"
+name = "cvzx"
+version = "0.1.0"
 description = "Measurement-based Quantum Computation with Continuous-variable Cluster states"
 readme = "README.md"
 requires-python = ">=3.10"
 
-# authors =
+authors = [
+  { name = "vardamideslembe@gmail.com" }
+]
 license = "MIT"
-# keywords =
+
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -21,14 +24,16 @@ classifiers = [
   "Typing :: Typed",
 ]
 
-dynamic = ["version"]
-
 dependencies = [
   "typing_extensions >= 4.12",
   'tzdata >= 2025.1; platform_system == "Windows"',
 
   "numpy >= 2.1, < 3",
   "networkx >= 3.4, < 4",
+  "sympy >= 1.12",
+  "scipy >= 1.10",
+  "matplotlib >= 3.7",
+  "Pillow >= 9.0",
 
   "grpcio ~= 1.71",
   "protobuf ~= 5.29",
@@ -38,12 +43,8 @@ dependencies = [
 # [project.urls]
 
 [project.optional-dependencies]
-all = ["matplotlib"]
+all = []
 dev = [
-  "matplotlib",
-  "sympy",
-  "scipy",
-
   # Test
   "pytest",
   "allpairspy",
@@ -70,17 +71,11 @@ sf = [
   "scipy < 1.14; python_version < '3.13'",              # To avoid import errors with the strawberryfields package
 ]
 
-[tool.setuptools.dynamic]
-version = { attr = "mqc3.__version__.__version__" }
-
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["mqc3*"]
+include = ["cvzx*"]
 namespaces = false
 exclude = ["build", "tests"]
 
 [tool.setuptools.package-data]
-mqc3 = ["py.typed"]
-
-[tool.coverage.run]
-omit = ["tests/*", "src/mqc3/pb/mqc3_cloud/*"]
+cvzx = ["py.typed"]
