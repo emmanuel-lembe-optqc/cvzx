@@ -114,6 +114,28 @@ python -m pip install -e ".[sf]"
 
 The package currently targets Python 3.10 and newer.
 
+## Quick start
+
+A guided introduction to the compiler architecture and current graph-rewrite
+foundations is available in [`quick_start.ipynb`](quick_start.ipynb).
+
+The notebook demonstrates:
+
+- structured CV-ZX diagram construction;
+- conversion to the port-aware NetworkX graph representation;
+- identity removal and chain reduction;
+- reconstruction of an optimized structured diagram;
+- the planned path from optimized CV-ZX graphs to simulator or hardware
+  backends.
+
+Start Jupyter from the repository root:
+
+```bash
+jupyter notebook
+```
+
+Then open `quick_start.ipynb` and run the cells from top to bottom.
+
 ## Running tests
 
 Run the test suite with:
