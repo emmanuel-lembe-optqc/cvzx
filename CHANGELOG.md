@@ -1,0 +1,1 @@
+This repository is an early research snapshot. The NetworkX representation and initial identity, chain-reduction, and fusion foundations are implemented. The complete optimization pipeline is not yet implemented; several higher-level stages remain placeholders.

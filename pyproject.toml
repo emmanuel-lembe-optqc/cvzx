@@ -76,6 +76,3 @@ where = ["src"]
 include = ["cvzx*"]
 namespaces = false
 exclude = ["build", "tests"]
-
-[tool.setuptools.package-data]
-cvzx = ["py.typed"]
