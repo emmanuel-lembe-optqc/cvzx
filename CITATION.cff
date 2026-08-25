@@ -1,0 +1,38 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it and the foundational CV-ZX paper."
+title: "CVZX Compiler"
+type: software
+authors:
+  - name: "Varda-star"
+version: "0.1.0"
+date-released: 2026-08-26
+license: MIT
+repository-code: "https://github.com/Varda-star/cvzx"
+
+references:
+  - type: article
+    authors:
+      - family-names: "Nagayoshi"
+        given-names: "Hironari"
+      - family-names: "Asavanant"
+        given-names: "Warit"
+      - family-names: "Ide"
+        given-names: "Ryuhoh"
+      - family-names: "Fukui"
+        given-names: "Kosuke"
+      - family-names: "Sakaguchi"
+        given-names: "Atsushi"
+      - family-names: "Yoshikawa"
+        given-names: "Jun-ichi"
+      - family-names: "Menicucci"
+        given-names: "Nicolas C."
+      - family-names: "Furusawa"
+        given-names: "Akira"
+    title: "ZX graphical calculus for continuous-variable quantum processes"
+    journal: "Physical Review Research"
+    volume: 7
+    issue: 3
+    article: "033141"
+    year: 2025
+    doi: "10.1103/PhysRevResearch.7.033141"
+    url: "https://arxiv.org/abs/2405.07246"

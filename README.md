@@ -218,6 +218,21 @@ The project is motivated by continuous-variable quantum computation, CV measurem
 
 The current repository should be read as a snapshot of ongoing research. It documents the implemented foundations and preserves the planned interfaces for future work.
 
+## Acknowledgements
+
+This project is an independent compiler prototype that builds on the
+continuous-variable ZX formalism introduced in:
+
+> Hironari Nagayoshi, Warit Asavanant, Ryuhoh Ide, Kosuke Fukui,
+> Atsushi Sakaguchi, Jun-ichi Yoshikawa, Nicolas C. Menicucci, and
+> Akira Furusawa, “ZX graphical calculus for continuous-variable quantum
+> processes,” *Physical Review Research* **7**, 033141 (2025).
+> [arXiv:2405.07246](https://arxiv.org/abs/2405.07246)
+
+The CVZX Compiler is an independent software implementation and research
+prototype. It is not an official implementation of, nor affiliated with, the
+authors or institutions of the original work.
+
 ## License
 
 This project is released under the MIT License. See [`LICENSE`](LICENSE) for the full text.

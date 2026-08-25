@@ -1,11 +1,11 @@
 """CV ZX calculus rewrite rules and applications.
 
-This module implements the 10 basic rewrite rules from [3] Sec. IV.A,
+This module implements the 10 basic rewrite rules from [1] Sec. IV.A,
 and the derived rules from Sec. IV.B; using a graph structure.
 
 References:
 -----------
-[3] Nagayoshi et al., CV ZX calculus, 2024
+[1] Nagayoshi et al., CV ZX calculus, 2024
 """
 
 from abc import ABC, abstractmethod

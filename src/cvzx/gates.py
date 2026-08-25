@@ -1,4 +1,4 @@
-"""CV-ZX representation of quantum gates from Nagayoshi et al. (2024), Sec. II.C.
+"""CV-ZX representation of quantum gates from [1] Nagayoshi et al. (2024), Sec. II.C.
 
 This module implements the standard CV quantum gates as compact diagrams
 built from proper diagrams (spiders, Fourier, Swap). Each gate is a subclass
@@ -7,7 +7,7 @@ equivalent CompositionDiagram or TensorDiagram of basic CV ZX elements.
 
 References:
 -----------
-[3] Nagayoshi et al., CV ZX calculus, Sec. II.C, Table I
+[1] Nagayoshi et al., CV ZX calculus, Sec. II.C, Table I
 """
 
 from dataclasses import dataclass, field
