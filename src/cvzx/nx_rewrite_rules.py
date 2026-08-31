@@ -37,8 +37,7 @@ class RewriteRule(ABC):
 
     The `apply_rule` method provides a default implementation that:
         1. Finds all matches
-        2. Processes them in order (deepest to shallowest)
-        3. Returns the modified graph
+        2. Returns the modified graph
 
     Parameters:
     ----------
@@ -101,11 +100,22 @@ class RewriteRule(ABC):
         if not matches:
             return G
 
-        # Process matches
+        # Group by container and apply each group's matches in reverse
+        # position order, so an earlier removal can't shift a later match's index.
+        groups: dict[object, list] = {}
+        group_order: list[object] = []
         for match in matches:
-            result = self.apply_single(G, match)
+            key = match.get("container_id") if isinstance(match, dict) else None
+            if key not in groups:
+                groups[key] = []
+                group_order.append(key)
+            groups[key].append(match)
 
-        return result
+        for key in group_order:
+            for match in reversed(groups[key]):
+                self.apply_single(G, match)
+
+        return G
 
     def _flatten_container(self, G: nx.DiGraph, container_id: int) -> None:  # noqa: N803
         """Flatten a container if it has only one element.
@@ -186,7 +196,8 @@ class IdentityRule(RewriteRule):
         """
         matches = []
 
-        for node in registry.identity_spiders:
+        # Sort for deterministic match order (set iteration order is not stable).
+        for node in sorted(registry.identity_spiders):
             attrs = graph.nodes[node]
             if (
                 attrs.get("kind") == "proper"
@@ -300,7 +311,8 @@ class FusionRule(RewriteRule):
         """
         matches = []
 
-        for node in registry.contracted_diagrams:
+        # Sort for deterministic match order (set iteration order is not stable).
+        for node in sorted(registry.contracted_diagrams):
             # Check if this is a ContractedDiagram container
             # Get the first and second diagrams
             attrs = graph.nodes[node]
@@ -492,8 +504,8 @@ class ChainReductionRule(RewriteRule):
         """
         matches = []
 
-        # Iterate over all CompositionDiagram containers
-        for container_id in registry.composition_nodes:
+        # Sort for deterministic match order (set iteration order is not stable).
+        for container_id in sorted(registry.composition_nodes):
             attrs = graph.nodes[container_id]
             sub_ids = attrs.get("sub_diagram_ids", [])
 
@@ -829,7 +841,7 @@ class ChainReductionRule(RewriteRule):
             total = 1.0
             for v in values:
                 total *= v
-            if total == 1.0:  # noqa: RUF069
+            if total == 1.0:
                 return id_q
             return {"type": "SqueezingGate", "tau": total}
 
@@ -1000,8 +1012,8 @@ class CopyRule(RewriteRule):
         """
         matches = []
 
-        # Iterate over all CompositionDiagram containers
-        for container_id in registry.composition_nodes:
+        # Sort for deterministic match order (set iteration order is not stable).
+        for container_id in sorted(registry.composition_nodes):
             attrs = graph.nodes[container_id]
             sub_ids = attrs.get("sub_diagram_ids", [])
 
@@ -1072,7 +1084,7 @@ class CopyRule(RewriteRule):
                 copy_spider_id=second_id,
                 disappearing_spider_id=first_id,
                 n_copies=first_num_inputs,
-                copy_spider_type="P",
+                copy_spider_type="Q",
             )
 
         # Pattern: Q(φ, 1, n) ∘ P(g, 0, 1)
@@ -1124,7 +1136,7 @@ class CopyRule(RewriteRule):
         copy_phase = copy_attrs.get("phase")
 
         # Check that the copied spider's phase is in R₁[X] (degree ≤ 1)
-        if not self._is_in_R1(copy_phase):
+        if not self.is_in_R1(copy_phase):
             return None
 
         return {
@@ -1137,7 +1149,7 @@ class CopyRule(RewriteRule):
             "copy_spider_num_outputs": copy_attrs.get("num_outputs"),
         }
 
-    def _is_in_R1(self, phase: ZxPoly) -> bool:
+    def is_in_R1(self, phase: ZxPoly) -> bool:
         """Check if a phase polynomial is in R₁[X] (degree ≤ 1).
 
         Parameters:
@@ -1195,14 +1207,14 @@ class CopyRule(RewriteRule):
             graph.add_node(
                 new_id,
                 id=new_id,
-                type=copy_spider_type,
+                type=f"{copy_spider_type}Spider",
                 kind="proper",
                 phase=copy_spider_phase,
                 num_inputs=copy_num_inputs,
                 num_outputs=copy_num_outputs,
                 container_id=copy_spider_id,
                 external_inputs=list(range(copy_num_inputs)),
-                external_outputs=list(range(copy_num_inputs)),
+                external_outputs=list(range(copy_num_outputs)),
             )
             copy_ids.append(new_id)
 
@@ -1218,33 +1230,28 @@ class CopyRule(RewriteRule):
             # Remove spider-specific attributes
             "phase": None,
         })
-        graph.nodes["external_input_mapping"] = graph.nodes["external_inputs"]
-        graph.nodes["external_output_mapping"] = graph.nodes["external_outputs"]
+        graph.nodes[copy_spider_id]["external_input_mapping"] = graph.nodes[copy_spider_id]["external_inputs"]
+        graph.nodes[copy_spider_id]["external_output_mapping"] = graph.nodes[copy_spider_id]["external_outputs"]
 
         # Replace the two elements with the tensor in the CompositionDiagram
         new_sub_ids = [*sub_ids[:idx1], copy_spider_id, *sub_ids[idx2 + 1 :]]
         graph.nodes[container_id]["sub_diagram_ids"] = new_sub_ids
 
-        # Update connectivity if it exists
+        # Drop the now-internal idx1 link, move idx2's outgoing link to idx1,
+        # and shift every index past idx2 down by one.
         if "connectivity" in container_attrs:
             connectivity = container_attrs["connectivity"]
             new_connectivity = {}
 
-            # Build mapping from old indices to new indices
-            index_map = {}
-            new_idx = 0
-            for old_idx in range(len(connectivity)):
-                if old_idx == idx2:
-                    # The disappearing spider is removed
-                    continue
-                index_map[old_idx] = new_idx
-                new_idx += 1
-
-            # Remap connectivity
             for old_idx, targets in connectivity.items():
-                if old_idx != idx2:
-                    new_idx = index_map[old_idx]
-                    new_connectivity[new_idx] = targets
+                if old_idx == idx1:
+                    continue  # internal link between the merged pair
+                if old_idx == idx2:
+                    new_connectivity[idx1] = targets  # fused node's outgoing link
+                elif old_idx < idx1:
+                    new_connectivity[old_idx] = targets
+                else:  # old_idx > idx2
+                    new_connectivity[old_idx - 1] = targets
 
             graph.nodes[container_id]["connectivity"] = new_connectivity
         if len(sub_ids) == 2:  # noqa: PLR2004

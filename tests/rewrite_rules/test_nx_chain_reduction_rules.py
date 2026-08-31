@@ -302,7 +302,7 @@ class TestChainReductionRule(unittest.TestCase):
         graph = to_graph(self.disp1)
         gate_type, value, _ = self.rule.get_gate_info(graph, self.disp1.id)
         assert gate_type == "D"
-        assert value == 1.0 + 0.5j  # noqa: RUF069
+        assert value == 1.0 + 0.5j
 
     def test_get_gate_info_fourier(self):
         """Fourier returns ('F', 'F')."""
@@ -923,7 +923,7 @@ class TestChainReductionRule(unittest.TestCase):
         values = [1.0 + 0.5j, 2.0 + 1.0j]
         result = self.rule.reduce_chain("D", values)
         assert result["type"] == "DisplacementGate"
-        assert result["alpha"] == 3.0 + 1.5j  # noqa: RUF069
+        assert result["alpha"] == 3.0 + 1.5j
 
     def test_reduce_f_chain_two(self):
         """F ∘ F → F²."""
