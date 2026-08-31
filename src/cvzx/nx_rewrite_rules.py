@@ -958,6 +958,299 @@ class ChainReductionRule(RewriteRule):
         attrs["connectivity"] = new_connectivity
 
 
+class CopyRule(RewriteRule):
+    r"""Copy rule - Graph-based version.
+
+    The copy rule copies a spider with arity (0,1) or (1,0) through a spider
+    with arity (1,n) or (n,1), producing n copies in a tensor diagram.
+
+    Cases:
+    1. P(φ, 1, n) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ ... ⊗ Q(g, 0, 1) (n copies)
+    2. Q(g, 1, 0) ∘ P(φ, n, 1) → Q(g, 1, 0) ⊗ ... ⊗ Q(g, 1, 0) (n copies)
+    3. Q(φ, 1, n) ∘ P(g, 0, 1) → P(g, 0, 1) ⊗ ... ⊗ P(g, 0, 1) (n copies)
+    4. P(g, 1, 0) ∘ Q(φ, n, 1) → P(g, 1, 0) ⊗ ... ⊗ P(g, 1, 0) (n copies)
+
+    Constraints:
+    - The copied spider's phase g MUST be in R₁[X] (degree ≤ 1)
+    - The disappearing spider's phase φ can be ANY polynomial
+    - The result is a TensorDiagram of n copies of the copied spider
+    - The composition is removed and replaced by a tensor diagram
+    """
+
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+        """Find all CompositionDiagram containers containing a copy-able pattern.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+        registry : GateRegister
+            Registry for tracking specific gate types and nodes.
+
+        Returns:
+        -------
+        list[dict]
+            List of matches, each containing:
+            - 'container_id': the node ID of the CompositionDiagram
+            - 'copy_spider_id': the node ID of the spider to copy (Q or P with 0→1 or 1→0)
+            - 'disappearing_spider_id': the node ID of the spider that disappears (P or Q with 1→n or n→1)
+            - 'copy_spider_phase': the phase of the copied spider (g ∈ R₁[X])
+            - 'copy_spider_type': 'Q' or 'P'
+            - 'n_copies': number of copies to create
+        """
+        matches = []
+
+        # Iterate over all CompositionDiagram containers
+        for container_id in registry.composition_nodes:
+            attrs = graph.nodes[container_id]
+            sub_ids = attrs.get("sub_diagram_ids", [])
+
+            if len(sub_ids) < 2:  # noqa: PLR2004
+                continue
+
+            # Look at each pair of consecutive diagrams in the composition
+            for i in range(len(sub_ids) - 1):
+                first_id = sub_ids[i]
+                second_id = sub_ids[i + 1]
+
+                # Check if the two nodes form a copy-able pair
+                match = self._check_pair(graph, first_id, second_id)
+                if match:
+                    match["container_id"] = container_id
+                    match["indices"] = [i, i + 1]
+                    matches.append(match)
+
+        return matches
+
+    def _check_pair(self, graph: nx.DiGraph, first_id: int, second_id: int) -> dict | None:
+        """Check if a pair of nodes forms a copy-able pattern.
+
+        Returns:
+        -------
+        dict | None
+            Match dictionary if the pair is copy-able, None otherwise.
+        """
+        first_attrs = graph.nodes[first_id]
+        second_attrs = graph.nodes[second_id]
+
+        first_type = first_attrs.get("type")
+        second_type = second_attrs.get("type")
+
+        first_num_inputs = first_attrs.get("num_inputs")
+        first_num_outputs = first_attrs.get("num_outputs")
+        second_num_inputs = second_attrs.get("num_inputs")
+        second_num_outputs = second_attrs.get("num_outputs")
+
+        # Pattern: P(φ, 1, n) ∘ Q(g, 0, 1)
+        if (
+            first_type == "QSpider"  # noqa: PLR0916
+            and first_num_inputs == 0
+            and first_num_outputs == 1
+            and second_type == "PSpider"
+            and second_num_inputs == 1
+            and second_num_outputs >= 1
+        ):
+            return self._create_match(
+                graph,
+                copy_spider_id=first_id,
+                disappearing_spider_id=second_id,
+                n_copies=second_num_outputs,
+                copy_spider_type="Q",
+            )
+
+        # Pattern: Q(g, 1, 0) ∘ P(φ, n, 1)
+        if (
+            first_type == "PSpider"  # noqa: PLR0916
+            and first_num_inputs >= 1
+            and first_num_outputs == 1
+            and second_type == "QSpider"
+            and second_num_inputs == 1
+            and second_num_outputs == 0
+        ):
+            return self._create_match(
+                graph,
+                copy_spider_id=second_id,
+                disappearing_spider_id=first_id,
+                n_copies=first_num_inputs,
+                copy_spider_type="P",
+            )
+
+        # Pattern: Q(φ, 1, n) ∘ P(g, 0, 1)
+        if (
+            first_type == "PSpider"  # noqa: PLR0916
+            and first_num_inputs == 0
+            and first_num_outputs == 1
+            and second_type == "QSpider"
+            and second_num_inputs == 1
+            and second_num_outputs >= 1
+        ):
+            return self._create_match(
+                graph,
+                copy_spider_id=first_id,
+                disappearing_spider_id=second_id,
+                n_copies=second_num_outputs,
+                copy_spider_type="P",
+            )
+
+        # Pattern: P(g, 1, 0) ∘ Q(φ, n, 1)
+        if (
+            first_type == "QSpider"  # noqa: PLR0916
+            and first_num_inputs >= 1
+            and first_num_outputs == 1
+            and second_type == "PSpider"
+            and second_num_inputs == 1
+            and second_num_outputs == 0
+        ):
+            return self._create_match(
+                graph,
+                copy_spider_id=second_id,
+                disappearing_spider_id=first_id,
+                n_copies=first_num_inputs,
+                copy_spider_type="P",
+            )
+
+        return None
+
+    def _create_match(
+        self,
+        graph: nx.DiGraph,
+        copy_spider_id: int,
+        disappearing_spider_id: int,
+        n_copies: int,
+        copy_spider_type: str,
+    ) -> dict | None:
+        """Create a match dictionary if the copied spider's phase is in R₁[X]."""  # noqa: DOC201
+        copy_attrs = graph.nodes[copy_spider_id]
+        copy_phase = copy_attrs.get("phase")
+
+        # Check that the copied spider's phase is in R₁[X] (degree ≤ 1)
+        if not self._is_in_R1(copy_phase):
+            return None
+
+        return {
+            "copy_spider_id": copy_spider_id,
+            "disappearing_spider_id": disappearing_spider_id,
+            "n_copies": n_copies,
+            "copy_spider_type": copy_spider_type,
+            "copy_spider_phase": copy_phase,
+            "copy_spider_num_inputs": copy_attrs.get("num_inputs"),
+            "copy_spider_num_outputs": copy_attrs.get("num_outputs"),
+        }
+
+    def _is_in_R1(self, phase: ZxPoly) -> bool:
+        """Check if a phase polynomial is in R₁[X] (degree ≤ 1).
+
+        Parameters:
+        ----------
+        phase : ZxPoly
+            The phase polynomial to check.
+
+        Returns:
+        -------
+        bool
+            True if the polynomial has degree ≤ 1, False otherwise.
+        """
+        if phase is None:
+            return False
+        return phase.degree() <= 1
+
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # noqa: PLR0914
+        """Apply the copy rule to a specific match in-place.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        match : dict
+            Match containing the CompositionDiagram and spider information.
+        """
+        container_id = match["container_id"]
+        copy_spider_id = match["copy_spider_id"]
+        disappearing_spider_id = match["disappearing_spider_id"]
+        n_copies = match["n_copies"]
+        copy_spider_type = match["copy_spider_type"]
+        copy_spider_phase = match["copy_spider_phase"]
+        copy_num_inputs = match["copy_spider_num_inputs"]
+        copy_num_outputs = match["copy_spider_num_outputs"]
+        idx1 = match["indices"][0]
+        idx2 = match["indices"][1]
+
+        # Get container attributes
+        container_attrs = graph.nodes[container_id]
+        sub_ids = container_attrs.get("sub_diagram_ids", [])
+
+        # Contract the disappearing spider into the copy spider
+        # This preserves all connections automatically
+        nx.contracted_nodes(graph, copy_spider_id, disappearing_spider_id, self_loops=False, copy=False)
+
+        # Remove the contraction metadata that NetworkX adds
+        if "contraction" in graph.nodes[copy_spider_id]:
+            del graph.nodes[copy_spider_id]["contraction"]
+
+        # Now transform the copy spider into a TensorDiagram container
+        # Create n copies of the spider to place inside the tensor
+        copy_ids = []
+        for _ in range(n_copies):
+            new_id = max(graph.nodes) + 1 if graph.nodes else 0
+            graph.add_node(
+                new_id,
+                id=new_id,
+                type=copy_spider_type,
+                kind="proper",
+                phase=copy_spider_phase,
+                num_inputs=copy_num_inputs,
+                num_outputs=copy_num_outputs,
+                container_id=copy_spider_id,
+                external_inputs=list(range(copy_num_inputs)),
+                external_outputs=list(range(copy_num_inputs)),
+            )
+            copy_ids.append(new_id)
+
+        # Transform the copy_spider_id node from a proper spider into a TensorDiagram container
+        graph.nodes[copy_spider_id].update({
+            "type": "TensorDiagram",
+            "kind": "container",
+            "container_type": "tensor",
+            "sub_diagram_ids": copy_ids,
+            "num_inputs": n_copies * copy_num_inputs,
+            "num_outputs": n_copies * copy_num_outputs,
+            # Keep the container_id and is_root from the original
+            # Remove spider-specific attributes
+            "phase": None,
+        })
+        graph.nodes["external_input_mapping"] = graph.nodes["external_inputs"]
+        graph.nodes["external_output_mapping"] = graph.nodes["external_outputs"]
+
+        # Replace the two elements with the tensor in the CompositionDiagram
+        new_sub_ids = [*sub_ids[:idx1], copy_spider_id, *sub_ids[idx2 + 1 :]]
+        graph.nodes[container_id]["sub_diagram_ids"] = new_sub_ids
+
+        # Update connectivity if it exists
+        if "connectivity" in container_attrs:
+            connectivity = container_attrs["connectivity"]
+            new_connectivity = {}
+
+            # Build mapping from old indices to new indices
+            index_map = {}
+            new_idx = 0
+            for old_idx in range(len(connectivity)):
+                if old_idx == idx2:
+                    # The disappearing spider is removed
+                    continue
+                index_map[old_idx] = new_idx
+                new_idx += 1
+
+            # Remap connectivity
+            for old_idx, targets in connectivity.items():
+                if old_idx != idx2:
+                    new_idx = index_map[old_idx]
+                    new_connectivity[new_idx] = targets
+
+            graph.nodes[container_id]["connectivity"] = new_connectivity
+        if len(sub_ids) == 2:  # noqa: PLR2004
+            self._flatten_container(graph, container_id)
+
+
 def is_wiring_node_from_attrs(attrs: dict) -> bool:
     """Check if a node's attributes represent a wiring (identity) diagram.
 
