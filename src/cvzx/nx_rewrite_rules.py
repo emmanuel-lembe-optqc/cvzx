@@ -9,8 +9,10 @@ References:
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 import networkx as nx
+from sympy import pi
 
 from cvzx.base_gates import Diagram, ZxPoly
 from cvzx.nx_graph import (
@@ -51,13 +53,15 @@ class RewriteRule(ABC):
     """
 
     @abstractmethod
-    def match(self, G: nx.DiGraph) -> list:  # noqa: N803
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list:
         """Find all matches of the rule pattern in the graph.
 
         Parameters:
         ----------
-        G : nx.DiGraph
+        graph : nx.DiGraph
             The graph to search.
+        registry : GateRegister
+                    Registry for tracking specific gate types and nodes in a CV ZX graph.
 
         Returns:
         -------
@@ -67,22 +71,24 @@ class RewriteRule(ABC):
         """
 
     @abstractmethod
-    def apply_single(self, G: nx.DiGraph, match: any) -> None:  # noqa: N803
+    def apply_single(self, graph: nx.DiGraph, match: list) -> None:
         """Apply the rule to a specific match in-place.
 
         Parameters:
         ----------
-        G : nx.DiGraph
+        graph : nx.DiGraph
             The graph to modify.
-        match : any
+        match : list
             A match returned by `match()`.
         """
 
-    def apply_rule(self, G: nx.DiGraph, registry: GateRegister) -> nx.DiGraph:  # noqa: N803
+    def apply_rule(self, graph: nx.DiGraph, registry: GateRegister) -> nx.DiGraph:
         """Apply a rule to the entire graph.
 
         Parameters:
         ----------
+        graph : nx.DiGraph
+                    The graph to modify.
         diagram : Diagram
             The diagram to modify.
 
@@ -95,10 +101,10 @@ class RewriteRule(ABC):
             The modified diagram.
         """
         # Find all matches
-        matches = self.match(G, registry)
+        matches = self.match(graph, registry)
 
         if not matches:
-            return G
+            return graph
 
         # Group by container and apply each group's matches in reverse
         # position order, so an earlier removal can't shift a later match's index.
@@ -113,24 +119,24 @@ class RewriteRule(ABC):
 
         for key in group_order:
             for match in reversed(groups[key]):
-                self.apply_single(G, match)
+                self.apply_single(graph, match)
 
-        return G
+        return graph
 
-    def _flatten_container(self, G: nx.DiGraph, container_id: int) -> None:  # noqa: N803
+    def _flatten_container(self, graph: nx.DiGraph, container_id: int) -> None:
         """Flatten a container if it has only one element.
 
         Parameters:
         ----------
-        G : nx.DiGraph
+        graph : nx.DiGraph
             The graph to modify.
         container_id : int
             The container node ID.
         """
-        if container_id not in G.nodes:
+        if container_id not in graph.nodes:
             return
 
-        attrs = G.nodes[container_id]
+        attrs = graph.nodes[container_id]
         sub_ids = attrs.get("sub_diagram_ids", [])
 
         # If the container has exactly one element, flatten it
@@ -141,8 +147,8 @@ class RewriteRule(ABC):
             parent_container_id = attrs.get("container_id")
 
             # Replace the container with its child in the parent
-            if parent_container_id is not None and parent_container_id in G.nodes:
-                parent_attrs = G.nodes[parent_container_id]
+            if parent_container_id is not None and parent_container_id in graph.nodes:
+                parent_attrs = graph.nodes[parent_container_id]
                 if parent_attrs.get("container_type") in {"composition", "tensor"}:
                     parent_sub_ids = parent_attrs.get("sub_diagram_ids", [])
                     # Replace container_id with child_id in parent's sub_diagram_ids
@@ -155,15 +161,15 @@ class RewriteRule(ABC):
                     parent_attrs["second_id"] = child_id
 
                 # Update container_id of the child
-                if child_id in G.nodes:
-                    G.nodes[child_id]["container_id"] = parent_container_id
+                if child_id in graph.nodes:
+                    graph.nodes[child_id]["container_id"] = parent_container_id
                 # Remove the container node
-                G.remove_node(container_id)
+                graph.remove_node(container_id)
 
-            elif child_id in G.nodes:
+            elif child_id in graph.nodes:
                 # The Container was the root
-                G.nodes[child_id]["container_id"] = None
-                G.nodes[child_id]["is_root"] = True
+                graph.nodes[child_id]["container_id"] = None
+                graph.nodes[child_id]["is_root"] = True
 
 
 class IdentityRule(RewriteRule):
@@ -651,12 +657,12 @@ class ChainReductionRule(RewriteRule):
 
         return chains
 
-    def get_gate_info(self, graph: nx.DiGraph, node_id: int) -> tuple[str | None, any, dict | None]:  # noqa: C901, PLR0911
+    def get_gate_info(self, graph: nx.DiGraph, node_id: int) -> tuple[str | None, Any, dict | None]:  # noqa: C901, PLR0911
         """Extract gate type and value from a node.
 
         Returns:
         -------
-        tuple[str | None, any, dict | None]
+        tuple[str | None, Any, dict | None]
             (gate_type, value, gate_info)
             gate_type: 'Q', 'P', 'R', 'BS', 'Sq', 'D', 'F', 'F2', 'ControlledZGate', 'ControlledSumGate', or None
             value: the parameter value (phase polynomial, angle, etc.)
@@ -724,10 +730,10 @@ class ChainReductionRule(RewriteRule):
     def can_chain(  # noqa: PLR0911, PLR0913, PLR0917
         self,
         gate_type: str,
-        value: any,
+        value: Any,  # noqa: ANN401
         gate_info: dict | None,
         next_type: str | None,
-        next_value: any,
+        next_value: Any,  # noqa: ANN401
         next_gate_info: dict | None,
     ) -> bool:
         """Check if two gates can be chained.
@@ -968,6 +974,193 @@ class ChainReductionRule(RewriteRule):
                 new_connectivity[new_idx] = targets
 
         attrs["connectivity"] = new_connectivity
+
+
+class FourierNormalizationRule(RewriteRule):
+    r"""Fourier normalization rule - Graph-based version.
+
+    Folds a Fourier-type gate (F, Finv, or F2) into an adjacent rotation or
+    squeezing gate -- a cross-type merge `ChainReductionRule` cannot do on
+    its own, since its chaining is strictly same-type. Treats the
+    Fourier-type gate as an equivalent rotation/squeezing value and combines
+    it the same way ChainReductionRule combines same-type chains (sum for
+    rotations, product for squeezing). Prepares the ground for terminal
+    absorption.
+
+    Cases (either list order -- F, Finv and F2 all commute with rotations,
+    and F2 also commutes with squeezing, since they act as fixed
+    rotations/parity flips):
+    - F ∘ R(θ) → R(θ - π/2)
+    - Finv ∘ R(θ) → R(θ + π/2)
+    - F2 ∘ R(θ) → R(θ + π)
+    - F2 ∘ Sq(τ) → Sq(-τ)
+
+    F and Finv never merge with a squeezing gate.
+    """
+
+    # Equivalent rotation angle contributed by each Fourier-type gate.
+    _ROTATION_DELTA = {  # noqa: RUF012
+        "Fourier": -pi / 2,
+        "FourierInv": pi / 2,
+        "Fourier2": pi,
+    }
+
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+        """Find all Fourier-type/rotation or F2/squeezing pairs.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+        registry : GateRegister
+            Registry for tracking specific gate types and nodes.
+
+        Returns:
+        -------
+        list[dict]
+            List of matches, each containing:
+            - 'container_id': the node ID of the CompositionDiagram
+            - 'node_ids': [keep_id, absorb_id] in list order (keep_id survives)
+            - 'result_type': 'PhaseRotationGate' or 'SqueezingGate'
+            - 'result_value': the combined angle or squeezing parameter
+        """
+        matches = []
+
+        # Sort for deterministic match order (set iteration order is not stable).
+        for container_id in sorted(registry.composition_nodes):
+            attrs = graph.nodes[container_id]
+            sub_ids = attrs.get("sub_diagram_ids", [])
+
+            if len(sub_ids) < 2:  # noqa: PLR2004
+                continue
+
+            # Skip past a matched pair (i += 2) rather than sliding one at a
+            # time (i += 1): a Fourier-type node's "result_value" is computed
+            # once, from the neighbor's *current* phase. If two overlapping
+            # pairs were both matched here (e.g. F, R, Finv matching both
+            # (F,R) and (R,Finv)), applying the second one would overwrite
+            # the shared R node with a value computed before the first
+            # match's fold -- silently wrong, not even a crash. Consuming
+            # each matched pair before continuing avoids that; a 3+ chain
+            # like F ∘ R ∘ Finv still fully resolves, just over two
+            # apply_rule() passes instead of one (the fixed-point loop this
+            # rule is meant to run in already repeats until nothing changes).
+            i = 0
+            while i < len(sub_ids) - 1:
+                first_id = sub_ids[i]
+                second_id = sub_ids[i + 1]
+
+                match = self._check_pair(graph, first_id, second_id)
+                if match:
+                    match["container_id"] = container_id
+                    match["indices"] = [i, i + 1]
+                    matches.append(match)
+                    i += 2
+                else:
+                    i += 1
+
+        return matches
+
+    def _check_pair(self, graph: nx.DiGraph, first_id: int, second_id: int) -> dict | None:
+        """Check if a pair of adjacent nodes can be folded together.
+
+        Returns:
+        -------
+        dict | None
+            Match dictionary if the pair can be folded, None otherwise.
+        """
+        first_type = graph.nodes[first_id].get("type")
+        second_type = graph.nodes[second_id].get("type")
+
+        # Fourier-type gate next to a rotation, in either order.
+        if first_type in self._ROTATION_DELTA and second_type == "PhaseRotationGate":
+            return self._rotation_match(
+                graph, fourier_id=first_id, rotation_id=second_id, first_id=first_id, second_id=second_id
+            )
+        if second_type in self._ROTATION_DELTA and first_type == "PhaseRotationGate":
+            return self._rotation_match(
+                graph, fourier_id=second_id, rotation_id=first_id, first_id=first_id, second_id=second_id
+            )
+
+        # F2 next to a squeezing gate, in either order. F and Finv never merge with squeezing.
+        if first_type == "Fourier2" and second_type == "SqueezingGate":
+            return self._squeezing_match(graph, squeezing_id=second_id, first_id=first_id, second_id=second_id)
+        if second_type == "Fourier2" and first_type == "SqueezingGate":
+            return self._squeezing_match(graph, squeezing_id=first_id, first_id=first_id, second_id=second_id)
+
+        return None
+
+    def _rotation_match(
+        self, graph: nx.DiGraph, *, fourier_id: int, rotation_id: int, first_id: int, second_id: int
+    ) -> dict:
+        """Build the match dict for a Fourier-type/rotation pair."""  # noqa: DOC201
+        fourier_type = graph.nodes[fourier_id]["type"]
+        theta = graph.nodes[rotation_id]["phase"]
+        return {
+            "node_ids": [first_id, second_id],
+            "result_type": "PhaseRotationGate",
+            "result_value": theta + self._ROTATION_DELTA[fourier_type],
+        }
+
+    def _squeezing_match(self, graph: nx.DiGraph, *, squeezing_id: int, first_id: int, second_id: int) -> dict:
+        """Build the match dict for an F2/squeezing pair."""  # noqa: DOC201
+        tau = graph.nodes[squeezing_id]["phase"]
+        return {
+            "node_ids": [first_id, second_id],
+            "result_type": "SqueezingGate",
+            "result_value": -tau,
+        }
+
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
+        """Apply a Fourier-normalization fold to a specific match in-place.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        match : dict
+            Match containing fold information.
+        """
+        container_id = match["container_id"]
+        keep_id, absorb_id = match["node_ids"]
+        i, _ = match["indices"]
+
+        # Contract the two nodes via nx; keep_id survives with its attrs
+        # fully overwritten below, so which original node's id survives
+        # doesn't matter.
+        nx.contracted_nodes(graph, keep_id, absorb_id, self_loops=False, copy=False)
+        if "contraction" in graph.nodes[keep_id]:
+            del graph.nodes[keep_id]["contraction"]
+
+        graph.nodes[keep_id].update({
+            "type": match["result_type"],
+            "phase": match["result_value"],
+            "container_id": container_id,
+        })
+
+        container_attrs = graph.nodes[container_id]
+        sub_ids = container_attrs.get("sub_diagram_ids", [])
+        new_sub_ids = [sub_id for sub_id in sub_ids if sub_id != absorb_id]
+        container_attrs["sub_diagram_ids"] = new_sub_ids
+
+        # Drop the now-internal link at i, move i+1's outgoing link to i,
+        # and shift every index past i+1 down by one.
+        if "connectivity" in container_attrs:
+            connectivity = container_attrs["connectivity"]
+            new_connectivity = {}
+            for old_idx, targets in connectivity.items():
+                if old_idx == i:
+                    continue
+                if old_idx == i + 1:
+                    new_connectivity[i] = targets
+                elif old_idx < i:
+                    new_connectivity[old_idx] = targets
+                else:  # old_idx > i + 1
+                    new_connectivity[old_idx - 1] = targets
+            container_attrs["connectivity"] = new_connectivity
+
+        if len(new_sub_ids) == 1:
+            self._flatten_container(graph, container_id)
 
 
 class CopyRule(RewriteRule):
