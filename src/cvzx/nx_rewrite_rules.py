@@ -8,11 +8,12 @@ References:
 [1] Nagayoshi et al., CV ZX calculus, 2024
 """
 
+import math
 from abc import ABC, abstractmethod
 from typing import Any
 
 import networkx as nx
-from sympy import pi
+from sympy import Expr, cos, pi, tan
 
 from cvzx.base_gates import Diagram, ZxPoly
 from cvzx.nx_graph import (
@@ -1135,6 +1136,255 @@ class FourierNormalizationRule(RewriteRule):
         graph.nodes[keep_id].update({
             "type": match["result_type"],
             "phase": match["result_value"],
+            "container_id": container_id,
+        })
+
+        container_attrs = graph.nodes[container_id]
+        sub_ids = container_attrs.get("sub_diagram_ids", [])
+        new_sub_ids = [sub_id for sub_id in sub_ids if sub_id != absorb_id]
+        container_attrs["sub_diagram_ids"] = new_sub_ids
+
+        # Drop the now-internal link at i, move i+1's outgoing link to i,
+        # and shift every index past i+1 down by one.
+        if "connectivity" in container_attrs:
+            connectivity = container_attrs["connectivity"]
+            new_connectivity = {}
+            for old_idx, targets in connectivity.items():
+                if old_idx == i:
+                    continue
+                if old_idx == i + 1:
+                    new_connectivity[i] = targets
+                elif old_idx < i:
+                    new_connectivity[old_idx] = targets
+                else:  # old_idx > i + 1
+                    new_connectivity[old_idx - 1] = targets
+            container_attrs["connectivity"] = new_connectivity
+
+        if len(new_sub_ids) == 1:
+            self._flatten_container(graph, container_id)
+
+
+class TerminalAbsorptionRule(RewriteRule):
+    r"""Terminal absorption rule - Graph-based version.
+
+    Absorbs a gate adjacent to a QSpider/PSpider terminal (arity (1,0)
+    effect or (0,1) state) into the terminal's own phase, eliminating the
+    gate. Three sub-cases (the gate may sit on either side of the
+    terminal, whichever its own arity allows -- an effect's gate is
+    upstream, a state's gate is downstream):
+
+    - Rotation (QSpider terminal only, input phase degree <= 1): a
+      terminal with phase `c + k*x` folds R(theta) into
+      `c - tan(theta)/2*x**2 + k/cos(theta)*x`. Doesn't match when theta
+      is an odd multiple of pi/2 (tan/1-over-cos undefined). This is the
+      QSpider/PSpider-absorbs-a-rotation identity worked out in [1] Eq.
+      (239a)-(239e).
+    - Squeezing (QSpider or PSpider terminal, any phase degree): a
+      terminal with phase f(x) folds Sq(tau) into f(x/tau).
+    - Cross-color discard (opposite-color raw (1,1) spider): a QSpider
+      terminal absorbing an adjacent PSpider(1,1,f(x)), or vice versa,
+      leaves the terminal's phase unchanged -- the gate simply vanishes.
+      Same-color (1,1) spiders are ordinary spider fusion, FusionRule's
+      job, not this rule's.
+
+    References:
+    ----------
+    [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (239a)-(239e).
+    """
+
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+        """Find all gate/terminal pairs that can be absorbed.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+        registry : GateRegister
+            Registry for tracking specific gate types and nodes.
+
+        Returns:
+        -------
+        list[dict]
+            List of matches, each containing:
+            - 'container_id': the node ID of the CompositionDiagram
+            - 'node_ids': [keep_id, absorb_id] in list order (keep_id survives)
+            - 'result_type': 'QSpider' or 'PSpider'
+            - 'result_num_inputs' / 'result_num_outputs': the terminal's own arity
+            - 'result_phase': the folded phase
+        """
+        matches = []
+
+        # Sort for deterministic match order (set iteration order is not stable).
+        for container_id in sorted(registry.composition_nodes):
+            attrs = graph.nodes[container_id]
+            sub_ids = attrs.get("sub_diagram_ids", [])
+
+            if len(sub_ids) < 2:  # noqa: PLR2004
+                continue
+
+            # Skip past a matched pair (i += 2), same reasoning as
+            # FourierNormalizationRule: avoids reusing a stale
+            # precomputed result on a node a prior match already consumed.
+            i = 0
+            while i < len(sub_ids) - 1:
+                first_id = sub_ids[i]
+                second_id = sub_ids[i + 1]
+
+                match = self._check_pair(graph, first_id, second_id)
+                if match:
+                    match["container_id"] = container_id
+                    match["indices"] = [i, i + 1]
+                    matches.append(match)
+                    i += 2
+                else:
+                    i += 1
+
+        return matches
+
+    def _check_pair(self, graph: nx.DiGraph, first_id: int, second_id: int) -> dict | None:
+        """Check if a pair of adjacent nodes forms an absorbable gate/terminal pattern.
+
+        Returns:
+        -------
+        dict | None
+            Match dictionary if the pair can be folded, None otherwise.
+        """
+        first_attrs = graph.nodes[first_id]
+        second_attrs = graph.nodes[second_id]
+
+        # State case: terminal (0,1) is upstream, gate is downstream.
+        if (
+            first_attrs.get("num_inputs") == 0
+            and first_attrs.get("num_outputs") == 1
+            and first_attrs.get("type") in {"QSpider", "PSpider"}
+        ):
+            result = self._try_absorb(terminal_attrs=first_attrs, gate_attrs=second_attrs)
+            if result:
+                result["node_ids"] = [first_id, second_id]
+                return result
+
+        # Effect case: terminal (1,0) is downstream, gate is upstream.
+        if (
+            second_attrs.get("num_inputs") == 1
+            and second_attrs.get("num_outputs") == 0
+            and second_attrs.get("type") in {"QSpider", "PSpider"}
+        ):
+            result = self._try_absorb(terminal_attrs=second_attrs, gate_attrs=first_attrs)
+            if result:
+                result["node_ids"] = [first_id, second_id]
+                return result
+
+        return None
+
+    def _try_absorb(self, *, terminal_attrs: dict, gate_attrs: dict) -> dict | None:
+        """Fold `gate_attrs` into `terminal_attrs`, if the pattern matches.
+
+        Returns:
+        -------
+        dict | None
+            Partial match dict (result type/arity/phase), or None.
+        """
+        terminal_type = terminal_attrs["type"]
+        phase = terminal_attrs.get("phase")
+        gate_type = gate_attrs.get("type")
+
+        new_phase = None
+        if gate_type == "PhaseRotationGate" and terminal_type == "QSpider":
+            new_phase = self._rotation_absorb(phase, gate_attrs.get("phase"))
+        elif gate_type == "SqueezingGate":
+            new_phase = self._squeeze_absorb(phase, gate_attrs.get("phase"))
+        elif (
+            gate_type in {"QSpider", "PSpider"}
+            and gate_type != terminal_type
+            and gate_attrs.get("num_inputs") == 1
+            and gate_attrs.get("num_outputs") == 1
+        ):
+            new_phase = phase  # Cross-color discard: unchanged.
+
+        if new_phase is None:
+            return None
+
+        return {
+            "result_type": terminal_type,
+            "result_num_inputs": terminal_attrs["num_inputs"],
+            "result_num_outputs": terminal_attrs["num_outputs"],
+            "result_phase": new_phase,
+        }
+
+    @staticmethod
+    def _rotation_absorb(phase: ZxPoly, theta: float | Expr) -> ZxPoly | None:
+        """Fold a rotation R(theta) into a terminal's phase (degree <= 1 only).
+
+        Returns:
+        -------
+        ZxPoly | None
+            Updated phase after absorption.
+        """
+        if phase.degree() > 1:
+            return None
+        if TerminalAbsorptionRule._is_degenerate_angle(theta):
+            return None
+        coeffs = phase.coeffs
+        c = coeffs.get(0, 0)
+        k = coeffs.get(1, 0)
+        return ZxPoly({0: c, 1: k / cos(theta), 2: -tan(theta) / 2})
+
+    @staticmethod
+    def _squeeze_absorb(phase: ZxPoly, tau: float | Expr) -> ZxPoly:
+        """Fold a squeezing Sq(tau) into a terminal's phase (any degree).
+
+        x -> x/tau leaves each x**d term's degree unchanged and divides
+        its coefficient by tau**d (built via the dict form -- ZxPoly's
+        expr+gen constructor path has a latent bug, see base_gates.py).
+
+        Returns:
+        -------
+        ZxPoly
+            Update phase after applying the Squeezing rule.
+
+        References:
+        ----------
+        [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (82)-(83).
+        """
+        return ZxPoly({degree: coeff / tau**degree for degree, coeff in phase.coeffs.items()})
+
+    @staticmethod
+    def _is_degenerate_angle(theta: float | Expr) -> bool:
+        """True if theta is an odd multiple of pi/2 (tan/1-over-cos undefined).
+
+        Returns:
+        -------
+        bool
+        """
+        try:
+            theta_val = float(theta)
+        except (TypeError, ValueError):
+            return False  # Symbolic theta: can't determine, assume safe.
+        return math.isclose(abs(theta_val) % math.pi, math.pi / 2)
+
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
+        """Apply a terminal absorption to a specific match in-place.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        match : dict
+            Match containing fold information.
+        """
+        container_id = match["container_id"]
+        keep_id, absorb_id = match["node_ids"]
+        i, _ = match["indices"]
+
+        nx.contracted_nodes(graph, keep_id, absorb_id, self_loops=False, copy=False)
+        if "contraction" in graph.nodes[keep_id]:
+            del graph.nodes[keep_id]["contraction"]
+
+        graph.nodes[keep_id].update({
+            "type": match["result_type"],
+            "phase": match["result_phase"],
+            "num_inputs": match["result_num_inputs"],
+            "num_outputs": match["result_num_outputs"],
             "container_id": container_id,
         })
 
