@@ -1178,7 +1178,12 @@ class TerminalAbsorptionRule(RewriteRule):
       `c - tan(theta)/2*x**2 + k/cos(theta)*x`. Doesn't match when theta
       is an odd multiple of pi/2 (tan/1-over-cos undefined). This is the
       QSpider/PSpider-absorbs-a-rotation identity worked out in [1] Eq.
-      (239a)-(239e).
+      (239a)-(239e). `Fourier2` (a fixed rotation by pi) is absorbed the
+      same way, using theta = pi in the formula above -- pi isn't an odd
+      multiple of pi/2, so it's never degenerate. `Fourier`/`FourierInv`
+      (fixed rotations by -+pi/2) are deliberately NOT recognized here:
+      that is exactly the degenerate angle the formula excludes, so they
+      can never absorb this way regardless of how they're spelled.
     - Squeezing (QSpider or PSpider terminal, any phase degree): a
       terminal with phase f(x) folds Sq(tau) into f(x/tau).
     - Cross-color discard (opposite-color raw (1,1) spider): a QSpider
@@ -1187,10 +1192,30 @@ class TerminalAbsorptionRule(RewriteRule):
       Same-color (1,1) spiders are ordinary spider fusion, FusionRule's
       job, not this rule's.
 
+    Only the rotation sub-case is an exact identity for any physical
+    state. Squeezing absorption and cross-color discard both treat the
+    terminal's arbitrary-polynomial phase as an idealized (infinite
+    squeezing) eigenstate -- a real finite-squeezed state would carry
+    extra terms these two sub-cases drop. `assume_infinite_squeezing`
+    (default False) gates whether those two sub-cases are allowed to
+    match at all; when False, only rotation absorption runs.
+
     References:
     ----------
     [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (239a)-(239e).
     """
+
+    def __init__(self, assume_infinite_squeezing: bool = False) -> None:  # noqa: FBT001 FBT002
+        """Create the rule.
+
+        Parameters
+        ----------
+        assume_infinite_squeezing : bool
+            If True, also allow squeezing absorption and cross-color
+            discard (both idealized). If False (default), only the
+            exact rotation sub-case matches.
+        """
+        self.assume_infinite_squeezing = assume_infinite_squeezing
 
     def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
         """Find all gate/terminal pairs that can be absorbed.
@@ -1291,13 +1316,19 @@ class TerminalAbsorptionRule(RewriteRule):
         new_phase = None
         if gate_type == "PhaseRotationGate" and terminal_type == "QSpider":
             new_phase = self._rotation_absorb(phase, gate_attrs.get("phase"))
-        elif gate_type == "SqueezingGate":
+        elif gate_type == "Fourier2" and terminal_type == "QSpider":
+            # F2 is a fixed rotation by pi -- exact, and pi isn't a
+            # degenerate angle (only F/Finv's +-pi/2 would be, so those
+            # can never absorb this way: nothing else recognizes them).
+            new_phase = self._rotation_absorb(phase, pi)
+        elif gate_type == "SqueezingGate" and self.assume_infinite_squeezing:
             new_phase = self._squeeze_absorb(phase, gate_attrs.get("phase"))
         elif (
             gate_type in {"QSpider", "PSpider"}
             and gate_type != terminal_type
             and gate_attrs.get("num_inputs") == 1
             and gate_attrs.get("num_outputs") == 1
+            and self.assume_infinite_squeezing
         ):
             new_phase = phase  # Cross-color discard: unchanged.
 
