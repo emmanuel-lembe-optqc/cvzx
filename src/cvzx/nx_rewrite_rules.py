@@ -15,7 +15,8 @@ from typing import Any
 import networkx as nx
 from sympy import Expr, cos, pi, tan
 
-from cvzx.base_gates import Diagram, ZxPoly
+from cvzx.base_gates import CompositionDiagram, ContractedDiagram, Diagram, TensorDiagram, ZxPoly
+from cvzx.gates import BeamsplitterGate, ControlledSumGate
 from cvzx.nx_graph import (
     GateRegister,
     to_diagram,
@@ -1461,10 +1462,40 @@ class CopyRule(RewriteRule):
     - The disappearing spider's phase φ can be ANY polynomial
     - The result is a TensorDiagram of n copies of the copied spider
     - The composition is removed and replaced by a tensor diagram
+
+    The two spiders need not be direct siblings of one flat
+    CompositionDiagram. `match()` finds them via the graph's own
+    "composition" edges, which already connect fully-resolved leaf nodes
+    regardless of how deeply either sits inside a TensorDiagram or
+    ContractedDiagram.
     """
 
     def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
-        """Find all CompositionDiagram containers containing a copy-able pattern.
+        """Find all composition-adjacent copy-able patterns in the graph.
+
+        Copy-able pairs are found by scanning the graph's own "composition"
+        edges rather than one CompositionDiagram's flat `sub_diagram_ids`
+        list. Every composition edge already connects fully-resolved proper
+        (leaf) nodes regardless of how deeply either endpoint is nested
+        inside TensorDiagram/ContractedDiagram containers (that resolution
+        is exactly what `external_input_mapping`/`external_output_mapping`
+        are used for when the graph is first built) -- so this also finds
+        pairs that cross a TensorDiagram or ContractedDiagram boundary.
+
+        Two shapes are recognized:
+
+        - Same immediate parent (both nodes are direct, necessarily
+          adjacent, entries of one flat CompositionDiagram): resolved via
+          that container's own `sub_diagram_ids`/`connectivity`, exactly as
+          before.
+        - Cross-container: the two nodes have different immediate parents.
+          Only combinations this rule knows how to restructure are matched:
+          the disappearing spider's parent must be a TensorDiagram (direct
+          list substitution) or a ContractedDiagram (`first_id`/`second_id`
+          substitution); the copy spider's parent must be a TensorDiagram
+          or a flat CompositionDiagram where the copy spider sits at one of
+          the two ends (a state must be first, an effect must be last, so
+          removing it never requires splicing two neighbors together).
 
         Parameters
         ----------
@@ -1477,36 +1508,84 @@ class CopyRule(RewriteRule):
         -------
         list[dict]
             List of matches, each containing:
-            - 'container_id': the node ID of the CompositionDiagram
             - 'copy_spider_id': the node ID of the spider to copy (Q or P with 0→1 or 1→0)
             - 'disappearing_spider_id': the node ID of the spider that disappears (P or Q with 1→n or n→1)
             - 'copy_spider_phase': the phase of the copied spider (g ∈ R₁[X])
             - 'copy_spider_type': 'Q' or 'P'
             - 'n_copies': number of copies to create
+            - 'same_parent': whether both nodes share one flat CompositionDiagram parent
+            - 'container_id': grouping key for `RewriteRule.apply_rule()`
+            - additional container bookkeeping fields used by `apply_single`
         """
+        del registry
         matches = []
 
-        # Sort for deterministic match order (set iteration order is not stable).
-        for container_id in sorted(registry.composition_nodes):
-            attrs = graph.nodes[container_id]
-            sub_ids = attrs.get("sub_diagram_ids", [])
+        # Sort for deterministic match order (dict/edge iteration order
+        # isn't guaranteed to reflect any particular scan order).
+        composition_edges = sorted(
+            (u, v) for u, v, edge_attrs in graph.edges(data=True) if edge_attrs.get("edge_type") == "composition"
+        )
 
-            if len(sub_ids) < 2:  # noqa: PLR2004
+        for first_id, second_id in composition_edges:
+            base_match = self._check_pair(graph, first_id, second_id)
+            if base_match is None:
                 continue
 
-            # Look at each pair of consecutive diagrams in the composition
-            for i in range(len(sub_ids) - 1):
-                first_id = sub_ids[i]
-                second_id = sub_ids[i + 1]
+            resolved = self._resolve_containers(graph, base_match)
+            if resolved is None:
+                continue
 
-                # Check if the two nodes form a copy-able pair
-                match = self._check_pair(graph, first_id, second_id)
-                if match:
-                    match["container_id"] = container_id
-                    match["indices"] = [i, i + 1]
-                    matches.append(match)
+            base_match.update(resolved)
+            matches.append(base_match)
 
         return matches
+
+    def _resolve_containers(self, graph: nx.DiGraph, base_match: dict) -> dict | None:
+        """Work out how to restructure the containers around a candidate match.
+
+        Returns:
+        -------
+        dict | None
+            Extra fields to merge into the match, or None if this pair's
+            container arrangement isn't one this rule can restructure.
+        """
+        copy_id = base_match["copy_spider_id"]
+        disappear_id = base_match["disappearing_spider_id"]
+        copy_parent_id = graph.nodes[copy_id].get("container_id")
+        disappear_parent_id = graph.nodes[disappear_id].get("container_id")
+        copy_parent_type = graph.nodes[copy_parent_id].get("container_type") if copy_parent_id is not None else None
+        disappear_parent_type = (
+            graph.nodes[disappear_parent_id].get("container_type") if disappear_parent_id is not None else None
+        )
+
+        if copy_parent_id == disappear_parent_id:
+            # Classic case
+            if copy_parent_type != "composition":
+                return None
+            sub_ids = graph.nodes[copy_parent_id].get("sub_diagram_ids", [])
+            if copy_id not in sub_ids or disappear_id not in sub_ids:
+                return None
+            indices = sorted([sub_ids.index(copy_id), sub_ids.index(disappear_id)])
+            return {
+                "same_parent": True,
+                "container_id": copy_parent_id,
+                "indices": indices,
+            }
+
+        # Cross-container case:
+        if copy_parent_type != "tensor":
+            return None
+        if disappear_parent_type not in {"tensor", "contracted"}:
+            return None
+
+        return {
+            "same_parent": False,
+            "copy_container_id": copy_parent_id,
+            "copy_container_type": copy_parent_type,
+            "disappear_container_id": disappear_parent_id,
+            "disappear_container_type": disappear_parent_type,
+            "container_id": ("cross", copy_id, disappear_id),
+        }
 
     def _check_pair(self, graph: nx.DiGraph, first_id: int, second_id: int) -> dict | None:
         """Check if a pair of nodes forms a copy-able pattern.
@@ -1640,7 +1719,7 @@ class CopyRule(RewriteRule):
             return False
         return phase.degree() <= 1
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # noqa: PLR0914
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # noqa: PLR0912, PLR0914, PLR0915, C901
         """Apply the copy rule to a specific match in-place.
 
         Parameters
@@ -1648,9 +1727,9 @@ class CopyRule(RewriteRule):
         graph : nx.DiGraph
             The graph to modify.
         match : dict
-            Match containing the CompositionDiagram and spider information.
+            Match containing the copy/disappearing spider information plus
+            whatever container bookkeeping `match()` resolved for this pair.
         """
-        container_id = match["container_id"]
         copy_spider_id = match["copy_spider_id"]
         disappearing_spider_id = match["disappearing_spider_id"]
         n_copies = match["n_copies"]
@@ -1658,15 +1737,16 @@ class CopyRule(RewriteRule):
         copy_spider_phase = match["copy_spider_phase"]
         copy_num_inputs = match["copy_spider_num_inputs"]
         copy_num_outputs = match["copy_spider_num_outputs"]
-        idx1 = match["indices"][0]
-        idx2 = match["indices"][1]
+        same_parent = match.get("same_parent", True)
 
-        # Get container attributes
-        container_attrs = graph.nodes[container_id]
-        sub_ids = container_attrs.get("sub_diagram_ids", [])
+        if same_parent:
+            container_id = match["container_id"]
+            idx1, idx2 = match["indices"]
+            container_attrs = graph.nodes[container_id]
+            sub_ids = container_attrs.get("sub_diagram_ids", [])
 
-        # Contract the disappearing spider into the copy spider
-        # This preserves all connections automatically
+        # Contract the disappearing spider into the copy spider.
+        # This preserves all connections automatically.
         nx.contracted_nodes(graph, copy_spider_id, disappearing_spider_id, self_loops=False, copy=False)
 
         # Remove the contraction metadata that NetworkX adds
@@ -1707,29 +1787,396 @@ class CopyRule(RewriteRule):
         graph.nodes[copy_spider_id]["external_input_mapping"] = graph.nodes[copy_spider_id]["external_inputs"]
         graph.nodes[copy_spider_id]["external_output_mapping"] = graph.nodes[copy_spider_id]["external_outputs"]
 
-        # Replace the two elements with the tensor in the CompositionDiagram
-        new_sub_ids = [*sub_ids[:idx1], copy_spider_id, *sub_ids[idx2 + 1 :]]
-        graph.nodes[container_id]["sub_diagram_ids"] = new_sub_ids
+        if same_parent:
+            # Replace the two elements with the tensor in the CompositionDiagram
+            new_sub_ids = [*sub_ids[:idx1], copy_spider_id, *sub_ids[idx2 + 1 :]]
+            graph.nodes[container_id]["sub_diagram_ids"] = new_sub_ids
 
-        # Drop the now-internal idx1 link, move idx2's outgoing link to idx1,
-        # and shift every index past idx2 down by one.
-        if "connectivity" in container_attrs:
-            connectivity = container_attrs["connectivity"]
-            new_connectivity = {}
+            # Drop the now-internal idx1 link, move idx2's outgoing link to idx1,
+            # and shift every index past idx2 down by one.
+            if "connectivity" in container_attrs:
+                connectivity = container_attrs["connectivity"]
+                new_connectivity = {}
 
-            for old_idx, targets in connectivity.items():
-                if old_idx == idx1:
-                    continue  # internal link between the merged pair
-                if old_idx == idx2:
-                    new_connectivity[idx1] = targets  # fused node's outgoing link
-                elif old_idx < idx1:
-                    new_connectivity[old_idx] = targets
-                else:  # old_idx > idx2
-                    new_connectivity[old_idx - 1] = targets
+                for old_idx, targets in connectivity.items():
+                    if old_idx == idx1:
+                        continue  # internal link between the merged pair
+                    if old_idx == idx2:
+                        new_connectivity[idx1] = targets  # fused node's outgoing link
+                    elif old_idx < idx1:
+                        new_connectivity[old_idx] = targets
+                    else:  # old_idx > idx2
+                        new_connectivity[old_idx - 1] = targets
 
-            graph.nodes[container_id]["connectivity"] = new_connectivity
-        if len(sub_ids) == 2:  # noqa: PLR2004
-            self._flatten_container(graph, container_id)
+                graph.nodes[container_id]["connectivity"] = new_connectivity
+            if len(sub_ids) == 2:  # noqa: PLR2004
+                self._flatten_container(graph, container_id)
+            return
+
+        # Cross-container case
+        disappear_container_id = match["disappear_container_id"]
+        disappear_container_type = match["disappear_container_type"]
+        copy_container_id = match["copy_container_id"]
+
+        # 1. Install the transformed copy spider at the disappearing
+        #    spider's old slot in its own immediate parent.
+        if disappear_container_type == "contracted":
+            disappear_parent_attrs = graph.nodes[disappear_container_id]
+            if disappear_parent_attrs.get("first_id") == disappearing_spider_id:
+                disappear_parent_attrs["first_id"] = copy_spider_id
+            else:
+                disappear_parent_attrs["second_id"] = copy_spider_id
+            arity_change = self._recompute_contracted_arity(graph, disappear_container_id)
+        else:  # "tensor"
+            disappear_sub_ids = graph.nodes[disappear_container_id]["sub_diagram_ids"]
+            disappear_sub_ids[disappear_sub_ids.index(disappearing_spider_id)] = copy_spider_id
+            arity_change = self._recompute_tensor_arity(graph, disappear_container_id)
+        graph.nodes[copy_spider_id]["container_id"] = disappear_container_id
+        self._propagate_arity_to_parent(graph, disappear_container_id, *arity_change)
+
+        # 2. Remove the copy spider from its own old immediate parent
+        #    and Pass its ORIGINAL arity explicitly
+        arity_change = self._remove_tensor_child(
+            graph, copy_container_id, copy_spider_id, copy_num_inputs, copy_num_outputs
+        )
+        self._propagate_arity_to_parent(graph, copy_container_id, *arity_change)
+        if len(graph.nodes[copy_container_id]["sub_diagram_ids"]) == 1:
+            self._flatten_container(graph, copy_container_id)
+
+    @staticmethod
+    def _remap_by_identity(old_mapping: dict, new_mapping: dict) -> dict:
+        """Match old external ports to new ones by identical target.
+
+        Used when a container's ports were recomputed WITHOUT any sibling
+        being removed (a contracted side's arity changing in place, or a
+        tensor child being substituted at a fixed position) -- in that
+        case the (side-or-index, internal_port) target a port maps to is
+        stable, so old ports are matched to new ports by that identity.
+
+        Parameters
+        ----------
+        old_mapping : dict
+            The container's `external_input_mapping` (or output) before
+            the recompute, port -> (side_or_idx, internal_port).
+        new_mapping : dict
+            The same, after the recompute.
+
+        Returns:
+        -------
+        dict
+            old_port -> new_port for every old port whose target still
+            exists in the new mapping.
+        """
+        reverse_new = {tuple(target): new_port for new_port, target in new_mapping.items()}
+        remap = {}
+        for old_port, target in old_mapping.items():
+            key = tuple(target)
+            if key in reverse_new:
+                remap[old_port] = reverse_new[key]
+        return remap
+
+    def _recompute_contracted_arity(self, graph: nx.DiGraph, container_id: int) -> tuple:  # noqa: PLR0914
+        """Recompute a ContractedDiagram container's ports after a side's arity changed in place.
+
+        `first_id`/`second_id` are assumed already updated to point at the
+        (possibly different-arity) current children; `I1`/`I2`/`J1`/`J2`
+        are unchanged. Mirrors `_add_contracted_node`'s own bookkeeping.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        container_id : int
+            The ContractedDiagram container node ID.
+
+        Returns:
+        -------
+        tuple
+            (old_num_inputs, new_num_inputs, old_num_outputs,
+            new_num_outputs, input_remap, output_remap) for
+            `_propagate_arity_to_parent`.
+        """
+        attrs = graph.nodes[container_id]
+        first_id = attrs["first_id"]
+        second_id = attrs["second_id"]
+        j1 = attrs.get("J1", [])
+        i2 = attrs.get("I2", [])
+        i1 = attrs.get("I1", [])
+        j2 = attrs.get("J2", [])
+
+        first_num_inputs = graph.nodes[first_id].get("num_inputs", 0)
+        first_num_outputs = graph.nodes[first_id].get("num_outputs", 0)
+        second_num_inputs = graph.nodes[second_id].get("num_inputs", 0)
+        second_num_outputs = graph.nodes[second_id].get("num_outputs", 0)
+
+        old_num_inputs = attrs.get("num_inputs", 0)
+        old_num_outputs = attrs.get("num_outputs", 0)
+        old_input_mapping = attrs.get("external_input_mapping", {})
+        old_output_mapping = attrs.get("external_output_mapping", {})
+
+        kept_first_inputs = [p for p in range(first_num_inputs) if p not in j1]
+        kept_second_inputs = [p for p in range(second_num_inputs) if p not in i2]
+        kept_first_outputs = [p for p in range(first_num_outputs) if p not in i1]
+        kept_second_outputs = [p for p in range(second_num_outputs) if p not in j2]
+
+        input_mapping = {}
+        offset = 0
+        for p in kept_first_inputs:
+            input_mapping[offset] = ("first", p)
+            offset += 1
+        for p in kept_second_inputs:
+            input_mapping[offset] = ("second", p)
+            offset += 1
+        new_num_inputs = offset
+
+        output_mapping = {}
+        offset = 0
+        for p in kept_first_outputs:
+            output_mapping[offset] = ("first", p)
+            offset += 1
+        for p in kept_second_outputs:
+            output_mapping[offset] = ("second", p)
+            offset += 1
+        new_num_outputs = offset
+
+        attrs.update({
+            "kept_first_inputs": kept_first_inputs,
+            "kept_second_inputs": kept_second_inputs,
+            "kept_first_outputs": kept_first_outputs,
+            "kept_second_outputs": kept_second_outputs,
+            "external_input_mapping": input_mapping,
+            "external_output_mapping": output_mapping,
+            "num_inputs": new_num_inputs,
+            "num_outputs": new_num_outputs,
+            "external_inputs": list(range(new_num_inputs)),
+            "external_outputs": list(range(new_num_outputs)),
+        })
+
+        input_remap = self._remap_by_identity(old_input_mapping, input_mapping)
+        output_remap = self._remap_by_identity(old_output_mapping, output_mapping)
+        return old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs, input_remap, output_remap
+
+    def _recompute_tensor_arity(self, graph: nx.DiGraph, container_id: int) -> tuple:
+        """Recompute a TensorDiagram container's ports after a child was substituted in place.
+
+        The child at each index is assumed unchanged in position (only its
+        own arity may have changed) -- no sibling was added or removed, so
+        old ports are safely matched to new ports by (index, internal_port)
+        identity even though numeric port offsets may shift.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        container_id : int
+            The TensorDiagram container node ID.
+
+        Returns:
+        -------
+        tuple
+            (old_num_inputs, new_num_inputs, old_num_outputs,
+            new_num_outputs, input_remap, output_remap) for
+            `_propagate_arity_to_parent`.
+        """
+        attrs = graph.nodes[container_id]
+        sub_ids = attrs.get("sub_diagram_ids", [])
+
+        old_num_inputs = attrs.get("num_inputs", 0)
+        old_num_outputs = attrs.get("num_outputs", 0)
+        old_input_mapping = attrs.get("external_input_mapping", {})
+        old_output_mapping = attrs.get("external_output_mapping", {})
+
+        input_mapping = {}
+        offset = 0
+        for idx, sub_id in enumerate(sub_ids):
+            for p in range(graph.nodes[sub_id].get("num_inputs", 0)):
+                input_mapping[offset] = (idx, p)
+                offset += 1
+        new_num_inputs = offset
+
+        output_mapping = {}
+        offset = 0
+        for idx, sub_id in enumerate(sub_ids):
+            for p in range(graph.nodes[sub_id].get("num_outputs", 0)):
+                output_mapping[offset] = (idx, p)
+                offset += 1
+        new_num_outputs = offset
+
+        attrs.update({
+            "external_input_mapping": input_mapping,
+            "external_output_mapping": output_mapping,
+            "num_inputs": new_num_inputs,
+            "num_outputs": new_num_outputs,
+            "external_inputs": list(range(new_num_inputs)),
+            "external_outputs": list(range(new_num_outputs)),
+        })
+
+        input_remap = self._remap_by_identity(old_input_mapping, input_mapping)
+        output_remap = self._remap_by_identity(old_output_mapping, output_mapping)
+        return old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs, input_remap, output_remap
+
+    @staticmethod
+    def _remove_tensor_child(  # noqa: C901
+        graph: nx.DiGraph,
+        container_id: int,
+        removed_id: int,
+        removed_num_inputs: int,
+        removed_num_outputs: int,
+    ) -> tuple:
+        """Remove one child from a TensorDiagram container in place.
+
+        Unlike `_recompute_tensor_arity`, a child is actually leaving the
+        list here, so every later sibling's index shifts down by one --
+        identity-based matching would silently misplace them, so old ports
+        are mapped to new ports by direct position arithmetic instead.
+
+        `removed_num_inputs`/`removed_num_outputs` must be the arity the
+        removed child had WHILE it was still a member of this container --
+        the caller may have already overwritten `removed_id`'s own node
+        attrs in place to describe an unrelated new role (e.g. transformed
+        into a TensorDiagram of copies) before calling this, so those
+        current attrs cannot be trusted for what it used to contribute
+        here.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        container_id : int
+            The TensorDiagram container node ID.
+        removed_id : int
+            The child node ID being removed.
+        removed_num_inputs : int
+            The number of inputs the removed child contributed here.
+        removed_num_outputs : int
+            The number of outputs the removed child contributed here.
+
+        Returns:
+        -------
+        tuple
+            (old_num_inputs, new_num_inputs, old_num_outputs,
+            new_num_outputs, input_remap, output_remap) for
+            `_propagate_arity_to_parent`.
+        """
+        attrs = graph.nodes[container_id]
+        sub_ids = attrs["sub_diagram_ids"]
+        pos = sub_ids.index(removed_id)
+
+        old_num_inputs = attrs.get("num_inputs", 0)
+        old_num_outputs = attrs.get("num_outputs", 0)
+
+        input_offset_before = sum(graph.nodes[sid].get("num_inputs", 0) for sid in sub_ids[:pos])
+        input_remap = {}
+        for old_port in range(old_num_inputs):
+            if old_port < input_offset_before:
+                input_remap[old_port] = old_port
+            elif old_port >= input_offset_before + removed_num_inputs:
+                input_remap[old_port] = old_port - removed_num_inputs
+
+        output_offset_before = sum(graph.nodes[sid].get("num_outputs", 0) for sid in sub_ids[:pos])
+        output_remap = {}
+        for old_port in range(old_num_outputs):
+            if old_port < output_offset_before:
+                output_remap[old_port] = old_port
+            elif old_port >= output_offset_before + removed_num_outputs:
+                output_remap[old_port] = old_port - removed_num_outputs
+
+        sub_ids.remove(removed_id)
+        new_num_inputs = old_num_inputs - removed_num_inputs
+        new_num_outputs = old_num_outputs - removed_num_outputs
+
+        input_mapping = {}
+        offset = 0
+        for idx, sid in enumerate(sub_ids):
+            for p in range(graph.nodes[sid].get("num_inputs", 0)):
+                input_mapping[offset] = (idx, p)
+                offset += 1
+        output_mapping = {}
+        offset = 0
+        for idx, sid in enumerate(sub_ids):
+            for p in range(graph.nodes[sid].get("num_outputs", 0)):
+                output_mapping[offset] = (idx, p)
+                offset += 1
+
+        attrs.update({
+            "num_inputs": new_num_inputs,
+            "num_outputs": new_num_outputs,
+            "external_inputs": list(range(new_num_inputs)),
+            "external_outputs": list(range(new_num_outputs)),
+            "external_input_mapping": input_mapping,
+            "external_output_mapping": output_mapping,
+        })
+
+        return old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs, input_remap, output_remap
+
+    @staticmethod
+    def _propagate_arity_to_parent(  # noqa: PLR0913, PLR0917
+        graph: nx.DiGraph,
+        container_id: int,
+        old_num_inputs: int,
+        new_num_inputs: int,
+        old_num_outputs: int,
+        new_num_outputs: int,
+        input_remap: dict,
+        output_remap: dict,
+    ) -> None:
+        """Fix a flat CompositionDiagram parent's `connectivity` after a child's arity changed.
+
+        `to_diagram()` only needs a CompositionDiagram's `connectivity`
+        dict to stay consistent with its (freshly reconstructed) children's
+        actual arities -- container-level `num_inputs`/`external_*_mapping`
+        attributes are cosmetic bookkeeping only. So when `container_id`'s
+        own external arity changed, this is the one place that matters:
+        the link feeding its (possibly renumbered) inputs, and the link fed
+        by its (possibly renumbered) outputs, in its immediate parent, if
+        that parent is a flat composition. A TensorDiagram or
+        ContractedDiagram parent doesn't track per-port connectivity at
+        all, so there's nothing to fix there.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        container_id : int
+            The node whose external arity just changed.
+        old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs : int
+            Its external arity before and after the change.
+        input_remap : dict
+            old input port -> new input port, for ports that still exist.
+        output_remap : dict
+            old output port -> new output port, for ports that still exist.
+        """
+        parent_id = graph.nodes[container_id].get("container_id")
+        if parent_id is None or parent_id not in graph.nodes:
+            return
+        parent_attrs = graph.nodes[parent_id]
+        if parent_attrs.get("container_type") != "composition":
+            return  # only flat compositions track port-level connectivity
+        sub_ids = parent_attrs.get("sub_diagram_ids", [])
+        if container_id not in sub_ids:
+            return
+        pos = sub_ids.index(container_id)
+        connectivity = parent_attrs.get("connectivity", {})
+
+        if old_num_inputs != new_num_inputs and pos > 0:
+            key = pos - 1
+            old_conn = connectivity.get(key, {})
+            new_conn = {}
+            for in_port, out_port in old_conn.items():
+                if in_port in input_remap:
+                    new_conn[input_remap[in_port]] = out_port
+            connectivity[key] = new_conn
+
+        if old_num_outputs != new_num_outputs and pos < len(sub_ids) - 1:
+            key = pos
+            old_conn = connectivity.get(key, {})
+            new_conn = {}
+            for in_port, out_port in old_conn.items():
+                if out_port in output_remap:
+                    new_conn[in_port] = output_remap[out_port]
+            connectivity[key] = new_conn
+
+        parent_attrs["connectivity"] = connectivity
 
 
 def is_wiring_node_from_attrs(attrs: dict) -> bool:
@@ -1786,3 +2233,41 @@ def apply_rule_to_diagram(rule: RewriteRule, diagram: Diagram) -> Diagram:
     register.build_from_graph(graph)
     rule.apply_rule(graph, register)
     return to_diagram(graph)
+
+
+def expand_two_mode_gates(diagram: Diagram) -> Diagram:
+    """Recursively expand BeamsplitterGate/ControlledSumGate, but not CZ.
+
+    Like `cvzx.gates.expand_all`, but deliberately excludes
+    `ControlledZGate`: CZ's own decomposition sandwiches a Fourier gate
+    between its copy spider and the target mode, so `CopyRule` can't reach
+    across it -- expanding CZ wouldn't unlock any new reduction, unlike
+    BS/CSUM, whose expansions expose a bare copy spider `CopyRule` can act
+    on directly.
+
+    Parameters:
+    ----------
+    diagram : Diagram
+        The diagram to modify.
+
+    Returns:
+    -------
+    Diagram
+        Expanded diagram.
+    """
+    if isinstance(diagram, (BeamsplitterGate, ControlledSumGate)):
+        return diagram.expand()
+    if isinstance(diagram, CompositionDiagram):
+        return CompositionDiagram([expand_two_mode_gates(d) for d in diagram.diagrams])
+    if isinstance(diagram, TensorDiagram):
+        return TensorDiagram([expand_two_mode_gates(d) for d in diagram.diagrams])
+    if isinstance(diagram, ContractedDiagram):
+        return ContractedDiagram(
+            expand_two_mode_gates(diagram.first),
+            expand_two_mode_gates(diagram.second),
+            diagram.I1,
+            diagram.I2,
+            diagram.J1,
+            diagram.J2,
+        )
+    return diagram

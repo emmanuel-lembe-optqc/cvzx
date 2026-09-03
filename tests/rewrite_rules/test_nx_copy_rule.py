@@ -14,6 +14,7 @@ from sympy import I, symbols
 from cvzx.base_gates import (
     CompositionDiagram,
     ContractedDiagram,
+    Diagram,
     Fourier,
     PSpider,
     QSpider,
@@ -21,9 +22,9 @@ from cvzx.base_gates import (
     TensorDiagram,
     ZxPoly,
 )
-from cvzx.gates import BeamsplitterGate, PhaseRotationGate, SqueezingGate
+from cvzx.gates import BeamsplitterGate, ControlledSumGate, PhaseRotationGate, SqueezingGate
 from cvzx.nx_graph import GateRegister, to_diagram, to_graph
-from cvzx.nx_rewrite_rules import CopyRule, apply_rule_to_diagram
+from cvzx.nx_rewrite_rules import CopyRule, apply_rule_to_diagram, expand_two_mode_gates
 
 
 class TestCopyRule(unittest.TestCase):
@@ -914,6 +915,131 @@ class TestCopyRule(unittest.TestCase):
         reg = GateRegister()
         reg.build_from_graph(graph)
         assert len(self.rule.match(graph, reg)) == 0
+
+    # -------------------------------------------------------------------------
+    # 7. Cross-container matches: the copy spider and the disappearing
+    #    spider have DIFFERENT immediate parents (e.g. a classical control
+    #    state tensor-composed alongside another mode, feeding directly
+    #    into the copy/sum spider nested inside an expanded CSUM gate's
+    #    ContractedDiagram). These rely on `match()` finding pairs via the
+    #    graph's own "composition" edges (which are already fully resolved
+    #    down to leaf nodes regardless of container nesting) instead of one
+    #    CompositionDiagram's flat `sub_diagram_ids`, and on `apply_single`
+    #    restructuring whichever container types are involved.
+    # -------------------------------------------------------------------------
+
+    def _expanded_csum_with_states(self, control: int, target: int, control_mode: int = 2) -> Diagram:
+        """Build TensorDiagram([control, target]).compose(CSUM.expand()).
+
+        Returns:
+        -------
+        Diagram
+            Expanded diagram.
+        """
+        csum = ControlledSumGate(control=control_mode, target=3 - control_mode)
+        comp = CompositionDiagram([TensorDiagram([control, target]), csum])
+        return expand_two_mode_gates(comp)
+
+    def test_match_cross_container_csum_control(self):
+        """Only the opposite-color control state forms a copy-able pair.
+
+        With control=2, CSUM's copy spider is a QSpider and its sum spider
+        is a PSpider. A PSpider control state is opposite-color from the
+        copy spider (a genuine copy-rule pattern); a QSpider target state
+        is SAME-color as the sum spider it feeds (ordinary fusion, not
+        this rule's job), so exactly one match is expected.
+        """
+        control_state = PSpider(0, 1, self.phase_x2)
+        target_state = QSpider(0, 1, self.phase_x)
+        comp = self._expanded_csum_with_states(control_state, target_state)
+        graph = to_graph(comp)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        matches = self.rule.match(graph, reg)
+        assert len(matches) == 1
+        assert matches[0]["same_parent"] is False
+        assert matches[0]["copy_container_type"] == "tensor"
+        assert matches[0]["disappear_container_type"] == "contracted"
+        assert matches[0]["n_copies"] == 2
+
+    def test_match_cross_container_same_color_no_match(self):
+        """Same-color control/target states never match CopyRule -- that's fusion."""
+        control_state = QSpider(0, 1, self.phase_x2)  # same color as the QSpider copy spider
+        target_state = PSpider(0, 1, self.phase_x)  # same color as the PSpider sum spider
+        comp = self._expanded_csum_with_states(control_state, target_state)
+        graph = to_graph(comp)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        assert len(self.rule.match(graph, reg)) == 0
+
+    def test_match_cross_container_bad_phase_no_match(self):
+        """A control state with phase not in R1[X] still can't be copied."""
+        control_state = PSpider(0, 1, self.phase_x3)
+        target_state = QSpider(0, 1, self.phase_x)
+        comp = self._expanded_csum_with_states(control_state, target_state)
+        graph = to_graph(comp)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        assert len(self.rule.match(graph, reg)) == 0
+
+    def test_apply_rule_cross_container_csum_control(self):
+        """Applying the rule pulls the control state inside the ContractedDiagram.
+
+        The result should be reconstructable, keep the same overall arity,
+        and have the control state's two copies now living inside the
+        ContractedDiagram alongside the (untouched) target state and sum
+        spider -- with no more copy-able matches left.
+        """
+        control_state = PSpider(0, 1, self.phase_x2)
+        target_state = QSpider(0, 1, self.phase_x)
+        comp = self._expanded_csum_with_states(control_state, target_state)
+
+        result = apply_rule_to_diagram(self.rule, comp)
+
+        assert isinstance(result, CompositionDiagram)
+        assert result.num_inputs == 0
+        assert result.num_outputs == 2
+        assert isinstance(result.diagrams[0], QSpider)
+        assert result.diagrams[0].phase == self.phase_x  # target_state, untouched
+
+        contracted = result.diagrams[1]
+        assert isinstance(contracted, ContractedDiagram)
+        assert isinstance(contracted.first, TensorDiagram)
+        assert len(contracted.first.diagrams) == 2
+        assert all(isinstance(d, PSpider) and d.phase == self.phase_x2 for d in contracted.first.diagrams)
+        assert isinstance(contracted.second, PSpider)
+        assert contracted.second.num_inputs == 2
+
+        graph = to_graph(result)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        assert len(self.rule.match(graph, reg)) == 0
+
+    def test_apply_rule_cross_container_control_mode_one(self):
+        """Same cross-container reduction with the control on mode 1 instead of 2."""
+        control_state = QSpider(0, 1, self.phase_x2)  # control=1 -> copy spider is a PSpider
+        target_state = PSpider(0, 1, self.phase_x)
+        comp = self._expanded_csum_with_states(control_state, target_state, control_mode=1)
+
+        result = apply_rule_to_diagram(self.rule, comp)
+
+        assert isinstance(result, CompositionDiagram)
+        assert result.num_inputs == 0
+        assert result.num_outputs == 2
+        graph = to_graph(result)
+        reg = GateRegister()
+        reg.build_from_graph(graph)
+        assert len(self.rule.match(graph, reg)) == 0
+
+    def test_apply_rule_cross_container_no_match_leaves_diagram_unchanged(self):
+        """The same-color scenario is left untouched by CopyRule."""
+        control_state = QSpider(0, 1, self.phase_x2)
+        target_state = PSpider(0, 1, self.phase_x)
+        comp = self._expanded_csum_with_states(control_state, target_state)
+        result = apply_rule_to_diagram(self.rule, comp)
+        assert isinstance(result, CompositionDiagram)
+        assert result.num_inputs == 0
+        assert result.num_outputs == 2
 
 
 if __name__ == "__main__":
