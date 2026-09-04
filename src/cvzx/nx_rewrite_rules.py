@@ -55,7 +55,7 @@ class RewriteRule(ABC):
     """
 
     @abstractmethod
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list:
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
         """Find all matches of the rule pattern in the graph.
 
         Parameters:
@@ -67,21 +67,21 @@ class RewriteRule(ABC):
 
         Returns:
         -------
-        list
-            List of matches. Each match must be a dictionary or object
-            that can be passed to `apply_single`.
+        list[dict]
+            List of matches. Each match is a dictionary that can be
+            passed to `apply_single`.
         """
 
     @abstractmethod
-    def apply_single(self, graph: nx.DiGraph, match: list) -> None:
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
         """Apply the rule to a specific match in-place.
 
         Parameters:
         ----------
         graph : nx.DiGraph
             The graph to modify.
-        match : list
-            A match returned by `match()`.
+        match : dict
+            A single match returned by `match()`.
         """
 
     def apply_rule(self, graph: nx.DiGraph, registry: GateRegister) -> nx.DiGraph:
@@ -205,7 +205,7 @@ class RewriteRule(ABC):
                 remap[old_port] = reverse_new[key]
         return remap
 
-    def _recompute_contracted_arity(self, graph: nx.DiGraph, container_id: int) -> tuple:  # noqa: PLR0914
+    def _recompute_contracted_arity(self, graph: nx.DiGraph, container_id: int) -> tuple:  # ruff: ignore[too-many-locals]
         """Recompute a ContractedDiagram container's ports after a side's arity changed in place.
 
         `first_id`/`second_id` are assumed already updated to point at the
@@ -346,7 +346,7 @@ class RewriteRule(ABC):
         return old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs, input_remap, output_remap
 
     @staticmethod
-    def _recompute_tensor_arity_from_child_remap(  # noqa: C901, PLR0913, PLR0917
+    def _recompute_tensor_arity_from_child_remap(  # ruff: ignore[complex-structure, too-many-arguments, too-many-positional-arguments]
         graph: nx.DiGraph,
         container_id: int,
         changed_child_id: int,
@@ -449,7 +449,7 @@ class RewriteRule(ABC):
         return old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs, input_remap, output_remap
 
     @staticmethod
-    def _remove_tensor_child(  # noqa: C901
+    def _remove_tensor_child(  # ruff: ignore[complex-structure]
         graph: nx.DiGraph,
         container_id: int,
         removed_id: int,
@@ -542,7 +542,7 @@ class RewriteRule(ABC):
 
         return old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs, input_remap, output_remap
 
-    def _propagate_arity_to_parent(  # noqa: C901, PLR0912, PLR0913, PLR0914, PLR0915, PLR0917
+    def _propagate_arity_to_parent(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-locals, too-many-statements, too-many-positional-arguments]
         self,
         graph: nx.DiGraph,
         container_id: int,
@@ -835,7 +835,7 @@ class FusionRule(RewriteRule):
     After fusion, containers with a single element are flattened.
     """
 
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:  # noqa: PLR0914
+    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:  # ruff: ignore[too-many-locals]
         """Find all ContractedDiagram containers containing fusible spiders.
 
         Parameters
@@ -890,10 +890,10 @@ class FusionRule(RewriteRule):
                 continue
 
             # Get the connectivity information
-            J1 = attrs.get("J1", [])  # first outputs to second inputs  # noqa: N806
-            I1 = attrs.get("I1", [])  # second outputs to first inputs  # noqa: N806
-            J2 = attrs.get("J2", [])  # first inputs to second outputs  # noqa: N806
-            I2 = attrs.get("I2", [])  # second inputs to first outputs  # noqa: N806
+            J1 = attrs.get("J1", [])  # first outputs to second inputs  # ruff: ignore[non-lowercase-variable-in-function]
+            I1 = attrs.get("I1", [])  # second outputs to first inputs  # ruff: ignore[non-lowercase-variable-in-function]
+            J2 = attrs.get("J2", [])  # first inputs to second outputs  # ruff: ignore[non-lowercase-variable-in-function]
+            I2 = attrs.get("I2", [])  # second inputs to first outputs  # ruff: ignore[non-lowercase-variable-in-function]
 
             # Check if there is at least one connection between the spiders
             has_connection = (len(J1) > 0 and len(J2) > 0) or (len(I1) > 0 and len(I2) > 0)
@@ -925,7 +925,7 @@ class FusionRule(RewriteRule):
 
         return matches
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # noqa: PLR0914
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # ruff: ignore[too-many-locals]
         """Fuse two same-type spiders in a ContractedDiagram in-place.
 
         Parameters
@@ -1055,7 +1055,7 @@ class ChainReductionRule(RewriteRule):
             - 'values': list of values for each gate in the chain
             - 'node_ids': list of node IDs in the chain (in order)
         """
-        matches = []
+        matches: list[dict] = []
 
         # Sort for deterministic match order (set iteration order is not stable).
         for container_id in sorted(registry.composition_nodes):
@@ -1090,6 +1090,12 @@ class ChainReductionRule(RewriteRule):
             The graph to modify.
         match : dict
             Match containing chain information.
+
+        Raises:
+        ------
+        ValueError:
+            If `match["gate_type"]` is not a type `reduce_chain` recognizes
+            (should not occur for a match produced by `match()`).
         """
         container_id = match["container_id"]
         gate_type = match["gate_type"]
@@ -1103,6 +1109,9 @@ class ChainReductionRule(RewriteRule):
 
         # Reduce the chain based on gate type
         reduced_gate = self.reduce_chain(gate_type, values, gate_info)
+        if reduced_gate is None:
+            msg = f"reduce_chain: unrecognized gate_type {gate_type!r}"
+            raise ValueError(msg)
 
         # Get the first node in the chain (will absorb the others)
         first_node = node_ids[0]
@@ -1158,6 +1167,12 @@ class ChainReductionRule(RewriteRule):
             - 'gate_type': type of gates
             - 'values': list of values for each gate
             - 'node_ids': list of node IDs in order
+
+        Raises:
+        ------
+        ValueError:
+            If `get_gate_info` returns no `gate_info` for a 'Q'/'P' node
+            (should not occur: those kinds always carry gate_info).
         """
         chains = []
         i = 0
@@ -1188,8 +1203,11 @@ class ChainReductionRule(RewriteRule):
                         break
 
                 # Record the chain if it has at least 2 gates
-                if len(values) >= 2:  # noqa: PLR2004
+                if len(values) >= 2:  # ruff: ignore[magic-value-comparison]
                     if gate_type in {"Q", "P"}:
+                        if gate_info is None or next_gate_info is None:
+                            msg = f"get_gate_info returned no gate_info for a {gate_type!r} node."
+                            raise ValueError(msg)
                         gate_info["num_outputs"] = next_gate_info["num_outputs"]
                     chains.append({
                         "gate_type": gate_type,
@@ -1204,7 +1222,7 @@ class ChainReductionRule(RewriteRule):
 
         return chains
 
-    def get_gate_info(self, graph: nx.DiGraph, node_id: int) -> tuple[str | None, Any, dict | None]:  # noqa: C901, PLR0911
+    def get_gate_info(self, graph: nx.DiGraph, node_id: int) -> tuple[str | None, Any, dict | None]:  # ruff: ignore[complex-structure, too-many-return-statements]
         """Extract gate type and value from a node.
 
         Returns:
@@ -1274,13 +1292,13 @@ class ChainReductionRule(RewriteRule):
 
         return (None, None, None)
 
-    def can_chain(  # noqa: PLR0911, PLR0913, PLR0917
+    def can_chain(  # ruff: ignore[too-many-return-statements, too-many-arguments, too-many-positional-arguments]
         self,
         gate_type: str,
-        value: Any,  # noqa: ANN401
+        value: Any,  # ruff: ignore[any-type]
         gate_info: dict | None,
         next_type: str | None,
-        next_value: Any,  # noqa: ANN401
+        next_value: Any,  # ruff: ignore[any-type]
         next_gate_info: dict | None,
     ) -> bool:
         """Check if two gates can be chained.
@@ -1289,6 +1307,12 @@ class ChainReductionRule(RewriteRule):
         -------
         bool
             True if the gates can be chained (reduced together).
+
+        Raises:
+        ------
+        ValueError:
+            If `gate_type == "CSUM"` but `gate_info`/`next_gate_info` is
+            None (should not occur: CSUM nodes always carry gate_info).
         """
         if gate_type != next_type:
             return False
@@ -1314,13 +1338,17 @@ class ChainReductionRule(RewriteRule):
 
         # ControlledSumGate: chain only if control and target are the same
         if gate_type == "CSUM":
-            return (gate_info["control"] == next_gate_info["control"]) and (
-                gate_info["target"] == next_gate_info["target"]
+            if gate_info is None or next_gate_info is None:
+                msg = "get_gate_info returned no gate_info for a 'CSUM' node."
+                raise ValueError(msg)
+            return bool(
+                (gate_info["control"] == next_gate_info["control"])
+                and (gate_info["target"] == next_gate_info["target"])
             )
 
         return False
 
-    def reduce_chain(self, gate_type: str, values: list, gate_info: dict | None = None) -> dict | None:  # noqa: C901, PLR0911, PLR0912
+    def reduce_chain(self, gate_type: str, values: list, gate_info: dict | None = None) -> dict | None:  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches]
         """Reduce a chain of gates to a single gate.
 
         Parameters:
@@ -1335,8 +1363,14 @@ class ChainReductionRule(RewriteRule):
         Returns:
         -------
         dict | None
-            Dictionary with reduced gate attributes, or None if identity.
-            Contains: 'type', and type-specific fields.
+            Dictionary with reduced gate attributes (contains 'type' and
+            type-specific fields), or None if `gate_type` is not recognized.
+
+        Raises:
+        ------
+        ValueError:
+            If `gate_type` is 'Q', 'P', or 'CSUM' but `gate_info` is None
+            (should not occur: those kinds always carry gate_info).
         """
         zero_phase = ZxPoly({})
         id_q = {
@@ -1353,6 +1387,9 @@ class ChainReductionRule(RewriteRule):
         }
 
         if gate_type == "Q":
+            if gate_info is None:
+                msg = "get_gate_info returned no gate_info for a 'Q' node."
+                raise ValueError(msg)
             total_phase = zero_phase
             for v in values:
                 total_phase += v
@@ -1365,6 +1402,9 @@ class ChainReductionRule(RewriteRule):
 
         # P-Spider: sum phases
         if gate_type == "P":
+            if gate_info is None:
+                msg = "get_gate_info returned no gate_info for a 'P' node."
+                raise ValueError(msg)
             total_phase = ZxPoly({})
             for v in values:
                 total_phase += v
@@ -1394,7 +1434,7 @@ class ChainReductionRule(RewriteRule):
             total = 1.0
             for v in values:
                 total *= v
-            if total == 1.0:
+            if total == 1.0:  # ruff: ignore[float-equality-comparison]
                 return id_q
             return {"type": "SqueezingGate", "tau": total}
 
@@ -1413,7 +1453,7 @@ class ChainReductionRule(RewriteRule):
                 return id_q
             if remainder == 1:
                 return {"type": "Fourier" if values[0] == "F" else "FourierInv"}
-            if remainder == 2:  # noqa: PLR2004
+            if remainder == 2:  # ruff: ignore[magic-value-comparison]
                 return {"type": "Fourier2"}
             # Remainder == 3
             return {"type": "FourierInv" if values[0] == "F" else "Fourier"}
@@ -1437,6 +1477,9 @@ class ChainReductionRule(RewriteRule):
 
         # ControlledSumGate: sum gains (only if control/target same)
         if gate_type == "CSUM":
+            if gate_info is None:
+                msg = "get_gate_info returned no gate_info for a 'CSUM' node."
+                raise ValueError(msg)
             # Check that all ControlledSumGate gates have same control and target
             # We need to get this from the graph
             total = sum(values)
@@ -1546,7 +1589,7 @@ class FourierNormalizationRule(RewriteRule):
     """
 
     # Equivalent rotation angle contributed by each Fourier-type gate.
-    _ROTATION_DELTA = {  # noqa: RUF012
+    _ROTATION_DELTA = {  # ruff: ignore[mutable-class-default]
         "Fourier": -pi / 2,
         "FourierInv": pi / 2,
         "Fourier2": pi,
@@ -1578,7 +1621,7 @@ class FourierNormalizationRule(RewriteRule):
             attrs = graph.nodes[container_id]
             sub_ids = attrs.get("sub_diagram_ids", [])
 
-            if len(sub_ids) < 2:  # noqa: PLR2004
+            if len(sub_ids) < 2:  # ruff: ignore[magic-value-comparison]
                 continue
 
             # Skip past a matched pair (i += 2) rather than sliding one at a
@@ -1640,7 +1683,7 @@ class FourierNormalizationRule(RewriteRule):
     def _rotation_match(
         self, graph: nx.DiGraph, *, fourier_id: int, rotation_id: int, first_id: int, second_id: int
     ) -> dict:
-        """Build the match dict for a Fourier-type/rotation pair."""  # noqa: DOC201
+        """Build the match dict for a Fourier-type/rotation pair."""  # ruff: ignore[docstring-missing-returns]
         fourier_type = graph.nodes[fourier_id]["type"]
         theta = graph.nodes[rotation_id]["phase"]
         return {
@@ -1650,7 +1693,7 @@ class FourierNormalizationRule(RewriteRule):
         }
 
     def _squeezing_match(self, graph: nx.DiGraph, *, squeezing_id: int, first_id: int, second_id: int) -> dict:
-        """Build the match dict for an F2/squeezing pair."""  # noqa: DOC201
+        """Build the match dict for an F2/squeezing pair."""  # ruff: ignore[docstring-missing-returns]
         tau = graph.nodes[squeezing_id]["phase"]
         return {
             "node_ids": [first_id, second_id],
@@ -1751,7 +1794,7 @@ class TerminalAbsorptionRule(RewriteRule):
     [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (239a)-(239e).
     """
 
-    def __init__(self, assume_infinite_squeezing: bool = False) -> None:  # noqa: FBT001 FBT002
+    def __init__(self, assume_infinite_squeezing: bool = False) -> None:  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
         """Create the rule.
 
         Parameters
@@ -1790,7 +1833,7 @@ class TerminalAbsorptionRule(RewriteRule):
             attrs = graph.nodes[container_id]
             sub_ids = attrs.get("sub_diagram_ids", [])
 
-            if len(sub_ids) < 2:  # noqa: PLR2004
+            if len(sub_ids) < 2:  # ruff: ignore[magic-value-comparison]
                 continue
 
             # Skip past a matched pair (i += 2), same reasoning as
@@ -1854,20 +1897,42 @@ class TerminalAbsorptionRule(RewriteRule):
         -------
         dict | None
             Partial match dict (result type/arity/phase), or None.
+
+        Raises:
+        ------
+        TypeError:
+            If `terminal_attrs["phase"]` is present but not a `ZxPoly`.
+        ValueError:
+            If a phase is required to absorb `gate_attrs` but
+            `terminal_attrs` has none (should not occur for a real
+            QSpider/PSpider terminal).
         """
         terminal_type = terminal_attrs["type"]
         phase = terminal_attrs.get("phase")
         gate_type = gate_attrs.get("type")
 
+        if phase is not None and not isinstance(phase, ZxPoly):
+            msg = f"terminal_attrs['phase'] must be a ZxPoly, got {type(phase)}."
+            raise TypeError(msg)
+
         new_phase = None
         if gate_type == "PhaseRotationGate" and terminal_type == "QSpider":
+            if phase is None:
+                msg = f"terminal_attrs has no 'phase' to absorb {gate_type!r} into."
+                raise ValueError(msg)
             new_phase = self._rotation_absorb(phase, gate_attrs.get("phase"))
         elif gate_type == "Fourier2" and terminal_type == "QSpider":
             # F2 is a fixed rotation by pi -- exact, and pi isn't a
             # degenerate angle (only F/Finv's +-pi/2 would be, so those
             # can never absorb this way: nothing else recognizes them).
+            if phase is None:
+                msg = f"terminal_attrs has no 'phase' to absorb {gate_type!r} into."
+                raise ValueError(msg)
             new_phase = self._rotation_absorb(phase, pi)
         elif gate_type == "SqueezingGate" and self.assume_infinite_squeezing:
+            if phase is None:
+                msg = f"terminal_attrs has no 'phase' to absorb {gate_type!r} into."
+                raise ValueError(msg)
             new_phase = self._squeeze_absorb(phase, gate_attrs.get("phase"))
         elif (
             gate_type in {"QSpider", "PSpider"}
@@ -2164,7 +2229,7 @@ class CopyRule(RewriteRule):
         # absorption point, not a mid-chain pass-through with its own
         # unrelated incoming/outgoing wiring on either side.
         if (
-            first_type == "QSpider"  # noqa: PLR0916
+            first_type == "QSpider"  # ruff: ignore[too-many-boolean-expressions]
             and first_num_inputs == 0
             and first_num_outputs == 1
             and second_type == "PSpider"
@@ -2182,7 +2247,7 @@ class CopyRule(RewriteRule):
 
         # Pattern: Q(g, 1, 0) ∘ P(φ, n, 1)
         if (
-            first_type == "PSpider"  # noqa: PLR0916
+            first_type == "PSpider"  # ruff: ignore[too-many-boolean-expressions]
             and first_num_inputs >= 1
             and first_num_outputs == 1
             and second_type == "QSpider"
@@ -2200,7 +2265,7 @@ class CopyRule(RewriteRule):
 
         # Pattern: Q(φ, 1, n) ∘ P(g, 0, 1)
         if (
-            first_type == "PSpider"  # noqa: PLR0916
+            first_type == "PSpider"  # ruff: ignore[too-many-boolean-expressions]
             and first_num_inputs == 0
             and first_num_outputs == 1
             and second_type == "QSpider"
@@ -2218,7 +2283,7 @@ class CopyRule(RewriteRule):
 
         # Pattern: P(g, 1, 0) ∘ Q(φ, n, 1)
         if (
-            first_type == "QSpider"  # noqa: PLR0916
+            first_type == "QSpider"  # ruff: ignore[too-many-boolean-expressions]
             and first_num_inputs >= 1
             and first_num_outputs == 1
             and second_type == "PSpider"
@@ -2244,7 +2309,7 @@ class CopyRule(RewriteRule):
         n_copies: int,
         copy_spider_type: str,
     ) -> dict | None:
-        """Create a match dictionary if the copied spider's phase is in R₁[X]."""  # noqa: DOC201
+        """Create a match dictionary if the copied spider's phase is in R₁[X]."""  # ruff: ignore[docstring-missing-returns]
         copy_attrs = graph.nodes[copy_spider_id]
         copy_phase = copy_attrs.get("phase")
 
@@ -2277,9 +2342,9 @@ class CopyRule(RewriteRule):
         """
         if phase is None:
             return False
-        return phase.degree() <= 1
+        return bool(phase.degree() <= 1)
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # noqa: PLR0912, PLR0914, PLR0915, C901
+    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # ruff: ignore[too-many-branches, too-many-locals, too-many-statements, complex-structure]
         """Apply the copy rule to a specific match in-place.
 
         Parameters
@@ -2385,7 +2450,7 @@ class CopyRule(RewriteRule):
                         new_connectivity[old_idx - 1] = targets
 
                 graph.nodes[container_id]["connectivity"] = new_connectivity
-            if len(sub_ids) == 2:  # noqa: PLR2004
+            if len(sub_ids) == 2:  # ruff: ignore[magic-value-comparison]
                 self._flatten_container(graph, container_id)
             return
 
@@ -2597,7 +2662,7 @@ def is_wiring_node_from_attrs(attrs: dict) -> bool:
     if phase is None:
         return False
 
-    return phase.is_zero
+    return bool(phase.is_zero)
 
 
 def remove_void_and_identity_nodes(graph: nx.DiGraph) -> nx.DiGraph:

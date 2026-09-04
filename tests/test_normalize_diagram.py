@@ -42,7 +42,7 @@ from cvzx.visualize_base_gates import visualize_before_after
 _ZERO = ZxPoly({})
 
 
-def _identity():  # noqa: ANN202
+def _identity():  # ruff: ignore[missing-return-type-private-function]
     """A fresh 1-mode identity spider, matching `normalize_diagram`'s own filler."""
     return QSpider(1, 1, _ZERO)
 
@@ -66,7 +66,7 @@ def _is_identity_attrs(attrs: dict) -> bool:
     )
 
 
-def _leaf_signatures(diagram):  # noqa: ANN001, ANN202
+def _leaf_signatures(diagram):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Multiset of every non-identity leaf's (type, shape, params) in `diagram`.
 
     Built straight from `to_graph()` node attributes rather than from
@@ -98,13 +98,13 @@ def _leaf_signatures(diagram):  # noqa: ANN001, ANN202
     return sorted(sigs, key=repr)
 
 
-def _wide_leaves_in_stage(stage):  # noqa: ANN001, ANN202
+def _wide_leaves_in_stage(stage):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """The (0 or 1) "wide" (>1-mode) leaves directly inside one top-level stage."""
     elements = stage.diagrams if isinstance(stage, TensorDiagram) else [stage]
     return [d for d in elements if max(d.num_inputs, d.num_outputs) > 1]
 
 
-def _stage_kind(stage):  # noqa: ANN001, ANN202
+def _stage_kind(stage):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Classify one stage of a normalized `CompositionDiagram` as "wide" or "narrow".
 
     A well-formed stage from `normalize_diagram` never contains more
@@ -124,7 +124,7 @@ def _stage_kind(stage):  # noqa: ANN001, ANN202
     return "wide" if wide_leaves else "narrow"
 
 
-def _stage_is_all_identity(stage):  # noqa: ANN001, ANN202
+def _stage_is_all_identity(stage):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """True if every element of one top-level stage is a bare identity wire.
 
     This is exactly the "empty tensor" the design rule forbids: a
@@ -135,7 +135,7 @@ def _stage_is_all_identity(stage):  # noqa: ANN001, ANN202
     return all(_is_identity_element(element) for element in elements)
 
 
-def _is_identity_element(element):  # noqa: ANN001, ANN202
+def _is_identity_element(element):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """True for a bare `Diagram` leaf that is a plain identity wire.
 
     Unlike `_is_identity_attrs` (which reads graph-node attributes),
@@ -152,7 +152,7 @@ def _is_identity_element(element):  # noqa: ANN001, ANN202
     )
 
 
-def _leaf_signature(element):  # noqa: ANN001, ANN202
+def _leaf_signature(element):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """(type, shape, params) signature of one bare leaf `Diagram`, read directly."""
     return (
         type(element).__name__,
@@ -164,7 +164,7 @@ def _leaf_signature(element):  # noqa: ANN001, ANN202
     )
 
 
-def _real_wiring(diagram):  # noqa: ANN001, ANN202
+def _real_wiring(diagram):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Trace real-leaf-to-real-leaf (and external in/out) wiring, chasing through identity leaves.
 
     This is the check `_leaf_signatures` deliberately does *not* do: it
@@ -294,7 +294,7 @@ class TestBareLeafDiagrams(unittest.TestCase):
         """
         gate = ControlledSumGate(gain=0.5, control=2, target=1)
         result = normalize_diagram(gate)
-        assert type(result).__name__ == "ControlledSumGate"
+        assert isinstance(result, ControlledSumGate)
         assert result.num_inputs == 2
         assert result.num_outputs == 2
         assert result.control == gate.control
@@ -438,6 +438,7 @@ class TestStageAlternation(unittest.TestCase):
         # as one of its two consumed input positions.
         assert all(conn == {k: k for k in range(len(conn))} for conn in result.connectivity.values())
         stage_with_csum_a = result.diagrams[wide_positions[0]]
+        assert isinstance(stage_with_csum_a, TensorDiagram)
         assert stage_with_csum_a.diagrams.index(_wide_leaves_in_stage(stage_with_csum_a)[0]) == 0
 
 
@@ -480,6 +481,7 @@ class TestParallelWideGates(unittest.TestCase):
             assert len(wides) == 1
             assert wides[0].control == 2
             assert wides[0].target == 1
+            assert isinstance(stage, TensorDiagram)
             row = stage.diagrams.index(wides[0])
             assert row == 2 * k, f"gate {k} landed on row {row}, expected {2 * k}"
         # Nothing here ever needs reordering -- every boundary should be
@@ -502,7 +504,7 @@ class TestSemanticContentIsPreserved(unittest.TestCase):
     (non-identity) leaves, and the input/output wire counts.
     """
 
-    def _circuits(self):  # noqa: ANN202
+    def _circuits(self):  # ruff: ignore[missing-return-type-private-function]
         """A handful of representative diagrams, rebuilt fresh each call.
 
         Fresh instances matter here: several of these leaves carry an

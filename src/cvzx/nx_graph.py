@@ -15,6 +15,7 @@ Key design decisions:
 """
 
 from copy import deepcopy
+from typing import cast
 
 import networkx as nx
 from sympy import Expr
@@ -35,13 +36,20 @@ from cvzx.base_gates import (
     ZxPoly,
 )
 from cvzx.gates import (
+    ArbitraryGate,
     BeamsplitterGate,
     CompactDiagram,
     ControlledSumGate,
     ControlledZGate,
+    CubicPhaseGate,
     DisplacementGate,
+    MeasurementGate,
     PhaseRotationGate,
+    ShearPInvariantGate,
+    ShearXInvariantGate,
+    Squeezing45Gate,
     SqueezingGate,
+    TwoModeShearGate,
 )
 
 
@@ -90,7 +98,7 @@ class GateRegister:
         self.composition_nodes: set[int] = set()
         self.void_nodes: set[int] = set()
 
-    def add_node(self, node_id: int, attrs: dict) -> None:  # noqa: C901, PLR0912
+    def add_node(self, node_id: int, attrs: dict) -> None:  # ruff: ignore[complex-structure, too-many-branches]
         """Add a node to the appropriate sets based on its attributes.
 
         This method inspects the node's attributes and adds its ID to the
@@ -265,7 +273,7 @@ class GateRegister:
         if phase is None:
             return False
 
-        return phase.is_zero
+        return bool(phase.is_zero)
 
     def _is_input_state(self, attrs: dict) -> bool:
         """Check if a node is an input state.
@@ -322,7 +330,7 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
     return graph
 
 
-def to_diagram(G: nx.DiGraph) -> Diagram:  # noqa: N803
+def to_diagram(G: nx.DiGraph) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a CV ZX diagram from a directed graph representation.
 
     This function reconstructs the original diagram from the graph, preserving
@@ -361,7 +369,7 @@ def to_diagram(G: nx.DiGraph) -> Diagram:  # noqa: N803
 def find_node_by_external_output(
     diagram: Diagram,
     ext_port: int,
-    G: nx.DiGraph,  # noqa: N803
+    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
 ) -> tuple[int | None, int | None]:
     """Find the proper node and its internal port for a given external output port.
 
@@ -406,7 +414,7 @@ def find_node_by_external_output(
     if attrs.get("container_type") == "tensor" or attrs.get("container_type") == "composition":
         sub_node_id = attrs["sub_diagram_ids"][sub_ref]
         sub_diagram = G.nodes[sub_node_id]["diagram"]
-    elif attrs.get("container_type") == "contracted":
+    elif attrs.get("container_type") == "contracted" and isinstance(diagram, ContractedDiagram):
         # For ContractedDiagram: sub_ref is 'first' or 'second'
         sub_diagram = diagram.first if sub_ref == "first" else diagram.second
     else:
@@ -419,7 +427,7 @@ def find_node_by_external_output(
 def find_node_by_external_input(
     diagram: Diagram,
     ext_port: int,
-    G: nx.DiGraph,  # noqa: N803
+    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
 ) -> tuple[int | None, int | None]:
     """Find the proper node and its internal port for a given external input port.
 
@@ -461,7 +469,7 @@ def find_node_by_external_input(
     if attrs.get("container_type") == "tensor" or attrs.get("container_type") == "composition":
         sub_node_id = attrs["sub_diagram_ids"][sub_ref]
         sub_diagram = G.nodes[sub_node_id]["diagram"]
-    elif attrs.get("container_type") == "contracted":
+    elif attrs.get("container_type") == "contracted" and isinstance(diagram, ContractedDiagram):
         sub_diagram = diagram.first if sub_ref == "first" else diagram.second
     else:
         return None, None
@@ -470,7 +478,7 @@ def find_node_by_external_input(
     return find_node_by_external_input(sub_diagram, internal_port, G)
 
 
-def get_proper_nodes(G: nx.DiGraph) -> list[int]:  # noqa: N803
+def get_proper_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-argument-name]
     """Get all proper nodes (leaf operations) from the graph.
 
     Proper nodes represent actual operations (spiders, gates, etc.)
@@ -489,7 +497,7 @@ def get_proper_nodes(G: nx.DiGraph) -> list[int]:  # noqa: N803
     return [n for n, attrs in G.nodes(data=True) if attrs.get("kind") == "proper"]
 
 
-def get_container_nodes(G: nx.DiGraph) -> list[int]:  # noqa: N803
+def get_container_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-argument-name]
     """Get all container nodes from the graph.
 
     Container nodes represent structural elements (CompositionDiagram,
@@ -508,7 +516,7 @@ def get_container_nodes(G: nx.DiGraph) -> list[int]:  # noqa: N803
     return [n for n, attrs in G.nodes(data=True) if attrs.get("kind") == "container"]
 
 
-def get_root_node(G: nx.DiGraph) -> int | None:  # noqa: N803
+def get_root_node(G: nx.DiGraph) -> int | None:  # ruff: ignore[invalid-argument-name]
     """Get the root node (the outermost diagram) from the graph.
 
     The root node is the container node with is_root=True.
@@ -525,11 +533,11 @@ def get_root_node(G: nx.DiGraph) -> int | None:  # noqa: N803
     """
     for node, attrs in G.nodes(data=True):
         if attrs.get("is_root", False):
-            return node
+            return cast("int", node)
     return None
 
 
-def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:  # noqa: N803
+def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:  # ruff: ignore[invalid-argument-name]
     """Get the immediate container of a node.
 
     Parameters:
@@ -545,10 +553,10 @@ def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:  # noqa:
         The node ID of the immediate container, or None if the node is the root.
     """
     attrs = G.nodes[node_id]
-    return attrs.get("container_id")
+    return cast("int | None", attrs.get("container_id"))
 
 
-def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:  # noqa: N803
+def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:  # ruff: ignore[invalid-argument-name]
     """Get the sub-diagram node IDs of a container node.
 
     Parameters:
@@ -567,10 +575,10 @@ def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:  # noqa: 
     attrs = G.nodes[container_node]
     if attrs.get("kind") != "container":
         return []
-    return attrs.get("sub_diagram_ids", [])
+    return cast("list[int]", attrs.get("sub_diagram_ids", []))
 
 
-def get_connectivity(G: nx.DiGraph, container_node: int) -> dict | None:  # noqa: N803
+def get_connectivity(G: nx.DiGraph, container_node: int) -> dict[int, dict[int, int]] | None:  # ruff: ignore[invalid-argument-name]
     """Get the connectivity dictionary of a CompositionDiagram container node.
 
     Parameters:
@@ -582,17 +590,17 @@ def get_connectivity(G: nx.DiGraph, container_node: int) -> dict | None:  # noqa
 
     Returns:
     -------
-    dict | None
+    dict[int, dict[int, int]] | None
         The connectivity dictionary if the node is a CompositionDiagram,
         otherwise None.
     """
     attrs = G.nodes[container_node]
     if attrs.get("container_type") != "composition":
         return None
-    return attrs.get("connectivity")
+    return cast("dict[int, dict[int, int]] | None", attrs.get("connectivity"))
 
 
-def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | None:  # noqa: N803
+def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | None:  # ruff: ignore[invalid-argument-name]
     """Get the contracted connections of a ContractedDiagram container node.
 
     Parameters:
@@ -619,7 +627,7 @@ def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | Non
     }
 
 
-def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:  # noqa: N803
+def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:  # ruff: ignore[invalid-argument-name]
     """Get all nodes that belong to a specific container.
 
     This includes both proper nodes and nested container nodes.
@@ -641,9 +649,9 @@ def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:  # 
 
 def _convert_diagram_to_graph(
     diagram: Diagram,
-    G: nx.DiGraph,  # noqa: N803
+    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
     container_id: int | None,
-    is_root: bool = False,  # noqa: FBT001, FBT002
+    is_root: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> int:
     """Convert a diagram to graph nodes and return the root node ID.
 
@@ -679,9 +687,9 @@ def _convert_diagram_to_graph(
     return -1
 
 
-def _add_proper_node(
+def _add_proper_node(  # ruff: ignore[complex-structure, too-many-branches]
     diagram: ProperDiagram | CompactDiagram,
-    G: nx.DiGraph,  # noqa: N803
+    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
     container_id: int | None,
 ) -> int:
     """Add a proper diagram as a node in the graph.
@@ -709,6 +717,13 @@ def _add_proper_node(
     node_type = diagram.__class__.__name__
     kind = "proper" if isinstance(diagram, ProperDiagram) else "compact"
 
+    # Every CompactDiagram gate (see cvzx.gates) now carries feedforward /
+    # measurement_ids (mirroring DisplacementGate's original pattern), so
+    # this is pulled once here and attached to every node below rather
+    # than being recomputed per gate-type branch.
+    feedforward = getattr(diagram, "feedforward", None)
+    measurement_ids = getattr(diagram, "measurement_ids", None)
+
     if isinstance(diagram, PhaseRotationGate):
         phase = getattr(diagram, "theta", None)
     elif isinstance(diagram, SqueezingGate):
@@ -717,11 +732,17 @@ def _add_proper_node(
         phase = getattr(diagram, "theta", None)
     elif isinstance(diagram, (ControlledSumGate, ControlledZGate)):
         phase = getattr(diagram, "gain", None)
+    elif isinstance(diagram, CubicPhaseGate):
+        phase = getattr(diagram, "gamma", None)
+    elif isinstance(diagram, ShearXInvariantGate):
+        phase = getattr(diagram, "kappa", None)
+    elif isinstance(diagram, ShearPInvariantGate):
+        phase = getattr(diagram, "eta", None)
+    elif isinstance(diagram, (MeasurementGate, Squeezing45Gate)):
+        phase = getattr(diagram, "theta", None)
 
     if isinstance(diagram, DisplacementGate):
         phase = getattr(diagram, "alpha", None)
-        feedforward = getattr(diagram, "feedforward", None)
-        measurement_ids = getattr(diagram, "measurement_ids", None)
         G.add_node(
             node_id,
             id=node_id,
@@ -749,6 +770,45 @@ def _add_proper_node(
             phase=phase,
             control=control,
             target=target,
+            feedforward=feedforward,
+            measurement_ids=measurement_ids,
+            num_inputs=diagram.num_inputs,
+            num_outputs=diagram.num_outputs,
+            diagram=diagram,
+            container_id=container_id,
+            # Store external port mappings
+            external_inputs=list(range(diagram.num_inputs)),
+            external_outputs=list(range(diagram.num_outputs)),
+        )
+    elif isinstance(diagram, ArbitraryGate):
+        G.add_node(
+            node_id,
+            id=node_id,
+            type=node_type,
+            kind=kind,
+            alpha=diagram.alpha,
+            beta=diagram.beta,
+            lam=diagram.lam,
+            feedforward=feedforward,
+            measurement_ids=measurement_ids,
+            num_inputs=diagram.num_inputs,
+            num_outputs=diagram.num_outputs,
+            diagram=diagram,
+            container_id=container_id,
+            # Store external port mappings
+            external_inputs=list(range(diagram.num_inputs)),
+            external_outputs=list(range(diagram.num_outputs)),
+        )
+    elif isinstance(diagram, TwoModeShearGate):
+        G.add_node(
+            node_id,
+            id=node_id,
+            type=node_type,
+            kind=kind,
+            a=diagram.a,
+            b=diagram.b,
+            feedforward=feedforward,
+            measurement_ids=measurement_ids,
             num_inputs=diagram.num_inputs,
             num_outputs=diagram.num_outputs,
             diagram=diagram,
@@ -764,6 +824,8 @@ def _add_proper_node(
             type=node_type,
             kind=kind,
             phase=phase,
+            feedforward=feedforward,
+            measurement_ids=measurement_ids,
             num_inputs=diagram.num_inputs,
             num_outputs=diagram.num_outputs,
             diagram=diagram,
@@ -777,9 +839,9 @@ def _add_proper_node(
 
 def _add_composition_node(
     diagram: CompositionDiagram,
-    G: nx.DiGraph,  # noqa: N803
+    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
     container_id: int | None,
-    is_root: bool = False,  # noqa: FBT001, FBT002
+    is_root: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> int:
     """Add a CompositionDiagram as a container node in the graph.
 
@@ -829,6 +891,24 @@ def _add_composition_node(
         sub_node_id = _convert_diagram_to_graph(sub_diagram, G, container_id=node_id)
         sub_node_ids.append(sub_node_id)
 
+    # `find_node_by_external_output`/`find_node_by_external_input` resolve
+    # THROUGH a composition container exactly like they do a tensor
+    # container: via an `external_output_mapping`/`external_input_mapping`
+    # dict keyed by external port, valued (sub_diagram_index, internal_port)
+    # (their own container_type check already branches on "tensor" OR
+    # "composition" and does `sub_diagram_ids[sub_ref]` -- that branch was
+    # simply unreachable for composition nodes before this, since this
+    # dict was never populated here, so `ext_port not in output_mapping`
+    # always failed and any composition edge whose endpoint resolved
+    # through a *nested* CompositionDiagram (a CompositionDiagram sitting
+    # as one row of an enclosing TensorDiagram, itself then composed with
+    # a neighbor -- e.g. an ancilla-preparation sub-composition placed at
+    # one row of a wider layer) was silently dropped instead of being
+    # added). A composition's external inputs are exactly its first
+    # element's inputs, in order; its external outputs are exactly its
+    # last element's outputs, in order (see `__post_init__`:
+    # `_num_inputs = self.diagrams[0].num_inputs`,
+    # `_num_outputs = self.diagrams[-1].num_outputs`).
     external_input_mapping = {j: (0, j) for j in range(diagram.diagrams[0].num_inputs)}
     last_idx = len(diagram.diagrams) - 1
     external_output_mapping = {j: (last_idx, j) for j in range(diagram.diagrams[-1].num_outputs)}
@@ -898,9 +978,9 @@ def _add_composition_node(
 
 def _add_tensor_node(
     diagram: TensorDiagram,
-    G: nx.DiGraph,  # noqa: N803
+    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
     container_id: int | None,
-    is_root: bool = False,  # noqa: FBT001, FBT002
+    is_root: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> int:
     """Add a TensorDiagram as a container node in the graph.
 
@@ -977,11 +1057,11 @@ def _add_tensor_node(
     return node_id
 
 
-def _add_contracted_node(  # noqa: C901
+def _add_contracted_node(  # ruff: ignore[complex-structure]
     diagram: ContractedDiagram,
-    G: nx.DiGraph,  # noqa: N803
+    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
     container_id: int | None,
-    is_root: bool = False,  # noqa: FBT001, FBT002
+    is_root: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> int:
     """Add a ContractedDiagram as a container node in the graph.
 
@@ -1141,7 +1221,7 @@ def _add_contracted_node(  # noqa: C901
 # =========================================================================
 
 
-def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
+def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a diagram from a graph node.
 
     Parameters:
@@ -1180,7 +1260,7 @@ def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N80
     raise ValueError(msg)
 
 
-def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C901, N803, PLR0911, PLR0912
+def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[complex-structure, invalid-argument-name, too-many-return-statements, too-many-branches, too-many-locals]
     """Reconstruct a proper diagram from a graph node.
 
     Parameters:
@@ -1206,6 +1286,8 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C
     num_inputs = attrs.get("num_inputs", 0)
     num_outputs = attrs.get("num_outputs", 0)
     is_parametric = isinstance(phase, Expr)
+    feedforward = attrs.get("feedforward")
+    measurement_ids = attrs.get("measurement_ids")
 
     if node_type == "QSpider":
         return QSpider(num_inputs, num_outputs, phase if phase is not None else ZxPoly({}))
@@ -1222,26 +1304,45 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C
     if node_type == "Fourier2":
         return Fourier2()
     if node_type == "DisplacementGate":
-        feedforward = attrs.get("feedforward")
-        measurement_ids = attrs.get("measurement_ids")
         return DisplacementGate(phase, is_parametric, feedforward, measurement_ids)
     if node_type == "PhaseRotationGate":
-        return PhaseRotationGate(phase, is_parametric)
+        return PhaseRotationGate(phase, is_parametric, feedforward, measurement_ids)
     if node_type == "SqueezingGate":
-        return SqueezingGate(phase, is_parametric)
+        return SqueezingGate(phase, is_parametric, feedforward, measurement_ids)
     if node_type == "BeamsplitterGate":
-        return BeamsplitterGate(phase, is_parametric)
+        return BeamsplitterGate(phase, is_parametric, feedforward, measurement_ids)
     if node_type == "ControlledSumGate":
         control = attrs.get("control")
         target = attrs.get("target")
-        return ControlledSumGate(phase, control, target, is_parametric)
+        return ControlledSumGate(phase, control, target, is_parametric, feedforward, measurement_ids)
     if node_type == "ControlledZGate":
-        return ControlledZGate(phase, is_parametric)
+        return ControlledZGate(phase, is_parametric, feedforward, measurement_ids)
+    if node_type == "CubicPhaseGate":
+        return CubicPhaseGate(phase, is_parametric, feedforward, measurement_ids)
+    if node_type == "ShearXInvariantGate":
+        return ShearXInvariantGate(phase, is_parametric, feedforward, measurement_ids)
+    if node_type == "ShearPInvariantGate":
+        return ShearPInvariantGate(phase, is_parametric, feedforward, measurement_ids)
+    if node_type == "Squeezing45Gate":
+        return Squeezing45Gate(phase, is_parametric, feedforward, measurement_ids)
+    if node_type == "MeasurementGate":
+        return MeasurementGate(phase, is_parametric, feedforward, measurement_ids)
+    if node_type == "ArbitraryGate":
+        alpha = attrs.get("alpha")
+        beta = attrs.get("beta")
+        lam = attrs.get("lam")
+        arb_parametric = isinstance(alpha, Expr) or isinstance(beta, Expr) or isinstance(lam, Expr)
+        return ArbitraryGate(alpha, beta, lam, arb_parametric, feedforward, measurement_ids)
+    if node_type == "TwoModeShearGate":
+        a = attrs.get("a")
+        b = attrs.get("b")
+        shear2_parametric = isinstance(a, Expr) or isinstance(b, Expr)
+        return TwoModeShearGate(a, b, shear2_parametric, feedforward, measurement_ids)
     msg = f"Unknown proper node type: {node_type}"
     raise ValueError(msg)
 
 
-def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
+def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a CompositionDiagram from a graph node.
 
     Parameters:
@@ -1263,7 +1364,19 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # no
     """
     attrs = G.nodes[node_id]
     sub_diagram_ids = attrs.get("sub_diagram_ids", [])
-    # Shallow-copy the connectivity dict
+    # Shallow-copy the connectivity dict rather than handing out the
+    # graph-owned object directly: several rewrite rules (e.g.
+    # `RewriteRule._propagate_arity_to_parent`, `IdentityRule.apply_single`)
+    # mutate a container's "connectivity" dict IN PLACE (`connectivity[key]
+    # = ...`, `del connectivity[key]`) rather than always replacing it
+    # wholesale. A `Diagram` built from this node must stay a genuine,
+    # independent snapshot even if the source graph keeps being mutated
+    # afterward (e.g. `optimize()` calls `to_diagram(graph)` to capture
+    # its pre-cleanup result, then keeps mutating `graph` in
+    # `remove_void_and_identity_nodes`) -- without this copy, the earlier
+    # snapshot's `connectivity` would silently change underneath it. A
+    # shallow copy is enough: no rule mutates one of the per-index INNER
+    # dicts in place, only ever the outer one.
     connectivity = dict(attrs.get("connectivity", {}))
     # Recursively reconstruct all sub-diagrams
     sub_diagrams = [_reconstruct_from_node(G, sub_id) for sub_id in sub_diagram_ids]
@@ -1301,7 +1414,7 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # no
     return CompositionDiagram(sub_diagrams, connectivity)
 
 
-def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
+def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a TensorDiagram from a graph node.
 
     Parameters:
@@ -1325,7 +1438,7 @@ def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N
     return TensorDiagram(sub_diagrams)
 
 
-def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N803
+def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a ContractedDiagram from a graph node.
 
     Parameters:
@@ -1348,10 +1461,10 @@ def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noq
     attrs = G.nodes[node_id]
     first_id = attrs.get("first_id")
     second_id = attrs.get("second_id")
-    I1 = attrs.get("I1", [])  # noqa: N806
-    I2 = attrs.get("I2", [])  # noqa: N806
-    J1 = attrs.get("J1", [])  # noqa: N806
-    J2 = attrs.get("J2", [])  # noqa: N806
+    I1 = attrs.get("I1", [])  # ruff: ignore[non-lowercase-variable-in-function]
+    I2 = attrs.get("I2", [])  # ruff: ignore[non-lowercase-variable-in-function]
+    J1 = attrs.get("J1", [])  # ruff: ignore[non-lowercase-variable-in-function]
+    J2 = attrs.get("J2", [])  # ruff: ignore[non-lowercase-variable-in-function]
 
     if first_id is None or second_id is None:
         msg = f"ContractedDiagram node {node_id} missing first_id or second_id"

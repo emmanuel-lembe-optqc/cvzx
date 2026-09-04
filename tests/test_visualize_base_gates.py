@@ -91,7 +91,7 @@ def test_base_gates_exceptions():
         tensor.compose(fourier, connectivity={0: 0, 1: 0, 2: 1})  # fourier has 1 output, values must be 0
 
 
-def run_graphical_tests():  # noqa: PLR0914, PLR0915
+def run_graphical_tests():  # ruff: ignore[too-many-locals, too-many-statements]
     """Run all graphical tests - requires human verification."""
     print("Generating graphical test images...")
     print(f"Output directory: {OUTPUT_DIR}/")
@@ -248,7 +248,7 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     large_composition = swap_tensor_fourier.compose(large_composition)
 
     q_spider_3x3 = QSpider(3, 3, phase_poly_simple)
-    nested_composition_block = CompositionDiagram([q_spider_3x3, q_spider_3x3])
+    nested_composition_block: Diagram = CompositionDiagram([q_spider_3x3, q_spider_3x3])
     nested_composition_block = nested_composition_block.compose(q_spider_3x3)
     nested_composition_block = nested_composition_block.compose(q_spider_3x3)
 
@@ -266,7 +266,7 @@ def run_graphical_tests():  # noqa: PLR0914, PLR0915
     large_comp_conn = swap_tensor_fourier_conn.compose(large_comp_conn, connectivity={0: 1, 1: 0, 2: 2})
     large_comp_conn = swap_tensor_fourier_conn.compose(large_comp_conn)
 
-    nested_block_conn = CompositionDiagram([q_spider_3x3, q_spider_3x3])
+    nested_block_conn: Diagram = CompositionDiagram([q_spider_3x3, q_spider_3x3])
     nested_block_conn = nested_block_conn.compose(q_spider_3x3)
     nested_block_conn = nested_block_conn.compose(q_spider_3x3)
 

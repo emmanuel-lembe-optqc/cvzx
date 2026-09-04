@@ -62,7 +62,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         self.rule = TerminalAbsorptionRule()
         self.rule_idealized = TerminalAbsorptionRule(assume_infinite_squeezing=True)
 
-    def _expected_rotation(self, k: float, theta: float):  # noqa: ANN202
+    def _expected_rotation(self, k: float, theta: float):  # ruff: ignore[missing-return-type-private-function]
         """Hand-computed rotation-fold coefficients: (linear, quadratic)."""
         return k / cos(theta), -tan(theta) / 2
 
@@ -381,8 +381,10 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         lin, quad = self._expected_rotation(3.0, self.theta1)
-        assert isclose(result.diagrams[0].phase.coeffs[1], lin)
-        assert isclose(result.diagrams[0].phase.coeffs[2], quad)
+        folded = result.diagrams[0]
+        assert isinstance(folded, QSpider)
+        assert isclose(folded.phase.coeffs[1], lin)
+        assert isclose(folded.phase.coeffs[2], quad)
         assert result.diagrams[1] == self.q_filler
         assert result.connectivity == {0: {0: 0}}
 
@@ -503,9 +505,12 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         lin_state, quad_state = self._expected_rotation(3.0, self.theta1)
-        assert isclose(result.diagrams[0].phase.coeffs[1], lin_state)
-        assert isclose(result.diagrams[0].phase.coeffs[2], quad_state)
-        assert isclose(result.diagrams[1].phase.coeffs[1], -3.0 / 2.0)
+        folded_state, folded_effect = result.diagrams
+        assert isinstance(folded_state, QSpider)
+        assert isinstance(folded_effect, QSpider)
+        assert isclose(folded_state.phase.coeffs[1], lin_state)
+        assert isclose(folded_state.phase.coeffs[2], quad_state)
+        assert isclose(folded_effect.phase.coeffs[1], -3.0 / 2.0)
 
     def test_apply_rule_four_element_chain_one_pass(self):
         """[state, R1, R2, effect]: both boundary pairs fold in a single pass.
@@ -609,6 +614,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         effect_with_const = QSpider(1, 0, ZxPoly({0: 2.0, 1: -3.0}))
         comp = CompositionDiagram([self.r1, effect_with_const])
         result = apply_rule_to_diagram(self.rule, comp)
+        assert isinstance(result, QSpider)
         assert isclose(result.phase.coeffs[0], 2.0)
 
     def test_squeezing_any_degree(self):
@@ -616,6 +622,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         cubic_effect = QSpider(1, 0, ZxPoly({3: 1.0, 1: -2.0}))
         comp = CompositionDiagram([self.sq1, cubic_effect])
         result = apply_rule_to_diagram(self.rule_idealized, comp)
+        assert isinstance(result, QSpider)
         assert isclose(result.phase.coeffs[3], 1.0 / 8.0)
         assert isclose(result.phase.coeffs[1], -1.0)
 
@@ -625,6 +632,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         sq_sym = SqueezingGate(tau, parametric=True)
         comp = CompositionDiagram([sq_sym, self.q_effect])
         result = apply_rule_to_diagram(self.rule_idealized, comp)
+        assert isinstance(result, QSpider)
         expected = ZxPoly({1: -3.0 / tau})
         assert simplify(result.phase.as_expr() - expected.as_expr()) == 0
 
@@ -633,6 +641,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         effect_with_const = QSpider(1, 0, ZxPoly({0: 5.0, 1: -3.0}))
         comp = CompositionDiagram([self.sq1, effect_with_const])
         result = apply_rule_to_diagram(self.rule_idealized, comp)
+        assert isinstance(result, QSpider)
         assert isclose(result.phase.coeffs[0], 5.0)
 
     def test_cross_color_discard_arbitrary_degree(self):
@@ -653,6 +662,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Negative tau divides the phase's coefficients as-is (no sign special-casing)."""
         comp = CompositionDiagram([self.sq2, self.q_effect])
         result = apply_rule_to_diagram(self.rule_idealized, comp)
+        assert isinstance(result, QSpider)
         assert isclose(result.phase.coeffs[1], -3.0 / -3.0)
 
 

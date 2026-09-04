@@ -2,17 +2,21 @@ default_language_version:
   python: python3.12
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version.
-    rev: v0.11.4
+    rev: v0.16.6
     hooks:
       # Run the linter.
       - id: ruff
         args: [ --fix ]
       # Run the formatter.
       - id: ruff-format
-  # - repo: https://github.com/pre-commit/mirrors-mypy
-  #   rev: v1.15.0
-  #   hooks:
-  #     - id: mypy
-  #       additional_dependencies:
-  #         [atom, bidict, numpy, pint, pyvisa, types-toml, pyzmq, pytest, xarray]
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.3.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - "numpy>=2.1,<3"
+          - "networkx>=3.4,<4"
+          - "sympy>=1.12"
+          - "scipy>=1.10"
+          - "matplotlib>=3.7"
+          - "Pillow>=9.0"

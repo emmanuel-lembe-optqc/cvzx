@@ -390,8 +390,7 @@ class TestCopyRule(unittest.TestCase):
 
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 2
-        assert all(isinstance(d, QSpider) for d in result.diagrams)
-        assert all(d.phase == self.phase_x2 for d in result.diagrams)
+        assert all(isinstance(d, QSpider) and d.phase == self.phase_x2 for d in result.diagrams)
         assert all(d.num_inputs == 0 and d.num_outputs == 1 for d in result.diagrams)
 
     def test_apply_single_case_1_p_1_3_q_0_1(self):
@@ -406,8 +405,7 @@ class TestCopyRule(unittest.TestCase):
 
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 3
-        assert all(isinstance(d, QSpider) for d in result.diagrams)
-        assert all(d.phase == self.phase_x2 for d in result.diagrams)
+        assert all(isinstance(d, QSpider) and d.phase == self.phase_x2 for d in result.diagrams)
 
     def test_apply_single_case_2_q_1_0_p_2_1(self):
         """Case 2: Q(g, 1, 0) ∘ P(φ, 2, 1) → Q(g, 1, 0) ⊗ Q(g, 1, 0)."""
@@ -421,8 +419,7 @@ class TestCopyRule(unittest.TestCase):
 
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 2
-        assert all(isinstance(d, QSpider) for d in result.diagrams)
-        assert all(d.phase == self.phase_x for d in result.diagrams)
+        assert all(isinstance(d, QSpider) and d.phase == self.phase_x for d in result.diagrams)
         assert all(d.num_inputs == 1 and d.num_outputs == 0 for d in result.diagrams)
 
     def test_apply_single_case_3_q_1_2_p_0_1(self):
@@ -437,8 +434,7 @@ class TestCopyRule(unittest.TestCase):
 
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 2
-        assert all(isinstance(d, PSpider) for d in result.diagrams)
-        assert all(d.phase == self.phase_x2 for d in result.diagrams)
+        assert all(isinstance(d, PSpider) and d.phase == self.phase_x2 for d in result.diagrams)
         assert all(d.num_inputs == 0 and d.num_outputs == 1 for d in result.diagrams)
 
     def test_apply_single_case_4_p_1_0_q_2_1(self):
@@ -453,8 +449,7 @@ class TestCopyRule(unittest.TestCase):
 
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 2
-        assert all(isinstance(d, PSpider) for d in result.diagrams)
-        assert all(d.phase == self.phase_x for d in result.diagrams)
+        assert all(isinstance(d, PSpider) and d.phase == self.phase_x for d in result.diagrams)
         assert all(d.num_inputs == 1 and d.num_outputs == 0 for d in result.diagrams)
 
     def test_apply_single_nested_in_tensor(self):
@@ -671,7 +666,7 @@ class TestCopyRule(unittest.TestCase):
 
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 2
-        assert all(d.phase == self.zero_phase for d in result.diagrams)
+        assert all(isinstance(d, QSpider) and d.phase == self.zero_phase for d in result.diagrams)
 
     def test_apply_rule_with_containers_only(self):
         """Copy rule where only the container remains."""
@@ -726,6 +721,7 @@ class TestCopyRule(unittest.TestCase):
 
         assert isinstance(result, TensorDiagram)
         for d in result.diagrams:
+            assert isinstance(d, QSpider)
             assert d.phase == self.phase_x2
 
     def test_copy_disappearing_spider_phase_ignored(self):
@@ -929,7 +925,7 @@ class TestCopyRule(unittest.TestCase):
     #    restructuring whichever container types are involved.
     # -------------------------------------------------------------------------
 
-    def _expanded_csum_with_states(self, control: int, target: int, control_mode: int = 2) -> Diagram:
+    def _expanded_csum_with_states(self, control: Diagram, target: Diagram, control_mode: int = 2) -> Diagram:
         """Build TensorDiagram([control, target]).compose(CSUM.expand()).
 
         Returns:

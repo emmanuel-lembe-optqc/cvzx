@@ -5,6 +5,7 @@ and that to_diagram correctly reconstructs the original diagrams.
 """
 
 from math import pi
+from typing import cast
 
 from sympy import Expr, I, symbols
 
@@ -657,8 +658,8 @@ class TestgraphraphConversion:
 
     def test_tensor_of_compositions(self):
         """Test conversion of TensorDiagram containing CompositionDiagrams."""
-        comp1 = CompositionDiagram([self.q1, self.q2])
-        comp2 = CompositionDiagram([self.q3, self.q4])
+        comp1: Diagram = CompositionDiagram([self.q1, self.q2])
+        comp2: Diagram = CompositionDiagram([self.q3, self.q4])
         tensor = TensorDiagram([comp1, comp2])
         comp1 = tensor.diagrams[0]
         comp2 = tensor.diagrams[1]
@@ -787,8 +788,8 @@ class TestgraphraphConversion:
     def test_complex_nested_structure1(self):
         """Test conversion of complex nested structures."""
         # Create: Tensor([Composition([q1, q2]), Contracted(q3, q4)])
-        comp = CompositionDiagram([self.q1, self.q2])
-        contracted = ContractedDiagram(self.q3, self.q4, [0], [0], [], [])
+        comp: Diagram = CompositionDiagram([self.q1, self.q2])
+        contracted: Diagram = ContractedDiagram(self.q3, self.q4, [0], [0], [], [])
         tensor = TensorDiagram([comp, contracted])
         comp = tensor.diagrams[0]
         contracted = tensor.diagrams[1]
@@ -824,7 +825,7 @@ class TestgraphraphConversion:
         # Roundtrip test
         self._assert_roundtrip(tensor)
 
-    def test_complex_nested_structure2(self):  # noqa: PLR0914, PLR0915
+    def test_complex_nested_structure2(self):  # ruff: ignore[too-many-locals, too-many-statements]
         """Test conversion of complex nested structures."""
         fourier = self.fourier
         fourier2 = Fourier()
@@ -836,8 +837,8 @@ class TestgraphraphConversion:
         swap_node2 = Swap()
         swap_node3 = Swap()
         q_spider1 = QSpider(3, 3, self.phase_q)
-        q_spider2 = QSpider(3, 3, 4 * self.phase_q)
-        q_spider3 = QSpider(3, 3, 10 * self.phase_q)
+        q_spider2 = QSpider(3, 3, cast("ZxPoly", self.phase_q * 4))
+        q_spider3 = QSpider(3, 3, cast("ZxPoly", self.phase_q * 10))
         q_spider_5x5 = QSpider(5, 5, self.phase_q)
         p_spider_4x4 = PSpider(4, 4, self.phase_p)
 
@@ -853,13 +854,14 @@ class TestgraphraphConversion:
         large_comp_conn = large_tensor_conn.compose(tensor1, connectivity={0: 2, 1: 0, 2: 1})
         large_comp_conn = tensor2.compose(large_comp_conn, connectivity={0: 1, 1: 0, 2: 2})
         large_comp_conn = tensor3.compose(large_comp_conn)
-        nested_block_conn = CompositionDiagram([q_spider1, q_spider2])
+        nested_block_conn: Diagram = CompositionDiagram([q_spider1, q_spider2])
         nested_block_conn = nested_block_conn.compose(q_spider3)
         nested_block_conn = nested_block_conn.compose(contracted_diagram_1)
 
         large_comp_conn = large_comp_conn.compose(nested_block_conn, connectivity={0: 1, 1: 2, 2: 0})
         large_comp_conn = flatten_composition(large_comp_conn)
         final_large_conn = fourier.tensor(large_comp_conn)
+        assert isinstance(final_large_conn, TensorDiagram)
         large_comp_conn = final_large_conn.diagrams[1]
 
         graph = to_graph(final_large_conn)
@@ -898,6 +900,7 @@ class TestgraphraphConversion:
         # Check composition
         connectivity = get_connectivity(graph, comp_node)
         assert connectivity is not None
+        assert isinstance(large_comp_conn, CompositionDiagram)
         assert connectivity == large_comp_conn.connectivity
         assert len(graph.nodes[comp_node]["sub_diagram_ids"]) == 8
 
@@ -1074,6 +1077,7 @@ class TestgraphraphConversion:
                 break
 
         # Nodes in tensor: q2, q3, and the tensor itself
+        assert tensor_id is not None
         nodes_in_tensor = get_nodes_by_container(graph, tensor_id)
         assert self.q2.id in nodes_in_tensor
         assert self.q3.id in nodes_in_tensor
@@ -1092,6 +1096,7 @@ class TestgraphraphConversion:
         graph = to_graph(comp)
 
         retrieved_conn = get_connectivity(graph, comp.id)
+        assert retrieved_conn is not None
         assert retrieved_conn[0] == conn
 
         # Non-composition container returns None

@@ -426,6 +426,7 @@ class TestFusionRule(unittest.TestCase):
         q2 = QSpider(1, 1, phase2)
         contracted = ContractedDiagram(q1, q2, [0], [0], [], [])
         result = apply_rule_to_diagram(self.rule, contracted)
+        assert isinstance(result, QSpider)
         assert result.phase == expected_phase
 
     def test_fusion_with_non_fusible_contracted_diagram(self):

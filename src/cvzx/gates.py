@@ -14,12 +14,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from sympy import Expr, Symbol, cos, im, pi, re, simplify, sin, sqrt, symbols, sympify, tan
+from sympy import Expr, Symbol, cos, exp, im, pi, re, simplify, sin, sqrt, symbols, sympify, tan
 
 from cvzx.base_gates import (
     CompositionDiagram,
     ContractedDiagram,
     Diagram,
+    Fourier,
     FourierInv,
     PSpider,
     QSpider,
@@ -57,7 +58,7 @@ class CompactDiagram(Diagram):
     label: str
     _num_inputs: int
     _num_outputs: int
-    decomposition: Diagram
+    decomposition: Diagram | None
 
     def expand(self) -> Diagram:
         """Expand the compact diagram to its full decomposition.
@@ -101,15 +102,20 @@ class CompactDiagram(Diagram):
             decomposition=decomp,
         )
 
-    def conjugate(self) -> "CompactDiagram":
+    def conjugate(self) -> "Diagram":
         """Conjugate the compact diagram.
 
         For the label, this adds a '†' suffix if not already present.
         The decomposition is also conjugated if present.
 
+        Overridden by most subclasses to narrow the return type to
+        `CompactDiagram`; declared as `Diagram` here since at least one
+        subclass (`MeasurementGate`) has a true adjoint that isn't
+        compact-representable (see its own `conjugate()` docstring).
+
         Returns:
         -------
-        CompactDiagram
+        Diagram
             A new CompactDiagram with the conjugated label and decomposition.
         """
         # Conjugate the label
@@ -127,7 +133,7 @@ class CompactDiagram(Diagram):
             decomposition=new_decomp,
         )
 
-    def tensor(self, other: Diagram, expand_self: bool = False) -> Diagram:  # noqa: FBT001, FBT002
+    def tensor(self, other: Diagram, expand_self: bool = False) -> Diagram:  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
         """Tensor product of this compact diagram with another diagram.
 
         Parameters:
@@ -150,7 +156,7 @@ class CompactDiagram(Diagram):
         """
         # Expand self if requested
         if expand_self:
-            if self.can_expand:
+            if self.can_expand():
                 return self.expand().tensor(other)
             if isinstance(other, TensorDiagram):
                 diagrams = list(other.diagrams)
@@ -163,7 +169,7 @@ class CompactDiagram(Diagram):
             return TensorDiagram([self, *diagrams])
         return TensorDiagram([self, other])
 
-    def compose(self, other: Diagram, connectivity: dict | None = None, expand_self: bool = False) -> Diagram:  # noqa: FBT001, FBT002
+    def compose(self, other: Diagram, connectivity: dict | None = None, expand_self: bool = False) -> Diagram:  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
         """Compose this compact diagram with another diagram.
 
         Parameters:
@@ -192,7 +198,7 @@ class CompactDiagram(Diagram):
             connectivity = {i: i for i in range(self.num_inputs)}
         # Expand self if requested
         if expand_self:
-            if self.can_expand:
+            if self.can_expand():
                 return self.expand().compose(other, connectivity=connectivity)
             if isinstance(other, CompositionDiagram):
                 diagrams = list(other.diagrams)
@@ -403,6 +409,12 @@ class DisplacementGate(CompactDiagram):
         DisplacementGate
             A new DisplacementGate with substituted parameters.
 
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
         Examples:
         --------
         >>> from sympy import symbols
@@ -422,6 +434,9 @@ class DisplacementGate(CompactDiagram):
             new_mapping[n_key] = value
 
         # Substitute in alpha
+        if not isinstance(self.alpha, Expr):
+            msg = "substitute_parameters: self.alpha must be a sympy Expr in parametric mode."
+            raise TypeError(msg)
         new_alpha = self.alpha.subs(new_mapping)
         new_alpha = simplify(new_alpha)
 
@@ -429,7 +444,7 @@ class DisplacementGate(CompactDiagram):
             return DisplacementGate(float(new_alpha), parametric=False)
         return DisplacementGate(new_alpha, parametric=True)
 
-    def evaluate(self, **kwargs: Any) -> CompactDiagram:  # noqa: ANN401
+    def evaluate(self, **kwargs: Any) -> CompactDiagram:  # ruff: ignore[any-type]
         """Evaluate the displacement gate with given parameter values.
 
         Parameters
@@ -506,7 +521,7 @@ class DisplacementGate(CompactDiagram):
         return f"DisplacementGate(alpha={self.alpha:.2f})"
 
     def _validate_alpha(self) -> None:
-        """Validate that alpha is a valid complex number or sympy expression."""  # noqa: DOC501
+        """Validate that alpha is a valid complex number or sympy expression."""  # ruff: ignore[docstring-missing-exception]
         if self.parametric and not isinstance(self.alpha, Expr):
             msg = f"Expected sympy expression for parametric mode, got {type(self.alpha)}"
             raise ValueError(msg)
@@ -515,7 +530,7 @@ class DisplacementGate(CompactDiagram):
             raise TypeError(msg_0)
 
     def __post_init__(self) -> None:
-        """Initialize the displacement gate and validate parameters."""  # noqa: DOC501
+        """Initialize the displacement gate and validate parameters."""  # ruff: ignore[docstring-missing-exception]
         # Convert numeric alpha to sympy if parametric
         if self.parametric and not isinstance(self.alpha, Expr):
             self.alpha = sympify(self.alpha)
@@ -542,7 +557,7 @@ class DisplacementGate(CompactDiagram):
                 raise ValueError(msg)
         super().__post_init__()
 
-    def _get_re_im(self) -> tuple[float | int | complex | Expr, float | int | complex | Expr]:
+    def _get_re_im(self) -> tuple[float, float] | tuple[Expr, Expr]:
         """Extract real and imaginary parts of alpha.
 
         Returns:
@@ -561,12 +576,12 @@ class DisplacementGate(CompactDiagram):
             return self.alpha.real, self.alpha.imag
         return float(self.alpha.real), float(self.alpha.imag)
 
-    def _create_phase_poly(self, coeff: complex | Expr, degree: int = 1) -> ZxPoly:
+    def _create_phase_poly(self, coeff: float | Expr, degree: int = 1) -> ZxPoly:
         """Create a phase polynomial for the spider.
 
         Parameters
         ----------
-        coeff : float | int | complex | Expr
+        coeff : float | Expr
             Coefficient for the phase polynomial.
         degree : int
             Degree of the monomial. Default 1 for linear phase.
@@ -579,8 +594,6 @@ class DisplacementGate(CompactDiagram):
         if self.parametric:
             return ZxPoly({degree: coeff})
         # Convert to float for numeric case
-        if isinstance(coeff, complex):
-            return ZxPoly({degree: float(coeff)})
         return ZxPoly({degree: float(coeff)})
 
 
@@ -633,6 +646,8 @@ class PhaseRotationGate(CompactDiagram):
 
     theta: float | int | complex | Expr
     parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     label: str = field(init=False)
     _num_inputs: int = field(default=1, init=False)
     _num_outputs: int = field(default=1, init=False)
@@ -675,6 +690,13 @@ class PhaseRotationGate(CompactDiagram):
         -------
         PhaseRotationGate
             A new PhaseRotationGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
         """
         if not self.parametric:
             return self
@@ -686,13 +708,17 @@ class PhaseRotationGate(CompactDiagram):
                 n_key = symbols(key)
             new_mapping[n_key] = value
 
+        if not isinstance(self.theta, Expr):
+            msg = "substitute_parameters: self.theta must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
         new_theta = simplify(self.theta.subs(new_mapping))
 
         if is_numeric(new_theta):
             return PhaseRotationGate(float(new_theta), parametric=False)
         return PhaseRotationGate(new_theta, parametric=True)
 
-    def evaluate(self, **kwargs) -> CompactDiagram:  # noqa: ANN003
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
         """Evaluate the phase rotation gate with given parameter values.
 
         Parameters
@@ -751,7 +777,7 @@ class PhaseRotationGate(CompactDiagram):
         return f"PhaseRotationGate(theta={self.theta:.2f})"
 
     def _validate_theta(self) -> None:
-        """Validate theta for invalid angles (odd multiples of π/2)."""  # noqa: DOC501
+        """Validate theta for invalid angles (odd multiples of π/2)."""  # ruff: ignore[docstring-missing-exception]
         if self.parametric:
             return  # Skip validation for symbolic
 
@@ -763,7 +789,15 @@ class PhaseRotationGate(CompactDiagram):
             raise ValueError(msg)
 
     def __post_init__(self) -> None:
-        """Initialize the phase rotation gate and validate parameters."""
+        """Initialize the phase rotation gate and validate parameters.
+
+        Raises:
+        ------
+        ValueError:
+            If `theta` is an odd multiple of pi/2 (see `_validate_theta`),
+            or if `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
         if self.parametric and not isinstance(self.theta, Expr):
             self.theta = sympify(self.theta)
 
@@ -781,6 +815,14 @@ class PhaseRotationGate(CompactDiagram):
         else:
             self.label = f"R({self.theta:.2f})"
 
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
         super().__post_init__()
 
     def _get_tan_half(self) -> float | int | complex | Expr:
@@ -851,6 +893,8 @@ class SqueezingGate(CompactDiagram):
 
     tau: float | int | complex | Expr
     parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     label: str = field(init=False)
     _num_inputs: int = field(default=1, init=False)
     _num_outputs: int = field(default=1, init=False)
@@ -894,6 +938,13 @@ class SqueezingGate(CompactDiagram):
         -------
         SqueezingGate
             A new SqueezingGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
         """
         if not self.parametric:
             return self
@@ -905,13 +956,17 @@ class SqueezingGate(CompactDiagram):
                 n_key = symbols(key)
             new_mapping[n_key] = value
 
+        if not isinstance(self.tau, Expr):
+            msg = "substitute_parameters: self.tau must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
         new_tau = simplify(self.tau.subs(new_mapping))
 
         if is_numeric(new_tau):
             return SqueezingGate(float(new_tau), parametric=False)
         return SqueezingGate(new_tau, parametric=True)
 
-    def evaluate(self, **kwargs) -> CompactDiagram:  # noqa: ANN003
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
         """Evaluate the squeezing gate with given parameter values.
 
         Parameters
@@ -970,15 +1025,22 @@ class SqueezingGate(CompactDiagram):
         return f"SqueezingGate(tau={self.tau:.2f})"
 
     def _validate_tau(self) -> None:
-        """Validate tau parameter."""  # noqa: DOC501
+        """Validate tau parameter."""  # ruff: ignore[docstring-missing-exception]
         if self.parametric:
             return
-        if abs(self.tau) < 1e-10:  # noqa: PLR2004
+        if abs(self.tau) < 1e-10:  # ruff: ignore[magic-value-comparison]
             msg = f"tau={self.tau} is too close to zero for numerical stability"
             raise ValueError(msg)
 
     def __post_init__(self) -> None:
-        """Initialize the squeezing gate."""
+        """Initialize the squeezing gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
         if self.parametric and not isinstance(self.tau, Expr):
             self.tau = sympify(self.tau)
 
@@ -989,6 +1051,14 @@ class SqueezingGate(CompactDiagram):
         else:
             self.label = f"Sq({self.tau:.2f})"
 
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
         super().__post_init__()
 
     def _get_coefficients(
@@ -1014,10 +1084,10 @@ class SqueezingGate(CompactDiagram):
             a = self.tau * (1 - self.tau) / 4
             b = -1 / self.tau
             c = (self.tau - 1) / 4
-            d = 1
+            d = 1.0
         else:
             a = self.tau * (1 - self.tau) / 4
-            b = -1 / self.tau if abs(self.tau) > 1e-10 else 0  # noqa: PLR2004
+            b = -1 / self.tau if abs(self.tau) > 1e-10 else 0  # ruff: ignore[magic-value-comparison]
             c = (self.tau - 1) / 4
             d = 1.0
         return a, b, c, d
@@ -1080,6 +1150,8 @@ class ControlledSumGate(CompactDiagram):
     control: int = 2
     target: int = 1
     parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     label: str = field(init=False)
     _num_inputs: int = field(default=2, init=False)
     _num_outputs: int = field(default=2, init=False)
@@ -1111,7 +1183,9 @@ class ControlledSumGate(CompactDiagram):
         """
         # q-spider copies position from control mode
         # p-spider adds the copied position to the momentum of target mode
-        if self.control == 2:  # noqa: PLR2004
+        control_spider: QSpider | PSpider
+        target_spider: QSpider | PSpider
+        if self.control == 2:  # ruff: ignore[magic-value-comparison]
             control_spider = QSpider(1, 2, ZxPoly({}))  # 1 input, 2 outputs (copy)
             target_spider = PSpider(2, 1, ZxPoly({}))  # 2 inputs, 1 output (add)
         else:
@@ -1164,6 +1238,13 @@ class ControlledSumGate(CompactDiagram):
         -------
         ControlledSumGate
             A new ControlledSumGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
         """
         if not self.parametric:
             return self
@@ -1175,13 +1256,17 @@ class ControlledSumGate(CompactDiagram):
                 n_key = symbols(key)
             new_mapping[n_key] = value
 
+        if not isinstance(self.gain, Expr):
+            msg = "substitute_parameters: self.gain must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
         new_gain = simplify(self.gain.subs(new_mapping))
 
         if is_numeric(new_gain):
             return ControlledSumGate(float(new_gain), parametric=False)
         return ControlledSumGate(new_gain, parametric=True)
 
-    def evaluate(self, **kwargs: Any) -> CompactDiagram:  # noqa: ANN401
+    def evaluate(self, **kwargs: Any) -> CompactDiagram:  # ruff: ignore[any-type]
         """Evaluate the CSUM gate with given parameter values.
 
         Parameters
@@ -1247,7 +1332,7 @@ class ControlledSumGate(CompactDiagram):
         return f"ControlledSumGate(CS{self.target},{self.control}, gain={self.gain:.2f})"
 
     def __post_init__(self) -> None:
-        """Initialize the controlled-sum gate and validate parameters."""  # noqa: DOC501
+        """Initialize the controlled-sum gate and validate parameters."""  # ruff: ignore[docstring-missing-exception]
         if self.control == self.target:
             msg = f"Control mode {self.control} and target mode {self.target} must be different"
             raise ValueError(msg)
@@ -1271,6 +1356,14 @@ class ControlledSumGate(CompactDiagram):
         else:
             self.label = f"CS{self.target},{self.control}({self.gain:.2f})"
 
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
         super().__post_init__()
 
     def _is_unbiased(self) -> bool:
@@ -1330,6 +1423,8 @@ class ControlledZGate(CompactDiagram):
 
     gain: float | int | complex | Expr = 1.0
     parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     label: str = field(init=False)
     _num_inputs: int = field(default=2, init=False)
     _num_outputs: int = field(default=2, init=False)
@@ -1409,6 +1504,13 @@ class ControlledZGate(CompactDiagram):
         -------
         ControlledZGate
             A new ControlledZGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
         """
         if not self.parametric:
             return self
@@ -1420,13 +1522,17 @@ class ControlledZGate(CompactDiagram):
                 n_key = symbols(key)
             new_mapping[n_key] = value
 
+        if not isinstance(self.gain, Expr):
+            msg = "substitute_parameters: self.gain must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
         new_gain = simplify(self.gain.subs(new_mapping))
 
         if is_numeric(new_gain):
             return ControlledZGate(float(new_gain), parametric=False)
         return ControlledZGate(new_gain, parametric=True)
 
-    def evaluate(self, **kwargs) -> CompactDiagram:  # noqa: ANN003
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
         """Evaluate the CZ gate with given parameter values.
 
         Parameters
@@ -1487,7 +1593,14 @@ class ControlledZGate(CompactDiagram):
         return f"ControlledZGate(gain={self.gain:.2f})"
 
     def __post_init__(self) -> None:
-        """Initialize the controlled-Z gate."""
+        """Initialize the controlled-Z gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
         if self.parametric and not isinstance(self.gain, Expr):
             self.gain = sympify(self.gain)
 
@@ -1498,6 +1611,14 @@ class ControlledZGate(CompactDiagram):
         else:
             self.label = f"CZ({self.gain:.2f})"
 
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
         super().__post_init__()
 
     def _is_unbiased(self) -> bool:
@@ -1558,6 +1679,8 @@ class BeamsplitterGate(CompactDiagram):
 
     theta: float | int | complex | Expr
     parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     label: str = field(init=False)
     _num_inputs: int = field(default=2, init=False)
     _num_outputs: int = field(default=2, init=False)
@@ -1631,6 +1754,13 @@ class BeamsplitterGate(CompactDiagram):
         -------
         BeamsplitterGate
             A new BeamsplitterGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
         """
         if not self.parametric:
             return self
@@ -1642,13 +1772,17 @@ class BeamsplitterGate(CompactDiagram):
                 n_key = symbols(key)
             new_mapping[n_key] = value
 
+        if not isinstance(self.theta, Expr):
+            msg = "substitute_parameters: self.theta must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
         new_theta = simplify(self.theta.subs(new_mapping))
 
         if is_numeric(new_theta):
             return BeamsplitterGate(float(new_theta), parametric=False)
         return BeamsplitterGate(new_theta, parametric=True)
 
-    def evaluate(self, **kwargs) -> CompactDiagram:  # noqa: ANN003
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
         """Evaluate the beamsplitter gate with given parameter values.
 
         Parameters
@@ -1709,7 +1843,14 @@ class BeamsplitterGate(CompactDiagram):
         return f"BeamsplitterGate(theta={self.theta:.2f})"
 
     def __post_init__(self) -> None:
-        """Initialize the beamsplitter gate."""
+        """Initialize the beamsplitter gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
         if self.parametric and not isinstance(self.theta, Expr):
             self.theta = sympify(self.theta)
 
@@ -1722,6 +1863,14 @@ class BeamsplitterGate(CompactDiagram):
         else:
             self.label = f"BS({self.theta:.2f})"
 
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
         super().__post_init__()
 
     def _is_balanced(self) -> bool:
@@ -1732,8 +1881,8 @@ class BeamsplitterGate(CompactDiagram):
         bool
         """
         if self.parametric:
-            return self.theta == pi / 4  # noqa: RUF069
-        return np.isclose(self.theta, np.pi / 4)
+            return bool(self.theta == pi / 4)  # ruff: ignore[float-equality-comparison]
+        return bool(np.isclose(self.theta, np.pi / 4))
 
 
 @dataclass
@@ -1779,6 +1928,8 @@ class CubicPhaseGate(CompactDiagram):
 
     gamma: float | int | Expr
     parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     label: str = field(init=False)
     _num_inputs: int = field(default=1, init=False)
     _num_outputs: int = field(default=1, init=False)
@@ -1812,6 +1963,13 @@ class CubicPhaseGate(CompactDiagram):
         -------
         CubicPhaseGate
             A new CubicPhaseGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
         """
         if not self.parametric:
             return self
@@ -1823,13 +1981,17 @@ class CubicPhaseGate(CompactDiagram):
                 n_key = symbols(key)
             new_mapping[n_key] = value
 
+        if not isinstance(self.gamma, Expr):
+            msg = "substitute_parameters: self.gamma must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
         new_gamma = simplify(self.gamma.subs(new_mapping))
 
         if is_numeric(new_gamma):
             return CubicPhaseGate(float(new_gamma), parametric=False)
         return CubicPhaseGate(new_gamma, parametric=True)
 
-    def evaluate(self, **kwargs) -> CompactDiagram:  # noqa: ANN003
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
         """Evaluate the cubic phase gate with given parameter values.
 
         Parameters
@@ -1888,7 +2050,14 @@ class CubicPhaseGate(CompactDiagram):
         return f"CubicPhaseGate(gamma={self.gamma:.2f})"
 
     def __post_init__(self) -> None:
-        """Initialize the cubic phase gate."""
+        """Initialize the cubic phase gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
         if self.parametric and not isinstance(self.gamma, Expr):
             self.gamma = sympify(self.gamma)
 
@@ -1897,7 +2066,1306 @@ class CubicPhaseGate(CompactDiagram):
         else:
             self.label = f"CPG({self.gamma:.2f})"
 
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
         super().__post_init__()
+
+
+@dataclass
+class ShearXInvariantGate(CompactDiagram):
+    r"""X-invariant shear gate P(kappa) (mqc3 `intrinsic.ShearXInvariant`).
+
+    Represents the shear operator that leaves x-hat invariant and shifts
+    p-hat:
+
+        P^dagger(kappa) (x, p) P(kappa) = [[1, 0], [2*kappa, 1]] (x, p)
+
+    A quadratic-phase q-spider *is* this shear directly -- the same
+    building block already used inside `PhaseRotationGate`/`SqueezingGate`
+    -- so no composition is needed.
+
+    Parameters
+    ----------
+    kappa : float | int | Expr
+        Shear strength parameter.
+    parametric : bool
+        If True, treat kappa as symbolic parameter. Default False.
+    label : str
+        String label for the gate.
+    _num_inputs : int
+        Number of input wires (always 1).
+    _num_outputs : int
+        Number of output wires (always 1).
+    decomposition : Diagram | None
+        Cached decomposition of the gate.
+    spider_type : str
+        Type identifier for the spider.
+
+    Examples:
+    --------
+    >>> P = ShearXInvariantGate(0.3)
+    >>> P.expand()
+
+    References:
+    ----------
+    mqc3 `intrinsic.ShearXInvariant`; a quadratic-phase q-spider implements
+    this shear directly, the same pattern used by `PhaseRotationGate` and
+    `SqueezingGate` for [3] Eq. (58)-(59).
+    """
+
+    kappa: float | int | Expr
+    parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
+    label: str = field(init=False)
+    _num_inputs: int = field(default=1, init=False)
+    _num_outputs: int = field(default=1, init=False)
+    decomposition: Diagram | None = field(default=None, init=False)
+    spider_type: str = field(default="gate", init=False)
+
+    def expand(self) -> QSpider:
+        """Decompose the shear gate into a single q-spider.
+
+        P(kappa) = Q(kappa)
+
+        Returns:
+        -------
+        QSpider
+            q-spider with phase function f(x) = kappa * x^2.
+        """
+        return QSpider(1, 1, ZxPoly({2: self.kappa}))
+
+    def substitute_parameters(self, mapping: dict[Symbol | str, Any]) -> CompactDiagram:
+        """Substitute symbolic parameters in the shear gate.
+
+        Parameters
+        ----------
+        mapping : dict
+            Dictionary mapping symbols to values.
+
+        Returns:
+        -------
+        ShearXInvariantGate
+            A new ShearXInvariantGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
+        """
+        if not self.parametric:
+            return self
+
+        new_mapping = {}
+        for key, value in mapping.items():
+            n_key = key
+            if isinstance(key, str):
+                n_key = symbols(key)
+            new_mapping[n_key] = value
+
+        if not isinstance(self.kappa, Expr):
+            msg = "substitute_parameters: self.kappa must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
+        new_kappa = simplify(self.kappa.subs(new_mapping))
+
+        if is_numeric(new_kappa):
+            return ShearXInvariantGate(float(new_kappa), parametric=False)
+        return ShearXInvariantGate(new_kappa, parametric=True)
+
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
+        """Evaluate the shear gate with given parameter values.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Parameter values as keyword arguments.
+
+        Returns:
+        -------
+        ShearXInvariantGate
+            A new ShearXInvariantGate with evaluated parameters.
+        """
+        if not self.parametric:
+            return self
+
+        mapping = {}
+        for name, value in kwargs.items():
+            mapping[symbols(name)] = value
+
+        return self.substitute_parameters(mapping)
+
+    def get_parameters(self) -> set[Symbol]:
+        """Get all symbolic parameters in the shear gate.
+
+        Returns:
+        -------
+        set[Symbol]
+            Set of symbols used in the gate.
+        """
+        if not self.parametric or not isinstance(self.kappa, Expr):
+            return set()
+        return set(self.kappa.free_symbols)
+
+    def conjugate(self) -> CompactDiagram:
+        """Conjugate of the shear gate is the shear with negated kappa.
+
+        Returns:
+        -------
+        ShearXInvariantGate
+            P(-kappa)
+        """
+        if self.parametric:
+            return ShearXInvariantGate(-self.kappa, parametric=True)
+        return ShearXInvariantGate(kappa=-self.kappa)
+
+    def __repr__(self) -> str:
+        """Return string representation of the shear gate.
+
+        Returns:
+        -------
+        str
+            String showing the shear strength kappa.
+        """
+        if self.parametric:
+            return f"ShearXInvariantGate(kappa={self.kappa}, parametric=True)"
+        return f"ShearXInvariantGate(kappa={self.kappa:.2f})"
+
+    def __post_init__(self) -> None:
+        """Initialize the shear gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
+        if self.parametric and not isinstance(self.kappa, Expr):
+            self.kappa = sympify(self.kappa)
+
+        if self.parametric:
+            self.label = f"P({self.kappa})"
+        else:
+            self.label = f"P({self.kappa:.2f})"
+
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
+        super().__post_init__()
+
+
+@dataclass
+class ShearPInvariantGate(CompactDiagram):
+    r"""P-invariant shear gate Q(eta) (mqc3 `intrinsic.ShearPInvariant`).
+
+    Represents the shear operator that leaves p-hat invariant and shifts
+    x-hat:
+
+        Q^dagger(eta) (x, p) Q(eta) = [[1, 2*eta], [0, 1]] (x, p)
+
+    A quadratic-phase p-spider *is* this shear directly, symmetric to
+    `ShearXInvariantGate`.
+
+    Parameters
+    ----------
+    eta : float | int | Expr
+        Shear strength parameter.
+    parametric : bool
+        If True, treat eta as symbolic parameter. Default False.
+    label : str
+        String label for the gate.
+    _num_inputs : int
+        Number of input wires (always 1).
+    _num_outputs : int
+        Number of output wires (always 1).
+    decomposition : Diagram | None
+        Cached decomposition of the gate.
+    spider_type : str
+        Type identifier for the spider.
+
+    Examples:
+    --------
+    >>> Q = ShearPInvariantGate(0.3)
+    >>> Q.expand()
+
+    References:
+    ----------
+    mqc3 `intrinsic.ShearPInvariant`; a quadratic-phase p-spider implements
+    this shear directly, the same pattern used by `PhaseRotationGate` and
+    `SqueezingGate` for [3] Eq. (58)-(59).
+    """
+
+    eta: float | int | Expr
+    parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
+    label: str = field(init=False)
+    _num_inputs: int = field(default=1, init=False)
+    _num_outputs: int = field(default=1, init=False)
+    decomposition: Diagram | None = field(default=None, init=False)
+    spider_type: str = field(default="gate", init=False)
+
+    def expand(self) -> PSpider:
+        """Decompose the shear gate into a single p-spider.
+
+        Q(eta) = P(eta)
+
+        Returns:
+        -------
+        PSpider
+            p-spider with phase function f(x) = eta * x^2.
+        """
+        return PSpider(1, 1, ZxPoly({2: self.eta}))
+
+    def substitute_parameters(self, mapping: dict[Symbol | str, Any]) -> CompactDiagram:
+        """Substitute symbolic parameters in the shear gate.
+
+        Parameters
+        ----------
+        mapping : dict
+            Dictionary mapping symbols to values.
+
+        Returns:
+        -------
+        ShearPInvariantGate
+            A new ShearPInvariantGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
+        """
+        if not self.parametric:
+            return self
+
+        new_mapping = {}
+        for key, value in mapping.items():
+            n_key = key
+            if isinstance(key, str):
+                n_key = symbols(key)
+            new_mapping[n_key] = value
+
+        if not isinstance(self.eta, Expr):
+            msg = "substitute_parameters: self.eta must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
+        new_eta = simplify(self.eta.subs(new_mapping))
+
+        if is_numeric(new_eta):
+            return ShearPInvariantGate(float(new_eta), parametric=False)
+        return ShearPInvariantGate(new_eta, parametric=True)
+
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
+        """Evaluate the shear gate with given parameter values.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Parameter values as keyword arguments.
+
+        Returns:
+        -------
+        ShearPInvariantGate
+            A new ShearPInvariantGate with evaluated parameters.
+        """
+        if not self.parametric:
+            return self
+
+        mapping = {}
+        for name, value in kwargs.items():
+            mapping[symbols(name)] = value
+
+        return self.substitute_parameters(mapping)
+
+    def get_parameters(self) -> set[Symbol]:
+        """Get all symbolic parameters in the shear gate.
+
+        Returns:
+        -------
+        set[Symbol]
+            Set of symbols used in the gate.
+        """
+        if not self.parametric or not isinstance(self.eta, Expr):
+            return set()
+        return set(self.eta.free_symbols)
+
+    def conjugate(self) -> CompactDiagram:
+        """Conjugate of the shear gate is the shear with negated eta.
+
+        Returns:
+        -------
+        ShearPInvariantGate
+            Q(-eta)
+        """
+        if self.parametric:
+            return ShearPInvariantGate(-self.eta, parametric=True)
+        return ShearPInvariantGate(eta=-self.eta)
+
+    def __repr__(self) -> str:
+        """Return string representation of the shear gate.
+
+        Returns:
+        -------
+        str
+            String showing the shear strength eta.
+        """
+        if self.parametric:
+            return f"ShearPInvariantGate(eta={self.eta}, parametric=True)"
+        return f"ShearPInvariantGate(eta={self.eta:.2f})"
+
+    def __post_init__(self) -> None:
+        """Initialize the shear gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
+        if self.parametric and not isinstance(self.eta, Expr):
+            self.eta = sympify(self.eta)
+
+        if self.parametric:
+            self.label = f"Q({self.eta})"
+        else:
+            self.label = f"Q({self.eta:.2f})"
+
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
+        super().__post_init__()
+
+
+@dataclass
+class ArbitraryGate(CompactDiagram):
+    r"""Arbitrary single-mode Gaussian gate R(alpha) S(lam) R(beta) (mqc3 `intrinsic.Arbitrary`).
+
+    mqc3 defines this as the operator product `R(alpha) . S(lam) . R(beta)`
+    (rightmost applied first, i.e. the mode meets `R(beta)` first, then
+    `S(lam)`, then `R(alpha)` last), where:
+
+        R^dagger(phi) (x, p) R(phi) = [[cos(phi), -sin(phi)], [sin(phi), cos(phi)]] (x, p)
+        S^dagger(r) (x, p) S(r) = [[e^r, 0], [0, e^-r]] (x, p)
+
+    Two conversions are needed to express this with cvzx's existing gates:
+
+    - cvzx's `PhaseRotationGate(theta)` implements mqc3's `R(-theta)`, not
+      `R(theta)` (verified directly from its own three-spider
+      decomposition) -- so `R(phi)` here becomes `PhaseRotationGate(-phi)`.
+    - cvzx's `SqueezingGate(tau)` implements `diag(tau, 1/tau)`, exactly
+      `S(lam)` under `tau = e^lam` (no sign correction needed there).
+
+    Composed in signal-flow order (first-applied-first, matching
+    `CompositionDiagram`'s own convention):
+
+        Arbitrary(alpha, beta, lam)
+            = PhaseRotationGate(-beta) . SqueezingGate(e^lam) . PhaseRotationGate(-alpha)
+
+    Verified numerically against the raw mqc3 matrix product for random
+    (alpha, beta, lam).
+
+    Parameters
+    ----------
+    alpha : float | int | Expr
+        Final rotation angle.
+    beta : float | int | Expr
+        Initial rotation angle.
+    lam : float | int | Expr
+        Squeezing strength (natural-log convention, matching mqc3's `S(lam)`).
+    parametric : bool
+        If True, treat alpha, beta, lam as symbolic parameters. Default False.
+    label : str
+        String label for the gate.
+    _num_inputs : int
+        Number of input wires (always 1).
+    _num_outputs : int
+        Number of output wires (always 1).
+    decomposition : Diagram | None
+        Cached decomposition of the gate.
+    spider_type : str
+        Type identifier for the spider.
+
+    References:
+    ----------
+    mqc3 `intrinsic.Arbitrary`; decomposed here via cvzx's existing
+    `PhaseRotationGate` and `SqueezingGate` ([3] Eq. (58)-(59)) with the
+    sign correction noted above.
+    """
+
+    alpha: float | int | Expr
+    beta: float | int | Expr
+    lam: float | int | Expr
+    parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
+    label: str = field(init=False)
+    _num_inputs: int = field(default=1, init=False)
+    _num_outputs: int = field(default=1, init=False)
+    decomposition: Diagram | None = field(default=None, init=False)
+    spider_type: str = field(default="gate", init=False)
+
+    def expand(self) -> CompositionDiagram:
+        """Decompose into rotation-squeeze-rotation.
+
+        Returns:
+        -------
+        CompositionDiagram
+            Composition of two phase rotations around a squeezing gate.
+        """
+        tau = self._get_tau()
+
+        rot_beta = PhaseRotationGate(-self.beta, parametric=self.parametric)
+        squeeze = SqueezingGate(tau=tau, parametric=self.parametric)
+        rot_alpha = PhaseRotationGate(-self.alpha, parametric=self.parametric)
+
+        return CompositionDiagram([rot_beta, squeeze, rot_alpha])
+
+    def substitute_parameters(self, mapping: dict[Symbol | str, Any]) -> CompactDiagram:
+        """Substitute symbolic parameters in the arbitrary gate.
+
+        Parameters
+        ----------
+        mapping : dict
+            Dictionary mapping symbols to values.
+
+        Returns:
+        -------
+        ArbitraryGate
+            A new ArbitraryGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
+        """
+        if not self.parametric:
+            return self
+
+        new_mapping = {}
+        for key, value in mapping.items():
+            n_key = key
+            if isinstance(key, str):
+                n_key = symbols(key)
+            new_mapping[n_key] = value
+
+        if not isinstance(self.alpha, Expr):
+            msg = "substitute_parameters: self.alpha must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
+        new_alpha = simplify(self.alpha.subs(new_mapping))
+        if not isinstance(self.beta, Expr):
+            msg = "substitute_parameters: self.beta must be a sympy Expr in parametric mode."
+            raise TypeError(msg)
+        new_beta = simplify(self.beta.subs(new_mapping))
+        if not isinstance(self.lam, Expr):
+            msg = "substitute_parameters: self.lam must be a sympy Expr in parametric mode."
+            raise TypeError(msg)
+        new_lam = simplify(self.lam.subs(new_mapping))
+
+        if is_numeric(new_alpha) and is_numeric(new_beta) and is_numeric(new_lam):
+            return ArbitraryGate(float(new_alpha), float(new_beta), float(new_lam), parametric=False)
+        return ArbitraryGate(new_alpha, new_beta, new_lam, parametric=True)
+
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
+        """Evaluate the arbitrary gate with given parameter values.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Parameter values as keyword arguments.
+
+        Returns:
+        -------
+        ArbitraryGate
+            A new ArbitraryGate with evaluated parameters.
+        """
+        if not self.parametric:
+            return self
+
+        mapping = {}
+        for name, value in kwargs.items():
+            mapping[symbols(name)] = value
+
+        return self.substitute_parameters(mapping)
+
+    def get_parameters(self) -> set[Symbol]:
+        """Get all symbolic parameters in the arbitrary gate.
+
+        Returns:
+        -------
+        set[Symbol]
+            Set of symbols used in the gate.
+        """
+        params = set()
+        if self.parametric:
+            for value in (self.alpha, self.beta, self.lam):
+                if isinstance(value, Expr):
+                    params |= set(value.free_symbols)
+        return params
+
+    def conjugate(self) -> CompactDiagram:
+        """Conjugate of Arbitrary(alpha, beta, lam) is Arbitrary(-beta, -alpha, -lam).
+
+        `(R(alpha)S(lam)R(beta))^dagger = R(-beta)S(-lam)R(-alpha)`, which
+        is again of the form `R(alpha')S(lam')R(beta')` with
+        `alpha' = -beta`, `lam' = -lam`, `beta' = -alpha`.
+
+        Returns:
+        -------
+        ArbitraryGate
+            Arbitrary(-beta, -alpha, -lam)
+        """
+        if self.parametric:
+            return ArbitraryGate(-self.beta, -self.alpha, -self.lam, parametric=True)
+        return ArbitraryGate(alpha=-self.beta, beta=-self.alpha, lam=-self.lam)
+
+    def __repr__(self) -> str:
+        """Return string representation of the arbitrary gate.
+
+        Returns:
+        -------
+        str
+            String showing alpha, beta, lam.
+        """
+        if self.parametric:
+            return f"ArbitraryGate(alpha={self.alpha}, beta={self.beta}, lam={self.lam}, parametric=True)"
+        return f"ArbitraryGate(alpha={self.alpha:.2f}, beta={self.beta:.2f}, lam={self.lam:.2f})"
+
+    def __post_init__(self) -> None:
+        """Initialize the arbitrary gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
+        if self.parametric:
+            if not isinstance(self.alpha, Expr):
+                self.alpha = sympify(self.alpha)
+            if not isinstance(self.beta, Expr):
+                self.beta = sympify(self.beta)
+            if not isinstance(self.lam, Expr):
+                self.lam = sympify(self.lam)
+
+        if self.parametric:
+            self.label = f"Arb({self.alpha},{self.beta},{self.lam})"
+        else:
+            self.label = f"Arb({self.alpha:.2f},{self.beta:.2f},{self.lam:.2f})"
+
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
+        super().__post_init__()
+
+    def _get_tau(self) -> float | int | complex | Expr:
+        """Get tau = e^lam for the squeezing gate.
+
+        Returns:
+        -------
+        float | int | complex | Expr
+        """
+        if self.parametric:
+            return exp(self.lam)
+        return float(np.exp(self.lam))
+
+
+@dataclass
+class Squeezing45Gate(CompactDiagram):
+    r"""45-degree squeezing gate (mqc3 `intrinsic.Squeezing45`).
+
+    Defined by mqc3 as `R(-pi/4) S_V(cot theta) R(pi/4)`, where `S_V(c)`
+    has matrix `diag(1/c, c)`. This is exactly `ArbitraryGate` with
+    `alpha = -pi/4`, `beta = pi/4`, and `lam` chosen so that
+    `S(lam) = S_V(cot theta)`: since `e^lam = 1/cot(theta) = tan(theta)`,
+    cvzx's `SqueezingGate(tau)` (which implements `diag(tau, 1/tau)`) can
+    be used directly with `tau = tan(theta)`, no logarithm required.
+
+    Composed in signal-flow order:
+
+        Squeezing45(theta)
+            = PhaseRotationGate(-pi/4) . SqueezingGate(tan theta) . PhaseRotationGate(pi/4)
+
+    Parameters
+    ----------
+    theta : float | int | Expr
+        Squeezing angle parameter (mqc3 convention).
+    parametric : bool
+        If True, treat theta as symbolic parameter. Default False.
+    label : str
+        String label for the gate.
+    _num_inputs : int
+        Number of input wires (always 1).
+    _num_outputs : int
+        Number of output wires (always 1).
+    decomposition : Diagram | None
+        Cached decomposition of the gate.
+    spider_type : str
+        Type identifier for the spider.
+
+    References:
+    ----------
+    mqc3 `intrinsic.Squeezing45`; a special case of `ArbitraryGate`.
+    """
+
+    theta: float | int | Expr
+    parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
+    label: str = field(init=False)
+    _num_inputs: int = field(default=1, init=False)
+    _num_outputs: int = field(default=1, init=False)
+    decomposition: Diagram | None = field(default=None, init=False)
+    spider_type: str = field(default="gate", init=False)
+
+    def expand(self) -> CompositionDiagram:
+        """Decompose into rotation-squeeze-rotation at fixed +/- pi/4 angles.
+
+        Returns:
+        -------
+        CompositionDiagram
+            Composition of two fixed phase rotations around a squeezing gate.
+        """
+        tau = self._get_tau()
+
+        rot_in = PhaseRotationGate(-np.pi / 4)
+        squeeze = SqueezingGate(tau=tau, parametric=self.parametric)
+        rot_out = PhaseRotationGate(np.pi / 4)
+
+        return CompositionDiagram([rot_in, squeeze, rot_out])
+
+    def substitute_parameters(self, mapping: dict[Symbol | str, Any]) -> CompactDiagram:
+        """Substitute symbolic parameters in the 45-degree squeezing gate.
+
+        Parameters
+        ----------
+        mapping : dict
+            Dictionary mapping symbols to values.
+
+        Returns:
+        -------
+        Squeezing45Gate
+            A new Squeezing45Gate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
+        """
+        if not self.parametric:
+            return self
+
+        new_mapping = {}
+        for key, value in mapping.items():
+            n_key = key
+            if isinstance(key, str):
+                n_key = symbols(key)
+            new_mapping[n_key] = value
+
+        if not isinstance(self.theta, Expr):
+            msg = "substitute_parameters: self.theta must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
+        new_theta = simplify(self.theta.subs(new_mapping))
+
+        if is_numeric(new_theta):
+            return Squeezing45Gate(float(new_theta), parametric=False)
+        return Squeezing45Gate(new_theta, parametric=True)
+
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
+        """Evaluate the 45-degree squeezing gate with given parameter values.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Parameter values as keyword arguments.
+
+        Returns:
+        -------
+        Squeezing45Gate
+            A new Squeezing45Gate with evaluated parameters.
+        """
+        if not self.parametric:
+            return self
+
+        mapping = {}
+        for name, value in kwargs.items():
+            mapping[symbols(name)] = value
+
+        return self.substitute_parameters(mapping)
+
+    def get_parameters(self) -> set[Symbol]:
+        """Get all symbolic parameters in the 45-degree squeezing gate.
+
+        Returns:
+        -------
+        set[Symbol]
+            Set of symbols used in the gate.
+        """
+        if not self.parametric or not isinstance(self.theta, Expr):
+            return set()
+        return set(self.theta.free_symbols)
+
+    def conjugate(self) -> CompactDiagram:
+        """Conjugate of Squeezing45(theta) is Squeezing45(pi/2 - theta).
+
+        Since `S_V(c)^dagger = S_V(1/c)` and `1/cot(theta) = cot(pi/2-theta)`.
+
+        Returns:
+        -------
+        Squeezing45Gate
+            Squeezing45(pi/2 - theta)
+        """
+        if self.parametric:
+            return Squeezing45Gate(pi / 2 - self.theta, parametric=True)
+        return Squeezing45Gate(theta=np.pi / 2 - self.theta)
+
+    def __repr__(self) -> str:
+        """Return string representation of the 45-degree squeezing gate.
+
+        Returns:
+        -------
+        str
+            String showing theta.
+        """
+        if self.parametric:
+            return f"Squeezing45Gate(theta={self.theta}, parametric=True)"
+        return f"Squeezing45Gate(theta={self.theta:.2f})"
+
+    def __post_init__(self) -> None:
+        """Initialize the 45-degree squeezing gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
+        if self.parametric and not isinstance(self.theta, Expr):
+            self.theta = sympify(self.theta)
+
+        if self.parametric:
+            self.label = f"Sq45({self.theta})"
+        else:
+            self.label = f"Sq45({self.theta:.2f})"
+
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
+        super().__post_init__()
+
+    def _get_tau(self) -> float | int | complex | Expr:
+        """Get tau = tan(theta) for the squeezing gate.
+
+        Returns:
+        -------
+        float | int | complex | Expr
+        """
+        if self.parametric:
+            return tan(self.theta)
+        return float(np.tan(self.theta))
+
+
+@dataclass
+class TwoModeShearGate(CompactDiagram):
+    r"""Two-mode shear gate P2(a, b) (mqc3 `intrinsic.TwoModeShear`).
+
+        P2^dagger(a, b) (x1, x2, p1, p2) P2(a, b)
+            = [[1, 0, 0, 0], [0, 1, 0, 0], [2a, b, 1, 0], [b, 2a, 0, 1]] (x1, x2, p1, p2)
+
+    The diagonal `2a` terms are exactly `ShearXInvariantGate(a)` applied to
+    each mode; the cross `b` term is exactly cvzx's `ControlledZGate`
+    generator `exp(-ig q1 q2)` evaluated at `g = -b` (cvzx's
+    `ControlledZGate(g)` produces `p1 -= g*x2, p2 -= g*x1`, the negative of
+    mqc3's `ControlledZ(g)` convention -- verified directly from its own
+    decomposition's generator). Both pieces are shears of the same abelian
+    family (they only ever add a linear function of the x's to the p's,
+    leaving the x's invariant), so they commute and no new primitive is
+    required.
+
+    Parameters
+    ----------
+    a : float | int | Expr
+        Diagonal (single-mode) shear strength, applied to both modes.
+    b : float | int | Expr
+        Cross-mode coupling strength.
+    parametric : bool
+        If True, treat a and b as symbolic parameters. Default False.
+    label : str
+        String label for the gate.
+    _num_inputs : int
+        Number of input wires (always 2).
+    _num_outputs : int
+        Number of output wires (always 2).
+    decomposition : Diagram | None
+        Cached decomposition of the gate.
+    spider_type : str
+        Type identifier for the spider.
+
+    References:
+    ----------
+    mqc3 `intrinsic.TwoModeShear`; decomposed here as a diagonal shear on
+    each mode (see `ShearXInvariantGate`) composed with `ControlledZGate`.
+    """
+
+    a: float | int | Expr
+    b: float | int | Expr
+    parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
+    label: str = field(init=False)
+    _num_inputs: int = field(default=2, init=False)
+    _num_outputs: int = field(default=2, init=False)
+    decomposition: Diagram | None = field(default=None, init=False)
+    spider_type: str = field(default="gate", init=False)
+
+    def expand(self) -> CompositionDiagram:
+        """Decompose into per-mode shears and a controlled-Z coupling.
+
+        P2(a, b) = CZ(g=-b) after (P(a) tensor P(a))
+
+        Returns:
+        -------
+        CompositionDiagram
+            Tensor of two shears, followed by a controlled-Z gate.
+        """
+        shear1 = ShearXInvariantGate(self.a, parametric=self.parametric)
+        shear2 = ShearXInvariantGate(self.a, parametric=self.parametric)
+        cz = ControlledZGate(gain=-self.b, parametric=self.parametric)
+
+        return CompositionDiagram([TensorDiagram([shear1, shear2]), cz])
+
+    def substitute_parameters(self, mapping: dict[Symbol | str, Any]) -> CompactDiagram:
+        """Substitute symbolic parameters in the two-mode shear gate.
+
+        Parameters
+        ----------
+        mapping : dict
+            Dictionary mapping symbols to values.
+
+        Returns:
+        -------
+        TwoModeShearGate
+            A new TwoModeShearGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
+        """
+        if not self.parametric:
+            return self
+
+        new_mapping = {}
+        for key, value in mapping.items():
+            n_key = key
+            if isinstance(key, str):
+                n_key = symbols(key)
+            new_mapping[n_key] = value
+
+        if not isinstance(self.a, Expr):
+            msg = "substitute_parameters: self.a must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
+        new_a = simplify(self.a.subs(new_mapping))
+        if not isinstance(self.b, Expr):
+            msg = "substitute_parameters: self.b must be a sympy Expr in parametric mode."
+            raise TypeError(msg)
+        new_b = simplify(self.b.subs(new_mapping))
+
+        if is_numeric(new_a) and is_numeric(new_b):
+            return TwoModeShearGate(float(new_a), float(new_b), parametric=False)
+        return TwoModeShearGate(new_a, new_b, parametric=True)
+
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
+        """Evaluate the two-mode shear gate with given parameter values.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Parameter values as keyword arguments.
+
+        Returns:
+        -------
+        TwoModeShearGate
+            A new TwoModeShearGate with evaluated parameters.
+        """
+        if not self.parametric:
+            return self
+
+        mapping = {}
+        for name, value in kwargs.items():
+            mapping[symbols(name)] = value
+
+        return self.substitute_parameters(mapping)
+
+    def get_parameters(self) -> set[Symbol]:
+        """Get all symbolic parameters in the two-mode shear gate.
+
+        Returns:
+        -------
+        set[Symbol]
+            Set of symbols used in the gate.
+        """
+        params = set()
+        if self.parametric:
+            if isinstance(self.a, Expr):
+                params |= set(self.a.free_symbols)
+            if isinstance(self.b, Expr):
+                params |= set(self.b.free_symbols)
+        return params
+
+    def conjugate(self) -> CompactDiagram:
+        """Conjugate of the two-mode shear gate negates both parameters.
+
+        Both `a` and `b` parametrize the same real quadratic-form generator
+        (`H = a*x1^2 + a*x2^2 + b*x1*x2`), so
+        `exp(-iH)^dagger = exp(+iH) = exp(-i(-H))` is the same gate with
+        both coefficients negated -- computed directly rather than
+        delegating to `ControlledZGate.conjugate()`, since the two-mode
+        shear's adjoint is defined independently of whatever convention
+        that method follows.
+
+        Returns:
+        -------
+        TwoModeShearGate
+            P2(-a, -b)
+        """
+        if self.parametric:
+            return TwoModeShearGate(-self.a, -self.b, parametric=True)
+        return TwoModeShearGate(a=-self.a, b=-self.b)
+
+    def __repr__(self) -> str:
+        """Return string representation of the two-mode shear gate.
+
+        Returns:
+        -------
+        str
+            String showing a and b.
+        """
+        if self.parametric:
+            return f"TwoModeShearGate(a={self.a}, b={self.b}, parametric=True)"
+        return f"TwoModeShearGate(a={self.a:.2f}, b={self.b:.2f})"
+
+    def __post_init__(self) -> None:
+        """Initialize the two-mode shear gate.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
+        if self.parametric:
+            if not isinstance(self.a, Expr):
+                self.a = sympify(self.a)
+            if not isinstance(self.b, Expr):
+                self.b = sympify(self.b)
+
+        if self.parametric:
+            self.label = f"P2({self.a},{self.b})"
+        else:
+            self.label = f"P2({self.a:.2f},{self.b:.2f})"
+
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
+        super().__post_init__()
+
+
+@dataclass
+class MeasurementGate(CompactDiagram):
+    r"""Homodyne measurement effect (mqc3 `intrinsic.Measurement`).
+
+    Measures the quadrature `x-hat sin(theta) + p-hat cos(theta)`. This is
+    not a unitary gate but an *effect* -- a diagram leaf with an output
+    arity of zero, the dual of how e.g. `PSpider(0, 1, ...)` is already
+    used elsewhere in this codebase (and in
+    `tests/test_visualize_gates.py`'s `feedforward_test`) to represent
+    ancilla/measurement leaves.
+
+    Measuring `x-hat` directly is a plain q-spider effect, `QSpider(1, 0, 0)`.
+    To measure the rotated quadrature, rotate the mode into alignment
+    first: solving `R(phi)`'s Heisenberg matrix (top row) for
+    `cos(phi)*x - sin(phi)*p = sin(theta)*x + cos(theta)*p` gives
+    `phi = theta - pi/2`. Composed in signal-flow order (rotate first, then
+    measure), and converting to cvzx's rotation-gate convention
+    (`PhaseRotationGate(psi)` = mqc3's `R(-psi)`):
+
+        Measurement(theta) = PhaseRotationGate(pi/2 - theta) . QSpider(1, 0, 0)
+
+    Checked against the theta=0 case (measuring p-hat directly):
+    `phi = -pi/2` correctly rotates x-hat onto p-hat.
+
+    Note: `conjugate()` returns a bare `Diagram` (a 0-in-1-out state), not
+    another `MeasurementGate` -- an effect's adjoint is a state, a
+    different shape, so it cannot be wrapped back into this same compact
+    gate class the way every other gate in this module does.
+
+    Parameters
+    ----------
+    theta : float | int | Expr
+        Measured quadrature angle.
+    parametric : bool
+        If True, treat theta as symbolic parameter. Default False.
+    label : str
+        String label for the gate.
+    _num_inputs : int
+        Number of input wires (always 1).
+    _num_outputs : int
+        Number of output wires (always 0 -- this is an effect, not a gate).
+    decomposition : Diagram | None
+        Cached decomposition of the gate.
+    spider_type : str
+        Type identifier for the spider.
+
+    References:
+    ----------
+    mqc3 `intrinsic.Measurement`.
+    """
+
+    theta: float | int | Expr
+    parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
+    label: str = field(init=False)
+    _num_inputs: int = field(default=1, init=False)
+    _num_outputs: int = field(default=0, init=False)
+    decomposition: Diagram | None = field(default=None, init=False)
+    spider_type: str = field(default="effect", init=False)
+
+    def expand(self) -> CompositionDiagram:
+        """Decompose into a rotation followed by an x-basis effect.
+
+        Returns:
+        -------
+        CompositionDiagram
+            Rotation into alignment, followed by a q-spider effect.
+        """
+        rot = self._rotation_diagram(self._get_phi())
+        effect = QSpider(1, 0, ZxPoly({}))
+
+        return CompositionDiagram([rot, effect])
+
+    def substitute_parameters(self, mapping: dict[Symbol | str, Any]) -> CompactDiagram:
+        """Substitute symbolic parameters in the measurement effect.
+
+        Parameters
+        ----------
+        mapping : dict
+            Dictionary mapping symbols to values.
+
+        Returns:
+        -------
+        MeasurementGate
+            A new MeasurementGate with substituted parameters.
+
+        Raises:
+        ------
+        TypeError:
+            If this gate is parametric but its parameter is not a sympy
+            Expr (should not occur: `__post_init__` always converts it).
+
+        """
+        if not self.parametric:
+            return self
+
+        new_mapping = {}
+        for key, value in mapping.items():
+            n_key = key
+            if isinstance(key, str):
+                n_key = symbols(key)
+            new_mapping[n_key] = value
+
+        if not isinstance(self.theta, Expr):
+            msg = "substitute_parameters: self.theta must be a sympy Expr in parametric mode."
+
+            raise TypeError(msg)
+        new_theta = simplify(self.theta.subs(new_mapping))
+
+        if is_numeric(new_theta):
+            return MeasurementGate(float(new_theta), parametric=False)
+        return MeasurementGate(new_theta, parametric=True)
+
+    def evaluate(self, **kwargs) -> CompactDiagram:  # ruff: ignore[missing-type-kwargs]
+        """Evaluate the measurement effect with given parameter values.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Parameter values as keyword arguments.
+
+        Returns:
+        -------
+        MeasurementGate
+            A new MeasurementGate with evaluated parameters.
+        """
+        if not self.parametric:
+            return self
+
+        mapping = {}
+        for name, value in kwargs.items():
+            mapping[symbols(name)] = value
+
+        return self.substitute_parameters(mapping)
+
+    def get_parameters(self) -> set[Symbol]:
+        """Get all symbolic parameters in the measurement effect.
+
+        Returns:
+        -------
+        set[Symbol]
+            Set of symbols used in the gate.
+        """
+        if not self.parametric or not isinstance(self.theta, Expr):
+            return set()
+        return set(self.theta.free_symbols)
+
+    def conjugate(self) -> Diagram:
+        """Conjugate of the measurement effect.
+
+        Built directly rather than delegating to `self.expand().conjugate()`:
+        `QSpider.conjugate()` does not currently flip the input/output
+        arity for non-square (state/effect) leaves, so composing the
+        reversed, per-piece-conjugated pieces (as `CompositionDiagram`'s
+        own `conjugate()` does generically) fails arity validation. The
+        true adjoint of a 1-in-0-out effect is a 0-in-1-out state, so it
+        is constructed here explicitly: a zero-phase state followed by the
+        inverse rotation.
+
+        Returns:
+        -------
+        Diagram
+            A 0-in-1-out state diagram, the adjoint of this effect.
+        """
+        phi = self._get_phi()
+        state = QSpider(0, 1, ZxPoly({}))
+        rot_inv = self._rotation_diagram(-phi)
+        return CompositionDiagram([state, rot_inv])
+
+    def __repr__(self) -> str:
+        """Return string representation of the measurement effect.
+
+        Returns:
+        -------
+        str
+            String showing theta.
+        """
+        if self.parametric:
+            return f"MeasurementGate(theta={self.theta}, parametric=True)"
+        return f"MeasurementGate(theta={self.theta:.2f})"
+
+    def __post_init__(self) -> None:
+        """Initialize the measurement effect.
+
+        Raises:
+        ------
+        ValueError:
+            If `feedforward` is set and `measurement_ids` is not a
+            non-empty set.
+        """
+        if self.parametric and not isinstance(self.theta, Expr):
+            self.theta = sympify(self.theta)
+
+        if self.parametric:
+            self.label = f"M({self.theta})"
+        else:
+            self.label = f"M({self.theta:.2f})"
+
+        # Check feedforward
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
+        super().__post_init__()
+
+    def _get_phi(self) -> float | Expr:
+        """Get the cvzx rotation angle pi/2 - theta.
+
+        Returns:
+        -------
+        float | Expr
+        """
+        if self.parametric:
+            return pi / 2 - self.theta
+        return np.pi / 2 - self.theta
+
+    def _rotation_diagram(self, phi: float | Expr) -> Diagram:
+        """Build the rotation diagram for angle `phi`.
+
+        Routes around `PhaseRotationGate`'s restriction on odd
+        multiples of pi/2: it refuses angles that are an odd multiple of
+        pi/2 -- exactly the angles this gate needs for a plain x or p
+        measurement (`theta` an integer multiple of pi). Folding `phi`
+        into `(-pi, pi]` and substituting the equivalent `Fourier`/
+        `FourierInv` proper diagram at the two problem angles sidesteps
+        this without touching `PhaseRotationGate` itself. Derived (and
+        numerically checked) from `Fourier`'s own docstring definition:
+        `Fourier` implements the standard rotation matrix R(pi/2)
+        (x' = -p, p' = x), which is cvzx's `PhaseRotationGate(-pi/2)`
+        under the sign convention noted on `ArbitraryGate`; `FourierInv`
+        is its adjoint, R(-pi/2), i.e. `PhaseRotationGate(pi/2)`.
+        Only applies in numeric mode -- parametric angles skip
+        `PhaseRotationGate`'s own validation the same way already.
+
+        Returns:
+        -------
+        Diagram
+            `PhaseRotationGate`, `Fourier`, or `FourierInv`, as appropriate.
+        """
+        if self.parametric:
+            return PhaseRotationGate(phi, parametric=True)
+
+        folded = ((float(phi) + np.pi) % (2 * np.pi)) - np.pi
+        if np.isclose(folded, np.pi / 2):
+            return FourierInv()
+        if np.isclose(folded, -np.pi / 2):
+            return Fourier()
+        return PhaseRotationGate(folded)
 
 
 # =============================================================================
@@ -1961,7 +3429,7 @@ def expand_all(diagram: Diagram) -> Diagram:
     Diagram
         The expanded diagram with all CompactDiagram expanded.
     """
-    if isinstance(diagram, (BeamsplitterGate, ControlledSumGate, ControlledZGate)):
+    if isinstance(diagram, (BeamsplitterGate, ControlledSumGate, ControlledZGate, TwoModeShearGate)):
         return diagram.expand()
 
     if type(diagram) is CompactDiagram:

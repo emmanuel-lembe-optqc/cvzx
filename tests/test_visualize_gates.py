@@ -8,6 +8,7 @@ Run this script directly to generate test images.
 
 import random
 from pathlib import Path
+from typing import Protocol, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -45,6 +46,7 @@ from cvzx.gates import (
     create_compact_diagram,
     expand_all,
 )
+from cvzx.nx_graph import to_diagram, to_graph
 from cvzx.visualize_base_gates import DiagramVisualizer, VisualizerConfig, visualize
 
 OUTPUT_DIR = Path("test_images_gates")
@@ -66,7 +68,7 @@ def save_and_close(diagram: Diagram, filename: str, title: str = ""):
     print(f"Saved: {filepath}")
 
 
-def compact_gates_test():  # noqa: PLR0914, PLR0915
+def compact_gates_test():  # ruff: ignore[too-many-locals, too-many-statements]
     """Test visualization of all gates in compact form."""
     print("Testing compact gate visualization...")
 
@@ -132,18 +134,18 @@ def compact_gates_test():  # noqa: PLR0914, PLR0915
     print("=" * 60)
 
     # Create some compact gates (numeric and parametric)
-    D = DisplacementGate(alpha=1.0 + 0.5j)  # noqa: N806
-    D_sym = DisplacementGate(alpha=alpha_sym, parametric=True)  # noqa: N806
-    R = PhaseRotationGate(theta=np.pi / 4)  # noqa: N806
-    R_sym = PhaseRotationGate(theta=theta, parametric=True)  # noqa: N806
-    Sq = SqueezingGate(tau=0.5)  # noqa: N806
-    Sq_sym = SqueezingGate(tau=a, parametric=True)  # noqa: N806
-    BS = BeamsplitterGate(theta=np.pi / 4)  # noqa: N806
-    BS_sym = BeamsplitterGate(theta=phi, parametric=True)  # noqa: N806
-    CS = ControlledSumGate(gain=2.0, control=2, target=1)  # noqa: N806
-    CS_sym = ControlledSumGate(gain=c, control=2, target=1, parametric=True)  # noqa: N806
-    CZ = ControlledZGate(gain=1.0)  # noqa: N806
-    CZ_sym = ControlledZGate(gain=e, parametric=True)  # noqa: N806
+    D = DisplacementGate(alpha=1.0 + 0.5j)  # ruff: ignore[non-lowercase-variable-in-function]
+    D_sym = DisplacementGate(alpha=alpha_sym, parametric=True)  # ruff: ignore[non-lowercase-variable-in-function]
+    R = PhaseRotationGate(theta=np.pi / 4)  # ruff: ignore[non-lowercase-variable-in-function]
+    R_sym = PhaseRotationGate(theta=theta, parametric=True)  # ruff: ignore[non-lowercase-variable-in-function]
+    Sq = SqueezingGate(tau=0.5)  # ruff: ignore[non-lowercase-variable-in-function]
+    Sq_sym = SqueezingGate(tau=a, parametric=True)  # ruff: ignore[non-lowercase-variable-in-function]
+    BS = BeamsplitterGate(theta=np.pi / 4)  # ruff: ignore[non-lowercase-variable-in-function]
+    BS_sym = BeamsplitterGate(theta=phi, parametric=True)  # ruff: ignore[non-lowercase-variable-in-function]
+    CS = ControlledSumGate(gain=2.0, control=2, target=1)  # ruff: ignore[non-lowercase-variable-in-function]
+    CS_sym = ControlledSumGate(gain=c, control=2, target=1, parametric=True)  # ruff: ignore[non-lowercase-variable-in-function]
+    CZ = ControlledZGate(gain=1.0)  # ruff: ignore[non-lowercase-variable-in-function]
+    CZ_sym = ControlledZGate(gain=e, parametric=True)  # ruff: ignore[non-lowercase-variable-in-function]
 
     # Test 1: Simple composition with non-trivial connectivity (1 input, 1 output)
     comp1 = D.compose(R, connectivity={0: 0})
@@ -154,8 +156,8 @@ def compact_gates_test():  # noqa: PLR0914, PLR0915
     save_and_close(comp1_sym, "Compact_compose_D_sym_R_sym_conn.png", "D(a) ∘ R(θ) with connectivity (0→0)")
 
     # Test 2: Composition with swapped connectivity (if arities allow)
-    D_tensor = D.tensor(D)  # noqa: N806
-    R_tensor = R.tensor(R)  # noqa: N806
+    D_tensor = D.tensor(D)  # ruff: ignore[non-lowercase-variable-in-function]
+    R_tensor = R.tensor(R)  # ruff: ignore[non-lowercase-variable-in-function]
 
     comp2 = D_tensor.compose(R_tensor, connectivity={0: 1, 1: 0})
     save_and_close(
@@ -163,8 +165,8 @@ def compact_gates_test():  # noqa: PLR0914, PLR0915
     )
 
     # Test 2b: Parametric version
-    D_sym_tensor = D_sym.tensor(D_sym)  # noqa: N806
-    R_sym_tensor = R_sym.tensor(R_sym)  # noqa: N806
+    D_sym_tensor = D_sym.tensor(D_sym)  # ruff: ignore[non-lowercase-variable-in-function]
+    R_sym_tensor = R_sym.tensor(R_sym)  # ruff: ignore[non-lowercase-variable-in-function]
     comp2_sym = D_sym_tensor.compose(R_sym_tensor, connectivity={0: 1, 1: 0})
     save_and_close(
         comp2_sym,
@@ -180,7 +182,7 @@ def compact_gates_test():  # noqa: PLR0914, PLR0915
 
     # Test 4: CompactDiagram with CompositionDiagram connectivity
     comp_diag = CS.compose(CZ)
-    BS_compact = BS  # noqa: N806
+    BS_compact = BS  # ruff: ignore[non-lowercase-variable-in-function]
 
     comp4 = comp_diag.compose(BS_compact)
     save_and_close(comp4, "Compact_compose_CompDiagram_BS_conn.png", "(CS ∘ CZ) ∘ BS with connectivity (0→0)")
@@ -195,8 +197,8 @@ def compact_gates_test():  # noqa: PLR0914, PLR0915
     )
 
     # Test 5: Non-trivial connectivity with 2-input, 2-output diagrams
-    R_tensor = R.tensor(R)  # noqa: N806
-    Sq_tensor = Sq.tensor(Sq)  # noqa: N806
+    R_tensor = R.tensor(R)  # ruff: ignore[non-lowercase-variable-in-function]
+    Sq_tensor = Sq.tensor(Sq)  # ruff: ignore[non-lowercase-variable-in-function]
 
     comp5 = R_tensor.compose(Sq_tensor, connectivity={0: 1, 1: 0})
     save_and_close(
@@ -206,8 +208,8 @@ def compact_gates_test():  # noqa: PLR0914, PLR0915
     )
 
     # Test 5b: Parametric version
-    R_sym_tensor = R_sym.tensor(R_sym)  # noqa: N806
-    Sq_sym_tensor = Sq_sym.tensor(Sq_sym)  # noqa: N806
+    R_sym_tensor = R_sym.tensor(R_sym)  # ruff: ignore[non-lowercase-variable-in-function]
+    Sq_sym_tensor = Sq_sym.tensor(Sq_sym)  # ruff: ignore[non-lowercase-variable-in-function]
     comp5_sym = R_sym_tensor.compose(Sq_sym_tensor, connectivity={0: 1, 1: 0})
     save_and_close(
         comp5_sym,
@@ -311,8 +313,8 @@ def with_custom_config_test():
     a, theta = symbols("a theta", real=True)
 
     # Numeric version
-    R = PhaseRotationGate(theta=np.pi / 4)  # noqa: N806
-    Sq = SqueezingGate(tau=0.5)  # noqa: N806
+    R = PhaseRotationGate(theta=np.pi / 4)  # ruff: ignore[non-lowercase-variable-in-function]
+    Sq = SqueezingGate(tau=0.5)  # ruff: ignore[non-lowercase-variable-in-function]
     circuit = R.compose(Sq)
 
     visualizer = DiagramVisualizer(config)
@@ -324,8 +326,8 @@ def with_custom_config_test():
     print(f"Saved: {filepath}")
 
     # Parametric version
-    R_sym = PhaseRotationGate(theta=theta, parametric=True)  # noqa: N806
-    Sq_sym = SqueezingGate(tau=a, parametric=True)  # noqa: N806
+    R_sym = PhaseRotationGate(theta=theta, parametric=True)  # ruff: ignore[non-lowercase-variable-in-function]
+    Sq_sym = SqueezingGate(tau=a, parametric=True)  # ruff: ignore[non-lowercase-variable-in-function]
     circuit_sym = R_sym.compose(Sq_sym)
 
     fig_sym = visualizer.visualize(circuit_sym, title="Custom Config: Sq(a) ∘ R(θ)")
@@ -346,7 +348,7 @@ def compact_diagram_label_validation_test():
         print(f"✅ Caught expected error: {e}")
 
 
-def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
+def create_compact_diagram_test():  # ruff: ignore[too-many-locals, too-many-statements]
     """Compress a diagram into a compact diagram."""
     print("\n" + "=" * 60)
     print("Testing create_compact_diagram")
@@ -393,7 +395,8 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     large_composition = large_tensor.compose(swap_tensor_fourier)
     large_composition = swap_tensor_fourier.compose(large_composition)
     large_composition = swap_tensor_fourier.compose(large_composition)
-    nested_composition_block = CompositionDiagram([q_spider_3x3, q_spider_3x3])
+
+    nested_composition_block: Diagram = CompositionDiagram([q_spider_3x3, q_spider_3x3])
     nested_composition_block = nested_composition_block.compose(q_spider_3x3)
     nested_composition_block = nested_composition_block.compose(q_spider_3x3)
 
@@ -419,7 +422,7 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     large_tensor_sym = large_tensor_sym.tensor(fourier_squared)
 
     # Use parametric spiders
-    nested_composition_block_sym = CompositionDiagram([q_spider_3x3_sym, q_spider_3x3_sym])
+    nested_composition_block_sym: Diagram = CompositionDiagram([q_spider_3x3_sym, q_spider_3x3_sym])
     nested_composition_block_sym = nested_composition_block_sym.compose(q_spider_3x3_sym)
     nested_composition_block_sym = nested_composition_block_sym.compose(q_spider_3x3_sym)
 
@@ -578,6 +581,7 @@ def conjugate_gates_test():
     ]
 
     for gate in gates_numeric:
+        print()
         conjugated = gate.conjugate()
         filename = f"{gate.__class__.__name__}_conjugate.png"
         save_and_close(conjugated, filename, f"{gate!r}†")
@@ -592,6 +596,7 @@ def conjugate_gates_test():
     # conjugate is a state (0-in-1-out) rather than another MeasurementGate,
     # so it does not fit the "same type after double conjugate" pattern
     # above and is checked separately in mqc3_gates_numeric_verification_test.
+    print()
     meas = MeasurementGate(theta=0.7)
     meas_conj = meas.conjugate()
     save_and_close(meas_conj, "MeasurementGate_conjugate.png", f"{meas!r}†")
@@ -614,6 +619,7 @@ def conjugate_gates_test():
     ]
 
     for gate in gates_parametric:
+        print()
         conjugated = gate.conjugate()
         filename = f"{gate.__class__.__name__}_parametric_conjugate.png"
         save_and_close(conjugated, filename, f"{gate!r}† (parametric)")
@@ -625,7 +631,7 @@ def conjugate_gates_test():
             print(f"❌ {gate.__class__.__name__} conjugation failed (parametric)")
 
 
-def feedforward_test():  # noqa: PLR0914
+def feedforward_test():  # ruff: ignore[too-many-locals]
     """Test feedforward display."""
     zero_phase = ZxPoly({})
     id_q = QSpider(1, 1, zero_phase)
@@ -690,10 +696,11 @@ def _apply_1mode_cvzx(diagram: Diagram, x: float, p: float) -> tuple[float, floa
         for d in diagram.diagrams:
             x, p = _apply_1mode_cvzx(d, x, p)
         return x, p
+    assert isinstance(diagram, CompactDiagram)
     return _apply_1mode_cvzx(diagram.expand(), x, p)
 
 
-def _apply_1mode_mqc3(diagram: Diagram, x: float, p: float) -> tuple[float, float]:  # noqa: PLR0911
+def _apply_1mode_mqc3(diagram: Diagram, x: float, p: float) -> tuple[float, float]:  # ruff: ignore[too-many-return-statements]
     """Like `_apply_1mode_cvzx`, but in mqc3's own rotation convention.
 
     Interprets `PhaseRotationGate`, `Fourier`, and `FourierInv` nodes
@@ -718,10 +725,11 @@ def _apply_1mode_mqc3(diagram: Diagram, x: float, p: float) -> tuple[float, floa
         return -p, x  # mqc3 R(pi/2)
     if isinstance(diagram, FourierInv):
         return p, -x  # mqc3 R(-pi/2)
+    assert isinstance(diagram, CompactDiagram)
     return _apply_1mode_mqc3(diagram.expand(), x, p)
 
 
-def mqc3_gates_numeric_verification_test():  # noqa: C901, PLR0914, PLR0915
+def mqc3_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-structure, too-many-locals, too-many-statements]
     """Numerically verify each mqc3-derived gate's `expand()` against mqc3's own matrix definitions.
 
     Checks each gate's `expand()` against the exact Heisenberg matrix
@@ -790,11 +798,12 @@ def mqc3_gates_numeric_verification_test():  # noqa: C901, PLR0914, PLR0915
         x1, p1, x2, p2 = rand(), rand(), rand(), rand()
         expanded = TwoModeShearGate(a, b).expand()
         tensor, cz = expanded.diagrams
+        assert isinstance(tensor, TensorDiagram)
         shear1, shear2 = tensor.diagrams
         x1o, p1o = _apply_1mode_cvzx(shear1, x1, p1)
         x2o, p2o = _apply_1mode_cvzx(shear2, x2, p2)
         assert isinstance(cz, ControlledZGate)
-        g = cz.gain
+        g = cast("float", cz.gain)
         p1o, p2o = p1o - g * x2o, p2o - g * x1o
         assert abs(x1o - x1) < 1e-9
         assert abs(x2o - x2) < 1e-9
@@ -824,6 +833,116 @@ def mqc3_gates_numeric_verification_test():  # noqa: C901, PLR0914, PLR0915
     print("✅ All mqc3-derived gates verified against mqc3's own matrix definitions")
 
 
+def feedforward_params_all_gates_test():
+    """Every parametrized gate accepts `feedforward`/`measurement_ids` with the same validation.
+
+    Follows the same pattern `DisplacementGate` established:
+    `feedforward=True` requires a non-empty `measurement_ids` set.
+
+    Raises:
+    ------
+    AssertionError:
+        If any gate class fails to reject `feedforward=True` with no
+        (or empty) `measurement_ids`.
+    """
+    print("Testing feedforward/measurement_ids on all parametrized gates...")
+    m = symbols("m", real=True)
+    meas_leaf = QSpider(1, 0, ZxPoly({1: m}))
+
+    gate_specs = [
+        (DisplacementGate, {"alpha": m, "parametric": True}),
+        (PhaseRotationGate, {"theta": m, "parametric": True}),
+        (SqueezingGate, {"tau": m, "parametric": True}),
+        (ControlledSumGate, {"gain": m, "control": 1, "target": 2, "parametric": True}),
+        (ControlledZGate, {"gain": m, "parametric": True}),
+        (BeamsplitterGate, {"theta": m, "parametric": True}),
+        (CubicPhaseGate, {"gamma": m, "parametric": True}),
+        (ShearXInvariantGate, {"kappa": m, "parametric": True}),
+        (ShearPInvariantGate, {"eta": m, "parametric": True}),
+        (ArbitraryGate, {"alpha": m, "beta": 0.1, "lam": 0.2, "parametric": True}),
+        (Squeezing45Gate, {"theta": m, "parametric": True}),
+        (TwoModeShearGate, {"a": m, "b": 0.1, "parametric": True}),
+        (MeasurementGate, {"theta": m, "parametric": True}),
+    ]
+
+    for cls, kwargs in gate_specs:
+        gate = cls(feedforward=True, measurement_ids={meas_leaf.id}, **kwargs)
+        assert gate.feedforward is True
+        assert gate.measurement_ids == {meas_leaf.id}
+
+        default_gate = cls(**kwargs)
+        assert default_gate.feedforward is False
+        assert default_gate.measurement_ids is None
+
+        try:
+            cls(feedforward=True, **kwargs)
+        except ValueError:
+            pass
+        else:
+            msg = f"{cls.__name__} should reject feedforward=True with no measurement_ids"
+            raise AssertionError(msg)
+
+        try:
+            cls(feedforward=True, measurement_ids=set(), **kwargs)
+        except ValueError:
+            pass
+        else:
+            msg = f"{cls.__name__} should reject feedforward=True with empty measurement_ids"
+            raise AssertionError(msg)
+
+    print(f"✅ feedforward/measurement_ids verified on all {len(gate_specs)} gates")
+
+
+class _Feedforwardable(Protocol):
+    """Structural type for the `feedforward`/`measurement_ids` fields every concrete gate class declares."""
+
+    feedforward: bool
+    measurement_ids: set[int] | None
+
+
+def nx_graph_roundtrip_test():
+    """Every gate class must survive `to_graph()` then `to_diagram()` unchanged.
+
+    Same class, same parameters, same feedforward/measurement_ids --
+    since `optimize()` and friends round-trip diagrams through the
+    graph representation routinely. This caught a real pre-existing
+    gap (`CubicPhaseGate` was entirely unhandled by
+    `_reconstruct_proper_node` and would raise) as well as the
+    mqc3-derived gates needing the same wiring.
+    """
+    print("Testing nx_graph.py to_graph()/to_diagram() round-trip for all gates...")
+    m = symbols("m", real=True)
+    meas_leaf = QSpider(1, 0, ZxPoly({1: m}))
+
+    gates = [
+        DisplacementGate(alpha=0.5 + 0.2j),
+        PhaseRotationGate(theta=0.4, feedforward=True, measurement_ids={meas_leaf.id}),
+        SqueezingGate(tau=0.6),
+        ControlledSumGate(gain=1.5, control=1, target=2),
+        ControlledZGate(gain=0.8),
+        BeamsplitterGate(theta=np.pi / 6),
+        CubicPhaseGate(gamma=0.1),
+        ShearXInvariantGate(kappa=0.3),
+        ShearPInvariantGate(eta=-0.4),
+        Squeezing45Gate(theta=0.9),
+        ArbitraryGate(alpha=0.3, beta=-0.6, lam=0.2),
+        TwoModeShearGate(a=0.5, b=-0.2),
+        MeasurementGate(theta=0.7),
+    ]
+
+    for gate in gates:
+        graph = to_graph(gate)
+        rebuilt = to_diagram(graph)
+        assert type(rebuilt) is type(gate), f"{gate!r} round-tripped to {rebuilt!r}"
+        if hasattr(gate, "feedforward"):
+            ff_gate = cast("_Feedforwardable", gate)
+            ff_rebuilt = cast("_Feedforwardable", rebuilt)
+            assert ff_rebuilt.feedforward == ff_gate.feedforward, gate
+            assert ff_rebuilt.measurement_ids == ff_gate.measurement_ids, gate
+
+    print(f"✅ nx_graph.py round-trip verified for all {len(gates)} gates")
+
+
 def run_all_tests():
     """Run all test functions."""
     compact_gates_test()
@@ -834,6 +953,8 @@ def run_all_tests():
     create_compact_diagram_test()
     feedforward_test()
     mqc3_gates_numeric_verification_test()
+    feedforward_params_all_gates_test()
+    nx_graph_roundtrip_test()
 
 
 if __name__ == "__main__":

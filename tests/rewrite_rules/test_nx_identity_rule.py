@@ -12,6 +12,7 @@ from math import pi
 from cvzx.base_gates import (
     CompositionDiagram,
     ContractedDiagram,
+    Diagram,
     Fourier,
     Fourier2,
     FourierInv,
@@ -31,6 +32,12 @@ from cvzx.gates import (
 )
 from cvzx.nx_graph import GateRegister, to_diagram, to_graph
 from cvzx.nx_rewrite_rules import IdentityRule, apply_rule_to_diagram
+
+
+def _sub(diagram: Diagram, index: int) -> Diagram:
+    """Index into a container `Diagram`'s children, for navigating a fixture's known shape."""
+    assert isinstance(diagram, (CompositionDiagram, TensorDiagram, ContractedDiagram))
+    return diagram.diagrams[index]
 
 
 class TestIdentityRule(unittest.TestCase):
@@ -370,7 +377,7 @@ class TestIdentityRule(unittest.TestCase):
         reg.build_from_graph(graph)
         matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
-        idx = comp.diagrams[1].diagrams[1].diagrams[1].id
+        idx = _sub(_sub(_sub(comp, 1), 1), 1).id
         self.rule.apply_single(graph, matches_by_id[idx])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -395,9 +402,9 @@ class TestIdentityRule(unittest.TestCase):
         reg.build_from_graph(graph)
         matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
-        idx = comp.diagrams[1].diagrams[1].diagrams[1].id
+        idx = _sub(_sub(_sub(comp, 1), 1), 1).id
         self.rule.apply_single(graph, matches_by_id[idx])
-        idx = comp.diagrams[1].diagrams[1].diagrams[2].id
+        idx = _sub(_sub(_sub(comp, 1), 1), 2).id
         self.rule.apply_single(graph, matches_by_id[idx])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -417,7 +424,7 @@ class TestIdentityRule(unittest.TestCase):
         reg.build_from_graph(graph)
         matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
-        idx = tensor.diagrams[1].diagrams[2].id
+        idx = _sub(_sub(tensor, 1), 2).id
         self.rule.apply_single(graph, matches_by_id[idx])
         result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
@@ -440,7 +447,7 @@ class TestIdentityRule(unittest.TestCase):
         reg.build_from_graph(graph)
         matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
-        idx = contracted.diagrams[0].diagrams[0].id
+        idx = _sub(_sub(contracted, 0), 0).id
         self.rule.apply_single(graph, matches_by_id[idx])
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)
@@ -456,7 +463,7 @@ class TestIdentityRule(unittest.TestCase):
         reg.build_from_graph(graph)
         matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
-        idx = contracted.diagrams[1].diagrams[0].id
+        idx = _sub(_sub(contracted, 1), 0).id
         self.rule.apply_single(graph, matches_by_id[idx])
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)
@@ -472,7 +479,7 @@ class TestIdentityRule(unittest.TestCase):
         reg.build_from_graph(graph)
         matches = self.rule.match(graph, reg)
         matches_by_id = {m["node_id"]: m for m in matches}
-        idx = contracted.diagrams[0].diagrams[1].diagrams[2].id
+        idx = _sub(_sub(_sub(contracted, 0), 1), 2).id
         self.rule.apply_single(graph, matches_by_id[idx])
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)

@@ -48,7 +48,7 @@ class ZxPoly(Poly):
 
     _var = symbols("x", real=True)
 
-    def __new__(cls, coeffs_or_poly: dict[int, float | int | Expr] | Poly | Expr | None = None, *args, **kwargs):  # noqa: ANN002, ANN003, ANN204
+    def __new__(cls, coeffs_or_poly: dict[int, float | int | Expr] | Poly | Expr | None = None, *args, **kwargs):  # ruff: ignore[missing-type-args, missing-type-kwargs, missing-return-type-special-method]
         """Create a new ZxPoly instance.
 
         This method intercepts instance creation to handle the special case
@@ -101,8 +101,8 @@ class ZxPoly(Poly):
     def __init__(
         self,
         coeffs_or_poly: dict[int, float | int | Expr] | Poly | Expr | None = None,
-        *args,  # noqa: ANN002
-        **kwargs,  # noqa: ANN003
+        *args,  # ruff: ignore[missing-type-args]
+        **kwargs,  # ruff: ignore[missing-type-kwargs]
     ) -> None:
         """Initialize the ZxPoly instance.
 
@@ -128,7 +128,7 @@ class ZxPoly(Poly):
 
     @property
     def coeffs(self) -> dict[int, float | Expr]:
-        """Get coefficients as a dictionary for backward compatibility.
+        """Coefficients as a dictionary, for backward compatibility.
 
         Returns a dictionary mapping degree → coefficient. Zero coefficients
         are omitted. Numeric coefficients are converted to Python floats
@@ -231,7 +231,7 @@ class ZxPoly(Poly):
             False otherwise.
         """
         if isinstance(other, ZxPoly | Poly):
-            return super().__eq__(other)
+            return bool(super().__eq__(other))
         return False
 
     def __hash__(self) -> int:
@@ -245,7 +245,7 @@ class ZxPoly(Poly):
         int
             Hash value for the polynomial.
         """
-        return super().__hash__()
+        return int(super().__hash__())
 
 
 class Diagram(ABC):
@@ -264,7 +264,7 @@ class Diagram(ABC):
 
     _id_counter = count(1)
 
-    def __init__(self) -> None:  # noqa: D107
+    def __init__(self) -> None:  # ruff: ignore[undocumented-public-init]
         self._id = next(Diagram._id_counter)
 
     @abstractmethod
@@ -481,7 +481,7 @@ class ProperDiagram(Diagram):
         """
         return self._num_outputs
 
-    def __post_init__(self) -> None:  # noqa: D105
+    def __post_init__(self) -> None:  # ruff: ignore[undocumented-magic-method]
         super().__init__()
 
     def __repr__(self) -> str:
@@ -543,14 +543,14 @@ class ContractedDiagram(Diagram):
     J1: Sequence[int]
     J2: Sequence[int]
 
-    def __init__(  # noqa: C901, PLR0912, PLR0913, PLR0917
+    def __init__(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-positional-arguments]
         self,
         first: Diagram,
         second: Diagram,
-        I1: Sequence[int],  # noqa: N803
-        I2: Sequence[int],  # noqa: N803
-        J1: Sequence[int],  # noqa: N803
-        J2: Sequence[int],  # noqa: N803
+        I1: Sequence[int],  # ruff: ignore[invalid-argument-name]
+        I2: Sequence[int],  # ruff: ignore[invalid-argument-name]
+        J1: Sequence[int],  # ruff: ignore[invalid-argument-name]
+        J2: Sequence[int],  # ruff: ignore[invalid-argument-name]
     ) -> None:
         """Initialize ContractedDiagram with two diagrams and connection indices.
 
@@ -798,7 +798,7 @@ class TensorDiagram(Diagram):
 
     diagrams: Sequence[Diagram]
 
-    def partial_trace(  # noqa: C901, PLR0912, PLR0915
+    def partial_trace(  # ruff: ignore[complex-structure, too-many-branches, too-many-statements]
         self,
         diagram_pairs: Sequence[tuple[int, Sequence[int], Sequence[int]]],
     ) -> None:
@@ -1078,7 +1078,7 @@ class TensorDiagram(Diagram):
         Diagram
         """
         if isinstance(diagram, TensorDiagram):
-            flattened: list = []
+            flattened: list[Diagram] = []
             for sub in diagram.diagrams:
                 flattened_sub = self._flatten_tensor(sub)
                 if isinstance(flattened_sub, TensorDiagram):
@@ -1141,7 +1141,7 @@ class CompositionDiagram(Diagram):
     """
 
     diagrams: Sequence[Diagram]
-    connectivity: dict | None = None
+    connectivity: dict[int, dict[int, int]] = field(default_factory=dict)
 
     def tensor(self, other: Diagram) -> Diagram:
         """Parallelize composition with another diagram.
@@ -1276,8 +1276,7 @@ class CompositionDiagram(Diagram):
                 raise ValueError(msg)
         self._num_inputs = self.diagrams[0].num_inputs
         self._num_outputs = self.diagrams[-1].num_outputs
-        if self.connectivity is None:
-            self.connectivity = {}
+        if not self.connectivity:
             for i in range(len(self.diagrams) - 1):
                 self.connectivity[i] = {k: k for k in range(self.diagrams[i + 1].num_inputs)}
         # Check connectivity
@@ -1633,7 +1632,7 @@ class Fourier2(ProperDiagram):
         return "Fourier2()"
 
 
-def flatten_composition(diagram: Diagram) -> Diagram:  # noqa: C901, PLR0912
+def flatten_composition(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-structure, too-many-branches]
     """Recursively flatten any CompositionDiagram found in the diagram.
 
     This method recursively traverses the diagram and flattens:
@@ -1671,7 +1670,7 @@ def flatten_composition(diagram: Diagram) -> Diagram:  # noqa: C901, PLR0912
             return flatten_composition(diagram.diagrams[0])
 
         # Build the flattened list of diagrams and accumulate connectivity
-        flattened_diagrams: list = []
+        flattened_diagrams: list[Diagram] = []
         # Maps from original diagram index to the range of flattened indices
         index_mapping = {}  # original_index -> (start_idx, end_idx)
         all_connectivity = {}
@@ -1686,11 +1685,10 @@ def flatten_composition(diagram: Diagram) -> Diagram:  # noqa: C901, PLR0912
                 sub_end = current_idx + len(flattened_sub.diagrams)
                 flattened_diagrams.extend(flattened_sub.diagrams)
                 # Merge the sub-composition's connectivity
-                if flattened_sub.connectivity is not None:
-                    for key, conn in flattened_sub.connectivity.items():
-                        # Adjust indices: key + sub_start gives the new position
-                        new_key = key + sub_start
-                        all_connectivity[new_key] = conn
+                for key, conn in flattened_sub.connectivity.items():
+                    # Adjust indices: key + sub_start gives the new position
+                    new_key = key + sub_start
+                    all_connectivity[new_key] = conn
                 if i < len(diagram.diagrams) - 1:
                     all_connectivity[sub_end - 1] = diagram.connectivity[i]
                 current_idx = sub_end

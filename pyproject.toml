@@ -79,3 +79,15 @@ where = ["src"]
 include = ["cvzx*"]
 namespaces = false
 exclude = ["build", "tests"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests"]
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["networkx.*", "sympy.*", "scipy.*"]
+ignore_missing_imports = true

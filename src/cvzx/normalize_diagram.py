@@ -306,7 +306,7 @@ def _is_wide(attrs: dict) -> bool:
     bool
         True if the leaf touches more than one mode.
     """
-    return max(attrs.get("num_inputs", 0), attrs.get("num_outputs", 0)) > 1
+    return bool(max(attrs.get("num_inputs", 0), attrs.get("num_outputs", 0)) > 1)
 
 
 def _build_pred_map(
@@ -419,7 +419,7 @@ def _strip_identity_leaves(
     return new_leaves, new_pred_of, flatten
 
 
-def _assign_stages(  # noqa: C901, PLR0912, PLR0915, PLR0914
+def _assign_stages(  # ruff: ignore[complex-structure, too-many-branches, too-many-statements, too-many-locals]
     graph: nx.DiGraph,
     leaves: list[int],
     pred_of: dict[tuple[int, int], _Token],
@@ -559,7 +559,7 @@ def _finalize_row(graph: nx.DiGraph, row: _Row) -> Diagram:
     return CompositionDiagram([_leaf_diagram(graph, leaf) for leaf in row.content])
 
 
-def _build_narrow_rows(  # noqa: PLR0913, PLR0917
+def _build_narrow_rows(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
     graph: nx.DiGraph,
     root_id: int,
     active: list[_Token],
@@ -723,7 +723,7 @@ def _absorb_final_permutation(
     return True
 
 
-def normalize_diagram(  # noqa: C901, PLR0912, PLR0914, PLR0915, PLR0911
+def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too-many-locals, too-many-statements, too-many-return-statements]
     diagram: Diagram,
 ) -> Diagram:
     """Rewrite `diagram` into alternating type-1/type-2 stages.
@@ -824,7 +824,7 @@ def normalize_diagram(  # noqa: C901, PLR0912, PLR0914, PLR0915, PLR0911
         stage_records.append((elements, input_tokens, new_active))
         active = new_active
 
-    def emit_wide(leaf: int) -> None:  # noqa: C901
+    def emit_wide(leaf: int) -> None:  # ruff: ignore[complex-structure]
         nonlocal active
         attrs = leaf_attrs[leaf]
         n_in = attrs.get("num_inputs", 0)

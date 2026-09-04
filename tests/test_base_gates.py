@@ -316,7 +316,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Output wires of the first diagram.*contain duplicate indices"):  # noqa: RUF043
+        with pytest.raises(ValueError, match="Output wires of the first diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([(0, [0, 0], [0, 1]), (1, [0, 1], [0, 1])])
 
     def test_duplicate_input_wires_first(self):
@@ -325,7 +325,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Input wires of the first diagram.*contain duplicate indices"):  # noqa: RUF043
+        with pytest.raises(ValueError, match="Input wires of the first diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([(0, [0, 1], [0, 0]), (1, [0, 1], [0, 1])])
 
     def test_duplicate_output_wires_second(self):
@@ -334,7 +334,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Output wires of the second diagram.*contain duplicate indices"):  # noqa: RUF043
+        with pytest.raises(ValueError, match="Output wires of the second diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([(0, [0, 1], [0, 1]), (1, [0, 0], [0, 1])])
 
     def test_duplicate_input_wires_second(self):
@@ -343,7 +343,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Input wires of the second diagram.*contain duplicate indices"):  # noqa: RUF043
+        with pytest.raises(ValueError, match="Input wires of the second diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([(0, [0, 1], [0, 1]), (1, [0, 1], [0, 0])])
 
     def test_mismatched_i_lengths(self):
@@ -352,7 +352,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="I1 length.*must equal I2 length"):  # noqa: RUF043
+        with pytest.raises(ValueError, match="I1 length.*must equal I2 length"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([
                 (0, [0, 1], [0]),
                 (1, [0], [1]),
@@ -364,7 +364,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="J1 length.*must equal J2 length"):  # noqa: RUF043
+        with pytest.raises(ValueError, match="J1 length.*must equal J2 length"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([
                 (0, [0], [0, 1]),
                 (1, [0], [0]),

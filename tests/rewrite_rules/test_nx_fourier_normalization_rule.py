@@ -8,6 +8,7 @@ a cross-type merge ChainReductionRule cannot do on its own.
 
 import unittest
 from math import isclose, pi
+from typing import cast
 
 from sympy import Symbol, simplify
 from sympy import pi as sympy_pi
@@ -113,7 +114,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         matches = self.rule.match(graph, reg)
         assert len(matches) == 1
         assert matches[0]["result_type"] == "SqueezingGate"
-        assert matches[0]["result_value"] == -2.0
+        assert matches[0]["result_value"] == -2.0  # ruff: ignore[float-equality-comparison]
 
     def test_match_f2_squeezing_other_order(self):
         """Sq(tau) next to F2 also matches (they commute)."""
@@ -123,7 +124,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         reg.build_from_graph(graph)
         matches = self.rule.match(graph, reg)
         assert len(matches) == 1
-        assert matches[0]["result_value"] == 3.0
+        assert matches[0]["result_value"] == 3.0  # ruff: ignore[float-equality-comparison]
 
     def test_match_no_fourier_squeezing(self):
         """F next to Sq does NOT match -- only F2 merges with squeezing."""
@@ -234,7 +235,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, PhaseRotationGate)
-        assert isclose(result.theta, self.theta1 - pi / 2)
+        assert isclose(cast("float", result.theta), self.theta1 - pi / 2)
 
     def test_apply_single_finv_rotation(self):
         """Finv folded into R(theta) leaves a single R(theta + pi/2)."""
@@ -246,7 +247,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, PhaseRotationGate)
-        assert isclose(result.theta, self.theta1 + pi / 2)
+        assert isclose(cast("float", result.theta), self.theta1 + pi / 2)
 
     def test_apply_single_f2_rotation(self):
         """F2 folded into R(theta) leaves a single R(theta + pi)."""
@@ -258,7 +259,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, PhaseRotationGate)
-        assert isclose(result.theta, self.theta1 + pi)
+        assert isclose(cast("float", result.theta), self.theta1 + pi)
 
     def test_apply_single_f2_squeezing(self):
         """F2 folded into Sq(tau) leaves a single Sq(-tau)."""
@@ -270,7 +271,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, SqueezingGate)
-        assert result.tau == -2.0
+        assert result.tau == -2.0  # ruff: ignore[float-equality-comparison]
 
     def test_apply_single_with_trailing_content(self):
         """Folding leaves trailing content untouched."""
@@ -284,7 +285,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         assert isinstance(result.diagrams[0], PhaseRotationGate)
-        assert isclose(result.diagrams[0].theta, self.theta1 - pi / 2)
+        assert isclose(cast("float", result.diagrams[0].theta), self.theta1 - pi / 2)
         assert result.diagrams[1] == self.filler
         assert result.connectivity == {0: {0: 0}}
 
@@ -302,7 +303,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         assert len(result.diagrams) == 3
         assert result.diagrams[0] == self.swap
         assert isinstance(result.diagrams[1], PhaseRotationGate)
-        assert isclose(result.diagrams[1].theta, self.theta1 - pi / 2)
+        assert isclose(cast("float", result.diagrams[1].theta), self.theta1 - pi / 2)
         assert result.diagrams[2] == self.bs
 
     def test_apply_single_nested_in_contracted(self):
@@ -317,7 +318,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)
         assert isinstance(result.first, PhaseRotationGate)
-        assert isclose(result.first.theta, self.theta1 - pi / 2)
+        assert isclose(cast("float", result.first.theta), self.theta1 - pi / 2)
         assert result.second == self.swap
 
     # -------------------------------------------------------------------------
@@ -329,28 +330,28 @@ class TestFourierNormalizationRule(unittest.TestCase):
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier()])
         result = apply_rule_to_diagram(self.rule, comp)
         assert isinstance(result, PhaseRotationGate)
-        assert isclose(result.theta, self.theta1 - pi / 2)
+        assert isclose(cast("float", result.theta), self.theta1 - pi / 2)
 
     def test_apply_rule_finv_rotation(self):
         """Full rule application for Finv next to R(theta)."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), FourierInv()])
         result = apply_rule_to_diagram(self.rule, comp)
         assert isinstance(result, PhaseRotationGate)
-        assert isclose(result.theta, self.theta1 + pi / 2)
+        assert isclose(cast("float", result.theta), self.theta1 + pi / 2)
 
     def test_apply_rule_f2_rotation(self):
         """Full rule application for F2 next to R(theta)."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier2()])
         result = apply_rule_to_diagram(self.rule, comp)
         assert isinstance(result, PhaseRotationGate)
-        assert isclose(result.theta, self.theta1 + pi)
+        assert isclose(cast("float", result.theta), self.theta1 + pi)
 
     def test_apply_rule_f2_squeezing(self):
         """Full rule application for F2 next to Sq(tau)."""
         comp = CompositionDiagram([SqueezingGate(2.0), Fourier2()])
         result = apply_rule_to_diagram(self.rule, comp)
         assert isinstance(result, SqueezingGate)
-        assert result.tau == -2.0
+        assert result.tau == -2.0  # ruff: ignore[float-equality-comparison]
 
     def test_apply_rule_no_match_returns_same_diagram(self):
         """If no pattern is present, apply_rule should return the original diagram."""
@@ -370,9 +371,9 @@ class TestFourierNormalizationRule(unittest.TestCase):
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         assert isinstance(result.diagrams[0], PhaseRotationGate)
-        assert isclose(result.diagrams[0].theta, self.theta1 - pi / 2)
+        assert isclose(cast("float", result.diagrams[0].theta), self.theta1 - pi / 2)
         assert isinstance(result.diagrams[1], SqueezingGate)
-        assert result.diagrams[1].tau == -2.0
+        assert result.diagrams[1].tau == -2.0  # ruff: ignore[float-equality-comparison]
 
     def test_apply_rule_overlapping_chain_needs_two_passes(self):
         """F, R, Finv: one apply_rule() pass folds only the first pair."""
@@ -391,7 +392,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         self.rule.apply_rule(graph, reg)
         final = to_diagram(graph)
         assert isinstance(final, PhaseRotationGate)
-        assert isclose(final.theta, self.theta1)
+        assert isclose(cast("float", final.theta), self.theta1)
 
     def test_apply_rule_nested_in_tensor(self):
         """Full rule application to a pattern nested inside a tensor branch."""
@@ -401,7 +402,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 3
         assert isinstance(result.diagrams[1], PhaseRotationGate)
-        assert isclose(result.diagrams[1].theta, self.theta1 - pi / 2)
+        assert isclose(cast("float", result.diagrams[1].theta), self.theta1 - pi / 2)
 
     # -------------------------------------------------------------------------
     # 4. Edge cases
@@ -425,7 +426,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         result = apply_rule_to_diagram(self.rule, comp)
         assert isinstance(result, PhaseRotationGate)
         assert result.parametric is True
-        assert isclose(float(result.theta), -pi / 2)
+        assert isclose(float(cast("float | int", result.theta)), -pi / 2)
 
     def test_squeezing_fold_stays_non_parametric(self):
         """Unlike the rotation folds, the F2/squeezing fold uses plain negation."""
@@ -433,14 +434,14 @@ class TestFourierNormalizationRule(unittest.TestCase):
         result = apply_rule_to_diagram(self.rule, comp)
         assert isinstance(result, SqueezingGate)
         assert result.parametric is False
-        assert result.tau == -2.0
+        assert result.tau == -2.0  # ruff: ignore[float-equality-comparison]
 
     def test_near_zero_squeezing_fold(self):
         """A small-magnitude tau still folds correctly (sign flip, no special-casing)."""
         comp = CompositionDiagram([SqueezingGate(1e-6), Fourier2()])
         result = apply_rule_to_diagram(self.rule, comp)
         assert isinstance(result, SqueezingGate)
-        assert result.tau == -1e-6
+        assert result.tau == -1e-6  # ruff: ignore[float-equality-comparison]
 
 
 if __name__ == "__main__":
