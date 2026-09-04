@@ -444,7 +444,7 @@ class ProperDiagram(Diagram):
             raise ValueError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            old_connectivity = other.connectivity
+            old_connectivity = dict(other.connectivity)
             old_connectivity[len(diagrams) - 1] = connectivity
             return CompositionDiagram([*diagrams, self], old_connectivity)
         return CompositionDiagram([other, self], {0: connectivity})
@@ -1445,6 +1445,65 @@ class Swap(ProperDiagram):
             "Swap()"
         """
         return "Swap()"
+
+
+@dataclass
+class VoidDiagram(ProperDiagram):
+    r"""Void diagram: a transient, undrawn placeholder of arbitrary arity.
+
+    Represents no wire and no physical content at all -- it is pure
+    bookkeeping, not a state, effect, gate, or identity wire. It exists
+    solely so that a container's shape (its `num_inputs`/`num_outputs`)
+    never has to change when one of its slots is fully consumed elsewhere
+    in the diagram.
+
+    The motivating case is `CopyRule`'s cross-container application: when
+    a state/effect is copied through a spider that lives in a different
+    container, the state/effect's own original slot has nothing left to
+    put there (its content now lives as copies elsewhere) -- but simply
+    deleting that slot would shrink its container's arity and force an
+    arity-propagation cascade through every parent container above it.
+    Installing a `VoidDiagram` with the exact same arity instead keeps
+    that slot's shape identical to what it replaced, so nothing upstream
+    ever needs to be touched or recomputed.
+
+    A `VoidDiagram` is meant to be transient: it should never survive past
+    `optimize()`'s return value. The end-of-pipeline cleanup pass removes
+    every `VoidDiagram` for good (alongside any leftover identity wires),
+    actually shrinking the containers they sit in at that point, once and
+    for all, rather than doing so eagerly on every application.
+
+    Visually, a `VoidDiagram` reserves exactly the layout space an
+    identity wire of the same arity would take, but draws nothing --
+    unlike an identity spider, which draws as a straight wire.
+
+    Parameters
+    ----------
+    _num_inputs : int
+        Number of input wires, matching whatever this slot replaced.
+    _num_outputs : int
+        Number of output wires, matching whatever this slot replaced.
+    """
+
+    def conjugate(self) -> Diagram:
+        """Void is self-conjugate (there is no phase to negate).
+
+        Returns:
+        -------
+        VoidDiagram
+            New VoidDiagram with the same arity.
+        """
+        return VoidDiagram(self.num_inputs, self.num_outputs)
+
+    def __repr__(self) -> str:
+        """Return string representation of the void diagram.
+
+        Returns:
+        -------
+        str
+            "VoidDiagram(num_inputs, num_outputs)"
+        """
+        return f"VoidDiagram({self.num_inputs}, {self.num_outputs})"
 
 
 @dataclass

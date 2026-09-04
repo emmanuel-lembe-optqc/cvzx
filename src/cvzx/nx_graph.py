@@ -31,6 +31,7 @@ from cvzx.base_gates import (
     QSpider,
     Swap,
     TensorDiagram,
+    VoidDiagram,
     ZxPoly,
 )
 from cvzx.gates import (
@@ -72,6 +73,7 @@ class GateRegister:
         contracted_diagrams set[int]: Node IDs of ContractedDiagram containers
         tensor_nodes set[int]: Node IDs of TensorDiagram containers
         composition_nodes set[int]: Node IDs of CompositionDiagram containers
+        void_nodes set[int]: Node IDs of VoidDiagram placeholders
     """
 
     def __init__(self) -> None:
@@ -86,8 +88,9 @@ class GateRegister:
         self.contracted_diagrams: set[int] = set()
         self.tensor_nodes: set[int] = set()
         self.composition_nodes: set[int] = set()
+        self.void_nodes: set[int] = set()
 
-    def add_node(self, node_id: int, attrs: dict) -> None:  # noqa: C901
+    def add_node(self, node_id: int, attrs: dict) -> None:  # noqa: C901, PLR0912
         """Add a node to the appropriate sets based on its attributes.
 
         This method inspects the node's attributes and adds its ID to the
@@ -143,6 +146,10 @@ class GateRegister:
         if self._is_identity_spider(attrs):
             self.identity_spiders.add(node_id)
 
+        # Void placeholders (see `VoidDiagram`)
+        if gate_type == "VoidDiagram":
+            self.void_nodes.add(node_id)
+
         # Terminals
         if self._is_input_state(attrs):
             self.input_states.add(node_id)
@@ -170,6 +177,7 @@ class GateRegister:
         self.contracted_diagrams.discard(node_id)
         self.tensor_nodes.discard(node_id)
         self.composition_nodes.discard(node_id)
+        self.void_nodes.discard(node_id)
 
     def copy(self) -> "GateRegister":
         """Create a shallow copy of the register.
@@ -196,6 +204,7 @@ class GateRegister:
         new_reg.contracted_diagrams = self.contracted_diagrams.copy()
         new_reg.tensor_nodes = self.tensor_nodes.copy()
         new_reg.composition_nodes = self.composition_nodes.copy()
+        new_reg.void_nodes = self.void_nodes.copy()
         return new_reg
 
     def clear(self) -> None:
@@ -820,6 +829,10 @@ def _add_composition_node(
         sub_node_id = _convert_diagram_to_graph(sub_diagram, G, container_id=node_id)
         sub_node_ids.append(sub_node_id)
 
+    external_input_mapping = {j: (0, j) for j in range(diagram.diagrams[0].num_inputs)}
+    last_idx = len(diagram.diagrams) - 1
+    external_output_mapping = {j: (last_idx, j) for j in range(diagram.diagrams[-1].num_outputs)}
+
     G.add_node(
         node_id,
         id=node_id,
@@ -836,6 +849,8 @@ def _add_composition_node(
         connectivity=diagram.connectivity,
         external_inputs=list(range(diagram.num_inputs)),
         external_outputs=list(range(diagram.num_outputs)),
+        external_input_mapping=external_input_mapping,
+        external_output_mapping=external_output_mapping,
     )
 
     # Add edges between sub-diagrams based on connectivity
@@ -1165,7 +1180,7 @@ def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: N80
     raise ValueError(msg)
 
 
-def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C901, N803, PLR0911
+def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C901, N803, PLR0911, PLR0912
     """Reconstruct a proper diagram from a graph node.
 
     Parameters:
@@ -1198,6 +1213,8 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # noqa: C
         return PSpider(num_inputs, num_outputs, phase if phase is not None else ZxPoly({}))
     if node_type == "Swap":
         return Swap()
+    if node_type == "VoidDiagram":
+        return VoidDiagram(num_inputs, num_outputs)
     if node_type == "Fourier":
         return Fourier()
     if node_type == "FourierInv":
@@ -1246,7 +1263,8 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # no
     """
     attrs = G.nodes[node_id]
     sub_diagram_ids = attrs.get("sub_diagram_ids", [])
-    connectivity = attrs.get("connectivity", {})
+    # Shallow-copy the connectivity dict
+    connectivity = dict(attrs.get("connectivity", {}))
     # Recursively reconstruct all sub-diagrams
     sub_diagrams = [_reconstruct_from_node(G, sub_id) for sub_id in sub_diagram_ids]
 
