@@ -6,6 +6,7 @@ that the compact representation works correctly.
 Run this script directly to generate test images.
 """
 
+import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -27,14 +28,20 @@ from cvzx.base_gates import (
     ZxPoly,
 )
 from cvzx.gates import (
+    ArbitraryGate,
     BeamsplitterGate,
     CompactDiagram,
     ControlledSumGate,
     ControlledZGate,
     CubicPhaseGate,
     DisplacementGate,
+    MeasurementGate,
     PhaseRotationGate,
+    ShearPInvariantGate,
+    ShearXInvariantGate,
+    Squeezing45Gate,
     SqueezingGate,
+    TwoModeShearGate,
     create_compact_diagram,
     expand_all,
 )
@@ -79,6 +86,12 @@ def compact_gates_test():  # noqa: PLR0914, PLR0915
         BeamsplitterGate(theta=np.pi / 4),
         BeamsplitterGate(theta=np.pi / 6),
         CubicPhaseGate(gamma=0.1),
+        ShearXInvariantGate(kappa=0.3),
+        ShearPInvariantGate(eta=-0.3),
+        Squeezing45Gate(theta=0.9),
+        ArbitraryGate(alpha=0.3, beta=-0.6, lam=0.2),
+        TwoModeShearGate(a=0.4, b=-0.2),
+        MeasurementGate(theta=0.7),
     ]
 
     for gate in gates_numeric:
@@ -101,6 +114,12 @@ def compact_gates_test():  # noqa: PLR0914, PLR0915
         BeamsplitterGate(theta=sym_pi / 4 + theta, parametric=True),
         CubicPhaseGate(gamma=gamma_sym, parametric=True),
         CubicPhaseGate(gamma=sin(theta) * 0.5, parametric=True),
+        ShearXInvariantGate(kappa=a, parametric=True),
+        ShearPInvariantGate(eta=b, parametric=True),
+        Squeezing45Gate(theta=theta, parametric=True),
+        ArbitraryGate(alpha=phi, beta=theta, lam=a, parametric=True),
+        TwoModeShearGate(a=c, b=d, parametric=True),
+        MeasurementGate(theta=phi, parametric=True),
     ]
 
     for gate in gates_parametric:
@@ -234,6 +253,12 @@ def expanded_gates_test():
         ControlledZGate(gain=1.0),
         BeamsplitterGate(theta=np.pi / 8),
         CubicPhaseGate(gamma=0.1),
+        ShearXInvariantGate(kappa=0.3),
+        ShearPInvariantGate(eta=-0.3),
+        Squeezing45Gate(theta=0.9),
+        ArbitraryGate(alpha=0.3, beta=-0.6, lam=0.2),
+        TwoModeShearGate(a=0.4, b=-0.2),
+        MeasurementGate(theta=0.7),
     ]
 
     for gate in gates_numeric:
@@ -257,6 +282,12 @@ def expanded_gates_test():
         ControlledZGate(gain=sin(phi) + 1, parametric=True),
         BeamsplitterGate(theta=sym_pi / 4 + theta, parametric=True),
         CubicPhaseGate(gamma=sin(theta) * 0.5, parametric=True),
+        ShearXInvariantGate(kappa=a, parametric=True),
+        ShearPInvariantGate(eta=b, parametric=True),
+        Squeezing45Gate(theta=theta, parametric=True),
+        ArbitraryGate(alpha=phi, beta=theta, lam=a, parametric=True),
+        TwoModeShearGate(a=a, b=b, parametric=True),
+        MeasurementGate(theta=phi, parametric=True),
     ]
 
     for gate in gates_parametric:
@@ -362,7 +393,6 @@ def create_compact_diagram_test():  # noqa: PLR0914, PLR0915
     large_composition = large_tensor.compose(swap_tensor_fourier)
     large_composition = swap_tensor_fourier.compose(large_composition)
     large_composition = swap_tensor_fourier.compose(large_composition)
-
     nested_composition_block = CompositionDiagram([q_spider_3x3, q_spider_3x3])
     nested_composition_block = nested_composition_block.compose(q_spider_3x3)
     nested_composition_block = nested_composition_block.compose(q_spider_3x3)
@@ -540,10 +570,14 @@ def conjugate_gates_test():
         ControlledZGate(gain=1.0),
         BeamsplitterGate(theta=np.pi / 4),
         CubicPhaseGate(gamma=0.1),
+        ShearXInvariantGate(kappa=0.3),
+        ShearPInvariantGate(eta=-0.3),
+        Squeezing45Gate(theta=0.9),
+        ArbitraryGate(alpha=0.3, beta=-0.6, lam=0.2),
+        TwoModeShearGate(a=0.4, b=-0.2),
     ]
 
     for gate in gates_numeric:
-        print()
         conjugated = gate.conjugate()
         filename = f"{gate.__class__.__name__}_conjugate.png"
         save_and_close(conjugated, filename, f"{gate!r}†")
@@ -554,6 +588,15 @@ def conjugate_gates_test():
         else:
             print(f"❌ {gate.__class__.__name__} conjugation failed")
 
+    # MeasurementGate is an effect (1-in-0-out), not a unitary gate: its
+    # conjugate is a state (0-in-1-out) rather than another MeasurementGate,
+    # so it does not fit the "same type after double conjugate" pattern
+    # above and is checked separately in mqc3_gates_numeric_verification_test.
+    meas = MeasurementGate(theta=0.7)
+    meas_conj = meas.conjugate()
+    save_and_close(meas_conj, "MeasurementGate_conjugate.png", f"{meas!r}†")
+    print(f"MeasurementGate conjugate (state, not effect): {meas_conj}")
+
     # Parametric gates
     gates_parametric = [
         DisplacementGate(alpha=alpha_sym, parametric=True),
@@ -563,10 +606,14 @@ def conjugate_gates_test():
         ControlledZGate(gain=phi, parametric=True),
         BeamsplitterGate(theta=theta, parametric=True),
         CubicPhaseGate(gamma=gamma_sym, parametric=True),
+        ShearXInvariantGate(kappa=a, parametric=True),
+        ShearPInvariantGate(eta=b, parametric=True),
+        Squeezing45Gate(theta=theta, parametric=True),
+        ArbitraryGate(alpha=phi, beta=theta, lam=a, parametric=True),
+        TwoModeShearGate(a=a, b=b, parametric=True),
     ]
 
     for gate in gates_parametric:
-        print()
         conjugated = gate.conjugate()
         filename = f"{gate.__class__.__name__}_parametric_conjugate.png"
         save_and_close(conjugated, filename, f"{gate!r}† (parametric)")
@@ -620,15 +667,173 @@ def feedforward_test():  # noqa: PLR0914
     save_and_close(diagram2, filename2, "Teleportation circuit 2")
 
 
+def _spider_quadratic_coef(spider: QSpider | PSpider) -> float:
+    """Extract the coefficient of x^2 from a QSpider/PSpider's phase (0 if absent)."""
+    return spider.phase.coeffs.get(2, 0.0)
+
+
+def _apply_1mode_cvzx(diagram: Diagram, x: float, p: float) -> tuple[float, float]:
+    """Walk a 1-in-1-out diagram and return its Heisenberg-transformed (x, p).
+
+    The diagram is built from QSpider/PSpider (quadratic phase),
+    CompositionDiagram, and the 1-mode compact gates defined in this
+    module. Returns (x, p) in cvzx's own convention (i.e. following
+    each spider's matrix directly, with no mqc3 sign correction).
+    """
+    if isinstance(diagram, QSpider):
+        c = _spider_quadratic_coef(diagram)
+        return x, p + 2 * c * x
+    if isinstance(diagram, PSpider):
+        c = _spider_quadratic_coef(diagram)
+        return x + 2 * c * p, p
+    if isinstance(diagram, CompositionDiagram):
+        for d in diagram.diagrams:
+            x, p = _apply_1mode_cvzx(d, x, p)
+        return x, p
+    return _apply_1mode_cvzx(diagram.expand(), x, p)
+
+
+def _apply_1mode_mqc3(diagram: Diagram, x: float, p: float) -> tuple[float, float]:  # noqa: PLR0911
+    """Like `_apply_1mode_cvzx`, but in mqc3's own rotation convention.
+
+    Interprets `PhaseRotationGate`, `Fourier`, and `FourierInv` nodes
+    using mqc3's OWN rotation convention (`cos/sin` matrix), for
+    directly checking what an expanded gate does to mqc3-convention
+    (x, p).
+    """
+    if isinstance(diagram, QSpider):
+        c = _spider_quadratic_coef(diagram)
+        return x, p + 2 * c * x
+    if isinstance(diagram, PSpider):
+        c = _spider_quadratic_coef(diagram)
+        return x + 2 * c * p, p
+    if isinstance(diagram, CompositionDiagram):
+        for d in diagram.diagrams:
+            x, p = _apply_1mode_mqc3(d, x, p)
+        return x, p
+    if isinstance(diagram, PhaseRotationGate):
+        phi = -diagram.theta  # cvzx PhaseRotationGate(theta) == mqc3 R(-theta)
+        return np.cos(phi) * x - np.sin(phi) * p, np.sin(phi) * x + np.cos(phi) * p
+    if isinstance(diagram, Fourier):
+        return -p, x  # mqc3 R(pi/2)
+    if isinstance(diagram, FourierInv):
+        return p, -x  # mqc3 R(-pi/2)
+    return _apply_1mode_mqc3(diagram.expand(), x, p)
+
+
+def mqc3_gates_numeric_verification_test():  # noqa: C901, PLR0914, PLR0915
+    """Numerically verify each mqc3-derived gate's `expand()` against mqc3's own matrix definitions.
+
+    Checks each gate's `expand()` against the exact Heisenberg matrix
+    mqc3's own docstrings define for it. Unlike the rest of this file,
+    this uses real `assert`s rather than printed checkmarks, since it
+    is checking mathematical correctness rather than just "did this
+    render."
+    """
+    print("Testing mqc3-derived gates against mqc3's own matrix definitions...")
+    rng = random.Random(12345)
+
+    def rand() -> float:
+        return rng.uniform(-2.0, 2.0)
+
+    def rand_angle() -> float:
+        return rng.uniform(-1.4, 1.4)  # stay clear of PhaseRotationGate's pi/2 exclusion
+
+    def mqc3_r(phi: float, x: float, p: float) -> tuple[float, float]:
+        return np.cos(phi) * x - np.sin(phi) * p, np.sin(phi) * x + np.cos(phi) * p
+
+    def mqc3_s(lam: float, x: float, p: float) -> tuple[float, float]:
+        return np.exp(lam) * x, np.exp(-lam) * p
+
+    # ShearXInvariant(kappa): x invariant, p -> p + 2*kappa*x
+    for _ in range(10):
+        kappa = rand()
+        xv, pv = rand(), rand()
+        xo, po = _apply_1mode_cvzx(ShearXInvariantGate(kappa).expand(), xv, pv)
+        assert abs(xo - xv) < 1e-9
+        assert abs(po - (pv + 2 * kappa * xv)) < 1e-9
+
+    # ShearPInvariant(eta): p invariant, x -> x + 2*eta*p
+    for _ in range(10):
+        eta = rand()
+        xv, pv = rand(), rand()
+        xo, po = _apply_1mode_cvzx(ShearPInvariantGate(eta).expand(), xv, pv)
+        assert abs(po - pv) < 1e-9
+        assert abs(xo - (xv + 2 * eta * pv)) < 1e-9
+
+    # Arbitrary(alpha, beta, lam) = R(alpha) . S(lam) . R(beta), rightmost applied first
+    for _ in range(20):
+        alpha, beta, lam = rand_angle(), rand_angle(), rand()
+        xv, pv = rand(), rand()
+        xo, po = _apply_1mode_mqc3(ArbitraryGate(alpha, beta, lam).expand(), xv, pv)
+        xe, pe = mqc3_r(beta, xv, pv)
+        xe, pe = mqc3_s(lam, xe, pe)
+        xe, pe = mqc3_r(alpha, xe, pe)
+        assert abs(xo - xe) < 1e-7
+        assert abs(po - pe) < 1e-7
+
+    # Squeezing45(theta) = R(-pi/4) . S_V(cot theta) . R(pi/4), rightmost applied first
+    for _ in range(20):
+        theta = rng.uniform(0.2, 1.3)
+        xv, pv = rand(), rand()
+        xo, po = _apply_1mode_mqc3(Squeezing45Gate(theta).expand(), xv, pv)
+        c = 1 / np.tan(theta)
+        xe, pe = mqc3_r(np.pi / 4, xv, pv)
+        xe, pe = xe / c, c * pe
+        xe, pe = mqc3_r(-np.pi / 4, xe, pe)
+        assert abs(xo - xe) < 1e-7
+        assert abs(po - pe) < 1e-7
+
+    # TwoModeShear(a, b): p1' = 2a*x1 + b*x2 + p1, p2' = b*x1 + 2a*x2 + p2, x invariant
+    for _ in range(10):
+        a, b = rand(), rand()
+        x1, p1, x2, p2 = rand(), rand(), rand(), rand()
+        expanded = TwoModeShearGate(a, b).expand()
+        tensor, cz = expanded.diagrams
+        shear1, shear2 = tensor.diagrams
+        x1o, p1o = _apply_1mode_cvzx(shear1, x1, p1)
+        x2o, p2o = _apply_1mode_cvzx(shear2, x2, p2)
+        assert isinstance(cz, ControlledZGate)
+        g = cz.gain
+        p1o, p2o = p1o - g * x2o, p2o - g * x1o
+        assert abs(x1o - x1) < 1e-9
+        assert abs(x2o - x2) < 1e-9
+        assert abs(p1o - (2 * a * x1 + b * x2 + p1)) < 1e-9
+        assert abs(p2o - (b * x1 + 2 * a * x2 + p2)) < 1e-9
+
+    # Measurement(theta) measures x*sin(theta) + p*cos(theta), including the
+    # theta = 0 (measure p) and theta = pi (measure -p) cases that force the
+    # Fourier/FourierInv fallback inside MeasurementGate._rotation_diagram.
+    test_thetas = [0.0, np.pi, -np.pi, 2 * np.pi, *[rand_angle() * 3 for _ in range(15)]]
+    for theta in test_thetas:
+        rot, effect = MeasurementGate(theta).expand().diagrams
+        assert effect.num_inputs == 1
+        assert effect.num_outputs == 0
+        xv, pv = rand(), rand()
+        x_after, _p_after = _apply_1mode_mqc3(rot, xv, pv)
+        expected = np.sin(theta) * xv + np.cos(theta) * pv
+        assert abs(x_after - expected) < 1e-7, (theta, x_after, expected)
+
+    # MeasurementGate.conjugate(): arity flips from effect (1-in-0-out) to
+    # state (0-in-1-out), including at the Fourier/FourierInv angles.
+    for theta in [0.0, np.pi / 3, np.pi]:
+        conj = MeasurementGate(theta).conjugate()
+        assert conj.num_inputs == 0
+        assert conj.num_outputs == 1
+
+    print("✅ All mqc3-derived gates verified against mqc3's own matrix definitions")
+
+
 def run_all_tests():
     """Run all test functions."""
-    # compact_gates_test()
-    # expanded_gates_test()
-    # with_custom_config_test()
-    # compact_diagram_label_validation_test()
-    # conjugate_gates_test()
-    # create_compact_diagram_test()
+    compact_gates_test()
+    expanded_gates_test()
+    with_custom_config_test()
+    compact_diagram_label_validation_test()
+    conjugate_gates_test()
+    create_compact_diagram_test()
     feedforward_test()
+    mqc3_gates_numeric_verification_test()
 
 
 if __name__ == "__main__":

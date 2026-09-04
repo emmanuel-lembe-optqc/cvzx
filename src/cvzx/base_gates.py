@@ -1197,15 +1197,15 @@ class CompositionDiagram(Diagram):
             )
             raise ValueError(msg)
         # Composition
+        diagrams = list(self.diagrams)
         if isinstance(other, CompositionDiagram):
-            diagrams = list(other.diagrams)
+            new_diagrams = list(other.diagrams)
             new_connectivity = deepcopy(other.connectivity)
-            size = len(diagrams)
+            size = len(new_diagrams)
             new_connectivity[size - 1] = connectivity
             for key, value in self.connectivity.items():
-                new_connectivity[size + key + 1] = value
-            return CompositionDiagram([*diagrams, self], new_connectivity)
-        diagrams = list(self.diagrams)
+                new_connectivity[size + key] = value
+            return CompositionDiagram([*new_diagrams, *diagrams], new_connectivity)
         new_connectivity = {key + 1: value for key, value in self.connectivity.items()}
         new_connectivity[0] = connectivity
         return CompositionDiagram([other, *diagrams], new_connectivity)

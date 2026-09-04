@@ -52,6 +52,9 @@ dev = [
   "pytest-cov",
   "pathos",
 
+  # Once in production use optqc-sdk repo
+  "mqc3 @ git+https://github.com/HidehiroYonezawa/mqc3.git",
+
   # Document
   "sphinx",
   "sphinx_copybutton",
