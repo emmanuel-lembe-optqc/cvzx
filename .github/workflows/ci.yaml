@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package
+        run: python -m pip install -e .
+
+      - name: Install lint/type/test tools
+        run: python -m pip install ruff==0.16.6 mypy==2.3.1 pytest
+
+      - name: Lint with ruff
+        run: ruff check src tests
+
+      - name: Check formatting with ruff
+        run: ruff format --check src tests
+
+      - name: Type check with mypy
+        run: mypy
+
+      - name: Run tests
+        run: pytest tests/
