@@ -20,6 +20,7 @@ from cvzx.base_gates import (
     QSpider,
     Swap,
     TensorDiagram,
+    VoidDiagram,
     ZxPoly,
 )
 from cvzx.gates import BeamsplitterGate, ControlledSumGate, PhaseRotationGate, SqueezingGate
@@ -989,6 +990,15 @@ class TestCopyRule(unittest.TestCase):
         and have the control state's two copies now living inside the
         ContractedDiagram alongside the (untouched) target state and sum
         spider -- with no more copy-able matches left.
+
+        `apply_rule_to_diagram` applies CopyRule directly, with none of
+        `optimize()`'s end-of-pipeline `remove_void_and_identity_nodes`
+        cleanup -- so the target state comes back wrapped in
+        `Tensor([VoidDiagram(0, 1), QSpider(...)])`, not a bare `QSpider`:
+        the `VoidDiagram` is CopyRule's transient placeholder for the leg
+        the control state vacated when it moved into the ContractedDiagram
+        (see `VoidDiagram`'s docstring), reserving that slot's arity until
+        a real cleanup pass removes it for good.
         """
         control_state = PSpider(0, 1, self.phase_x2)
         target_state = QSpider(0, 1, self.phase_x)
@@ -999,14 +1009,28 @@ class TestCopyRule(unittest.TestCase):
         assert isinstance(result, CompositionDiagram)
         assert result.num_inputs == 0
         assert result.num_outputs == 2
-        assert isinstance(result.diagrams[0], QSpider)
-        assert result.diagrams[0].phase == self.phase_x  # target_state, untouched
+
+        target_slot = result.diagrams[0]
+        assert isinstance(target_slot, TensorDiagram)
+        assert len(target_slot.diagrams) == 2
+        void, target = target_slot.diagrams
+        assert isinstance(void, VoidDiagram)
+        assert void.num_inputs == 0
+        assert void.num_outputs == 1
+        assert isinstance(target, QSpider)
+        assert target.phase == self.phase_x  # target_state, untouched
 
         contracted = result.diagrams[1]
         assert isinstance(contracted, ContractedDiagram)
         assert isinstance(contracted.first, TensorDiagram)
-        assert len(contracted.first.diagrams) == 2
-        assert all(isinstance(d, PSpider) and d.phase == self.phase_x2 for d in contracted.first.diagrams)
+        assert len(contracted.first.diagrams) == 3
+        void_first = [d for d in contracted.first.diagrams if isinstance(d, VoidDiagram)]
+        p_spiders = [d for d in contracted.first.diagrams if isinstance(d, PSpider)]
+        assert len(void_first) == 1
+        assert void_first[0].num_inputs == 1
+        assert void_first[0].num_outputs == 0
+        assert len(p_spiders) == 2
+        assert all(d.phase == self.phase_x2 for d in p_spiders)
         assert isinstance(contracted.second, PSpider)
         assert contracted.second.num_inputs == 2
 
