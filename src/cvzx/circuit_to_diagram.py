@@ -44,7 +44,7 @@ own gate matrices. A short summary:
   [-i*sqrt(1-sqrt_r**2), sqrt_r]]` -- an overall phase times a
   sigma_x-generated beamsplitter, whereas cvzx's own `BeamsplitterGate`
   is sigma_y-generated. Conjugating by a +-pi/2 rotation on mode 2
-  converts between the two, giving (with `eta = arccos(sqrt_r)`):
+  converts between the two, giving (with `eta = arccos(sqrt_r)`)::
 
       [TensorDiagram([identity, PhaseRotationGate(-pi/2)]),   # mode2 only
        BeamsplitterGate(eta),
