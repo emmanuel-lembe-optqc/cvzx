@@ -74,7 +74,7 @@ def _leaf_signatures(diagram):  # ruff: ignore[missing-type-function-argument, m
     reconstructs fresh leaf instances (see `_leaf_diagram`) -- comparing
     by `==`/`is` would never match even when the content is identical.
 
-    Returns:
+    Returns
     -------
     list[tuple]
         Sorted so two structurally-equal diagrams compare equal
@@ -112,9 +112,9 @@ def _stage_kind(stage):  # ruff: ignore[missing-type-function-argument, missing-
     the module exists to establish), so this doubles as a structural
     sanity check: it raises if that invariant is ever violated.
 
-    Raises:
+    Raises
     ------
-    AssertionError:
+    AssertionError
         If `stage` contains more than one wide leaf.
     """
     wide_leaves = _wide_leaves_in_stage(stage)
@@ -199,7 +199,7 @@ def _real_wiring(diagram):  # ruff: ignore[missing-type-function-argument, missi
     never reorders arbitrarily (see module docstring: causal/positional
     order is preserved throughout).
 
-    Returns:
+    Returns
     -------
     frozenset
         `(source, source_port, target, target_port)` tuples, where

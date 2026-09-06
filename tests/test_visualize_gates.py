@@ -839,9 +839,9 @@ def feedforward_params_all_gates_test():
     Follows the same pattern `DisplacementGate` established:
     `feedforward=True` requires a non-empty `measurement_ids` set.
 
-    Raises:
+    Raises
     ------
-    AssertionError:
+    AssertionError
         If any gate class fails to reject `feedforward=True` with no
         (or empty) `measurement_ids`.
     """

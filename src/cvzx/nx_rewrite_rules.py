@@ -3,8 +3,8 @@
 This module implements the 10 basic rewrite rules from [1] Sec. IV.A,
 and the derived rules from Sec. IV.B; using a graph structure.
 
-References:
------------
+References
+----------
 [1] Nagayoshi et al., CV ZX calculus, 2024
 """
 
@@ -43,12 +43,12 @@ class RewriteRule(ABC):
         1. Finds all matches
         2. Returns the modified graph
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph to modify.
 
-    Returns:
+    Returns
     -------
     nx.DiGraph
         The modified graph (same object, for chaining).
@@ -58,14 +58,14 @@ class RewriteRule(ABC):
     def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
         """Find all matches of the rule pattern in the graph.
 
-        Parameters:
+        Parameters
         ----------
         graph : nx.DiGraph
             The graph to search.
         registry : GateRegister
                     Registry for tracking specific gate types and nodes in a CV ZX graph.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of matches. Each match is a dictionary that can be
@@ -76,7 +76,7 @@ class RewriteRule(ABC):
     def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
         """Apply the rule to a specific match in-place.
 
-        Parameters:
+        Parameters
         ----------
         graph : nx.DiGraph
             The graph to modify.
@@ -87,20 +87,17 @@ class RewriteRule(ABC):
     def apply_rule(self, graph: nx.DiGraph, registry: GateRegister) -> nx.DiGraph:
         """Apply a rule to the entire graph.
 
-        Parameters:
+        Parameters
         ----------
         graph : nx.DiGraph
-                    The graph to modify.
-        diagram : Diagram
-            The diagram to modify.
-
+            The graph to modify.
         registry : GateRegister
             Registry for tracking specific gate types and nodes in a CV ZX graph.
 
-        Returns:
+        Returns
         -------
-        Diagram
-            The modified diagram.
+        nx.DiGraph
+            The modified graph.
         """
         # Find all matches
         matches = self.match(graph, registry)
@@ -128,7 +125,7 @@ class RewriteRule(ABC):
     def _flatten_container(self, graph: nx.DiGraph, container_id: int) -> None:
         """Flatten a container if it has only one element.
 
-        Parameters:
+        Parameters
         ----------
         graph : nx.DiGraph
             The graph to modify.
@@ -191,7 +188,7 @@ class RewriteRule(ABC):
         new_mapping : dict
             The same, after the recompute.
 
-        Returns:
+        Returns
         -------
         dict
             old_port -> new_port for every old port whose target still
@@ -219,7 +216,7 @@ class RewriteRule(ABC):
         container_id : int
             The ContractedDiagram container node ID.
 
-        Returns:
+        Returns
         -------
         tuple
             (old_num_inputs, new_num_inputs, old_num_outputs,
@@ -301,7 +298,7 @@ class RewriteRule(ABC):
         container_id : int
             The TensorDiagram container node ID.
 
-        Returns:
+        Returns
         -------
         tuple
             (old_num_inputs, new_num_inputs, old_num_outputs,
@@ -388,7 +385,7 @@ class RewriteRule(ABC):
             That child's own old port -> new port maps, for ports that
             still exist.
 
-        Returns:
+        Returns
         -------
         tuple
             (old_num_inputs, new_num_inputs, old_num_outputs,
@@ -484,7 +481,7 @@ class RewriteRule(ABC):
         removed_num_outputs : int
             The number of outputs the removed child contributed here.
 
-        Returns:
+        Returns
         -------
         tuple
             (old_num_inputs, new_num_inputs, old_num_outputs,
@@ -711,7 +708,7 @@ class IdentityRule(RewriteRule):
     def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
         """Find all identity spiders in the graph.
 
-        Parameters:
+        Parameters
         ----------
         graph : nx.DiGraph
             The graph to search.
@@ -719,7 +716,7 @@ class IdentityRule(RewriteRule):
         registry : GateRegister
             Registry for tracking specific gate types and nodes in a CV ZX graph.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of matches, each containing:
@@ -751,7 +748,7 @@ class IdentityRule(RewriteRule):
     def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
         """Remove an identity spider from the graph in-place.
 
-        Parameters:
+        Parameters
         ----------
         graph : nx.DiGraph
             The graph to modify.
@@ -823,12 +820,12 @@ class FusionRule(RewriteRule):
     For P-spiders: two p-spiders connected by wires can be fused with phase addition.
 
     The rule applies when:
+
     - Both spiders are the same type (both Q or both P)
     - They are in a ContractedDiagram container
     - They are connected via some wires (I1 and I2 matching J1 and J2)
-    - The resulting spider has:
-        inputs = inputs of first + inputs of second (minus connected wires)
-        outputs = outputs of first + outputs of second (minus connected wires)
+    - The resulting spider's inputs are the inputs of first + inputs of second
+      (minus connected wires), and likewise for outputs
     - Phase is the sum of the two phases
 
     The rule applies to ContractedDiagram containers anywhere in the graph.
@@ -846,7 +843,7 @@ class FusionRule(RewriteRule):
         registry : GateRegister
             Registry for tracking specific gate types and nodes in a CV ZX graph.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of matches, each containing:
@@ -1046,7 +1043,7 @@ class ChainReductionRule(RewriteRule):
         registry : GateRegister
             Registry for tracking specific gate types and nodes.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of matches, each containing:
@@ -1091,9 +1088,9 @@ class ChainReductionRule(RewriteRule):
         match : dict
             Match containing chain information.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `match["gate_type"]` is not a type `reduce_chain` recognizes
             (should not occur for a match produced by `match()`).
         """
@@ -1156,10 +1153,8 @@ class ChainReductionRule(RewriteRule):
             The graph containing the nodes.
         sub_ids : list[int]
             List of sub-diagram IDs in the composition.
-        container_id : int
-            The container node ID.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of chains, each containing:
@@ -1168,9 +1163,9 @@ class ChainReductionRule(RewriteRule):
             - 'values': list of values for each gate
             - 'node_ids': list of node IDs in order
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `get_gate_info` returns no `gate_info` for a 'Q'/'P' node
             (should not occur: those kinds always carry gate_info).
         """
@@ -1225,7 +1220,7 @@ class ChainReductionRule(RewriteRule):
     def get_gate_info(self, graph: nx.DiGraph, node_id: int) -> tuple[str | None, Any, dict | None]:  # ruff: ignore[complex-structure, too-many-return-statements]
         """Extract gate type and value from a node.
 
-        Returns:
+        Returns
         -------
         tuple[str | None, Any, dict | None]
             (gate_type, value, gate_info)
@@ -1303,14 +1298,14 @@ class ChainReductionRule(RewriteRule):
     ) -> bool:
         """Check if two gates can be chained.
 
-        Returns:
+        Returns
         -------
         bool
             True if the gates can be chained (reduced together).
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `gate_type == "CSUM"` but `gate_info`/`next_gate_info` is
             None (should not occur: CSUM nodes always carry gate_info).
         """
@@ -1351,7 +1346,7 @@ class ChainReductionRule(RewriteRule):
     def reduce_chain(self, gate_type: str, values: list, gate_info: dict | None = None) -> dict | None:  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches]
         """Reduce a chain of gates to a single gate.
 
-        Parameters:
+        Parameters
         ----------
         gate_type : str
             Type of gates in the chain
@@ -1360,15 +1355,15 @@ class ChainReductionRule(RewriteRule):
         gate_info : dict | None
             Useful information about the gate to reduce.
 
-        Returns:
+        Returns
         -------
         dict | None
             Dictionary with reduced gate attributes (contains 'type' and
             type-specific fields), or None if `gate_type` is not recognized.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `gate_type` is 'Q', 'P', or 'CSUM' but `gate_info` is None
             (should not occur: those kinds always carry gate_info).
         """
@@ -1605,7 +1600,7 @@ class FourierNormalizationRule(RewriteRule):
         registry : GateRegister
             Registry for tracking specific gate types and nodes.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of matches, each containing:
@@ -1654,7 +1649,7 @@ class FourierNormalizationRule(RewriteRule):
     def _check_pair(self, graph: nx.DiGraph, first_id: int, second_id: int) -> dict | None:
         """Check if a pair of adjacent nodes can be folded together.
 
-        Returns:
+        Returns
         -------
         dict | None
             Match dictionary if the pair can be folded, None otherwise.
@@ -1789,7 +1784,7 @@ class TerminalAbsorptionRule(RewriteRule):
     (default False) gates whether those two sub-cases are allowed to
     match at all; when False, only rotation absorption runs.
 
-    References:
+    References
     ----------
     [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (239a)-(239e).
     """
@@ -1816,7 +1811,7 @@ class TerminalAbsorptionRule(RewriteRule):
         registry : GateRegister
             Registry for tracking specific gate types and nodes.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of matches, each containing:
@@ -1858,7 +1853,7 @@ class TerminalAbsorptionRule(RewriteRule):
     def _check_pair(self, graph: nx.DiGraph, first_id: int, second_id: int) -> dict | None:
         """Check if a pair of adjacent nodes forms an absorbable gate/terminal pattern.
 
-        Returns:
+        Returns
         -------
         dict | None
             Match dictionary if the pair can be folded, None otherwise.
@@ -1893,16 +1888,16 @@ class TerminalAbsorptionRule(RewriteRule):
     def _try_absorb(self, *, terminal_attrs: dict, gate_attrs: dict) -> dict | None:
         """Fold `gate_attrs` into `terminal_attrs`, if the pattern matches.
 
-        Returns:
+        Returns
         -------
         dict | None
             Partial match dict (result type/arity/phase), or None.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If `terminal_attrs["phase"]` is present but not a `ZxPoly`.
-        ValueError:
+        ValueError
             If a phase is required to absorb `gate_attrs` but
             `terminal_attrs` has none (should not occur for a real
             QSpider/PSpider terminal).
@@ -1957,7 +1952,7 @@ class TerminalAbsorptionRule(RewriteRule):
     def _rotation_absorb(phase: ZxPoly, theta: float | Expr) -> ZxPoly | None:
         """Fold a rotation R(theta) into a terminal's phase (degree <= 1 only).
 
-        Returns:
+        Returns
         -------
         ZxPoly | None
             Updated phase after absorption.
@@ -1979,12 +1974,12 @@ class TerminalAbsorptionRule(RewriteRule):
         its coefficient by tau**d (built via the dict form -- ZxPoly's
         expr+gen constructor path has a latent bug, see base_gates.py).
 
-        Returns:
+        Returns
         -------
         ZxPoly
             Update phase after applying the Squeezing rule.
 
-        References:
+        References
         ----------
         [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (82)-(83).
         """
@@ -1994,7 +1989,7 @@ class TerminalAbsorptionRule(RewriteRule):
     def _is_degenerate_angle(theta: float | Expr) -> bool:
         """True if theta is an odd multiple of pi/2 (tan/1-over-cos undefined).
 
-        Returns:
+        Returns
         -------
         bool
         """
@@ -2114,7 +2109,7 @@ class CopyRule(RewriteRule):
         registry : GateRegister
             Registry for tracking specific gate types and nodes.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of matches, each containing:
@@ -2153,7 +2148,7 @@ class CopyRule(RewriteRule):
     def _resolve_containers(self, graph: nx.DiGraph, base_match: dict) -> dict | None:
         """Work out how to restructure the containers around a candidate match.
 
-        Returns:
+        Returns
         -------
         dict | None
             Extra fields to merge into the match, or None if this pair's
@@ -2200,7 +2195,7 @@ class CopyRule(RewriteRule):
     def _check_pair(self, graph: nx.DiGraph, first_id: int, second_id: int) -> dict | None:
         """Check if a pair of nodes forms a copy-able pattern.
 
-        Returns:
+        Returns
         -------
         dict | None
             Match dictionary if the pair is copy-able, None otherwise.
@@ -2330,12 +2325,12 @@ class CopyRule(RewriteRule):
     def is_in_R1(self, phase: ZxPoly) -> bool:
         """Check if a phase polynomial is in R₁[X] (degree ≤ 1).
 
-        Parameters:
+        Parameters
         ----------
         phase : ZxPoly
             The phase polynomial to check.
 
-        Returns:
+        Returns
         -------
         bool
             True if the polynomial has degree ≤ 1, False otherwise.
@@ -2571,7 +2566,7 @@ class IdentityRemovalRule(RewriteRule):
         registry : GateRegister
             Registry for tracking specific gate types and nodes in a CV ZX graph.
 
-        Returns:
+        Returns
         -------
         list[dict]
             List of matches, each containing:
@@ -2639,12 +2634,12 @@ def is_wiring_node_from_attrs(attrs: dict) -> bool:
         - With 1 input and 1 output
         - With zero phase
 
-    Parameters:
+    Parameters
     ----------
     attrs : dict
         Node attributes from the graph.
 
-    Returns:
+    Returns
     -------
     bool
         True if the node represents an identity spider.
@@ -2694,7 +2689,7 @@ def remove_void_and_identity_nodes(graph: nx.DiGraph) -> nx.DiGraph:
     graph : nx.DiGraph
         The graph to clean up in-place (already at a rewrite fixed point).
 
-    Returns:
+    Returns
     -------
     nx.DiGraph
         The same graph object, for chaining.
@@ -2717,14 +2712,14 @@ def remove_void_and_identity_nodes(graph: nx.DiGraph) -> nx.DiGraph:
 def apply_rule_to_diagram(rule: RewriteRule, diagram: Diagram) -> Diagram:
     """Apply a rewrite rule to a diagram, converting to graph and back.
 
-    Parameters:
+    Parameters
     ----------
     rule : RewriteRule
         The rule to apply.
     diagram : Diagram
         The diagram to modify.
 
-    Returns:
+    Returns
     -------
     Diagram
         The modified diagram.
@@ -2762,12 +2757,12 @@ def expand_two_mode_gates(diagram: Diagram) -> Diagram:
     reducible ancilla would otherwise fail to reduce at all. `CZ` is left
     completely unexpanded (and hence unnormalized), per the docstring above.
 
-    Parameters:
+    Parameters
     ----------
     diagram : Diagram
         The diagram to modify.
 
-    Returns:
+    Returns
     -------
     Diagram
         Expanded diagram.
@@ -2815,7 +2810,7 @@ def _flatten_expanded_composition(
     sits alongside other elements in a composition must flatten the result
     back into one flat list rather than nesting it.
 
-    Parameters:
+    Parameters
     ----------
     expanded_children : list[Diagram]
         The already-`expand_two_mode_gates`-processed children, in order.
@@ -2825,7 +2820,7 @@ def _flatten_expanded_composition(
         correctly describes each boundary `i` -> `i + 1` in terms of the
         un-flattened children's own port numbering.
 
-    Returns:
+    Returns
     -------
     CompositionDiagram
         A flat composition with every formerly-nested CompositionDiagram

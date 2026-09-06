@@ -928,7 +928,7 @@ class TestCopyRule(unittest.TestCase):
     def _expanded_csum_with_states(self, control: Diagram, target: Diagram, control_mode: int = 2) -> Diagram:
         """Build TensorDiagram([control, target]).compose(CSUM.expand()).
 
-        Returns:
+        Returns
         -------
         Diagram
             Expanded diagram.

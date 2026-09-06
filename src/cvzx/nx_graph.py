@@ -69,7 +69,7 @@ class GateRegister:
     modified (nodes added, removed, or changed), the registry must be updated
     accordingly using `add_node()`, `remove_node()`, or rebuilding from scratch.
 
-    Parameters:
+    Parameters
     ----------
         squeezing_gates set[int]: Node IDs of squeezing gates (Sq)
         displacement_gates set[int]: Node IDs of displacement gates (D)
@@ -104,7 +104,7 @@ class GateRegister:
         This method inspects the node's attributes and adds its ID to the
         corresponding sets based on its type, kind, and container type.
 
-        Parameters:
+        Parameters
         ----------
         node_id : int
             The ID of the node to add.
@@ -113,7 +113,7 @@ class GateRegister:
             and optionally 'type', 'container_type', 'num_inputs', 'num_outputs',
             and 'phase'.
 
-        Notes:
+        Notes
         -----
         - Container nodes (kind='container') are added to container-specific sets.
         - Proper nodes (kind='proper') are added to gate-type-specific sets.
@@ -170,7 +170,7 @@ class GateRegister:
         This method removes the given node ID from every set in the registry.
         It uses `discard()` to safely handle cases where the node is not present.
 
-        Parameters:
+        Parameters
         ----------
         node_id : int
             The ID of the node to remove from the registry.
@@ -190,12 +190,12 @@ class GateRegister:
     def copy(self) -> "GateRegister":
         """Create a shallow copy of the register.
 
-        Returns:
+        Returns
         -------
         GateRegister
             A new GateRegister instance with copies of all sets.
 
-        Notes:
+        Notes
         -----
         This is useful for parallelization where each partition needs its
         own independent registry that can be modified without affecting others.
@@ -239,12 +239,12 @@ class GateRegister:
         using `add_node()`. This is useful when the graph has been
         extensively modified and the registry may be out of sync.
 
-        Parameters:
+        Parameters
         ----------
         graph : nx.DiGraph
             The graph to rebuild the registry from.
 
-        Notes:
+        Notes
         -----
         This operation is O(N) where N is the number of nodes in the graph.
         It should be used sparingly; incremental updates are preferred.
@@ -256,7 +256,7 @@ class GateRegister:
     def _is_identity_spider(self, attrs: dict) -> bool:
         """Check if node attributes represent an identity spider.
 
-        Returns:
+        Returns
         -------
         bool
         """
@@ -278,7 +278,7 @@ class GateRegister:
     def _is_input_state(self, attrs: dict) -> bool:
         """Check if a node is an input state.
 
-        Returns:
+        Returns
         -------
         bool
         """
@@ -287,7 +287,7 @@ class GateRegister:
     def _is_measurement(self, attrs: dict) -> bool:
         """Check if a node is a measurement.
 
-        Returns:
+        Returns
         -------
         bool
         """
@@ -305,12 +305,12 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
         - The root container is marked with is_root=True
         - Edges represent connections between nodes
 
-    Parameters:
+    Parameters
     ----------
     diagram : Diagram
         The CV ZX diagram to convert.
 
-    Returns:
+    Returns
     -------
     nx.DiGraph
         Directed graph representation of the diagram with all nodes and edges.
@@ -336,19 +336,19 @@ def to_diagram(G: nx.DiGraph) -> Diagram:  # ruff: ignore[invalid-argument-name]
     This function reconstructs the original diagram from the graph, preserving
     the full hierarchy, container nodes, and all connections.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The directed graph representation of the diagram.
 
-    Returns:
+    Returns
     -------
     Diagram
         The reconstructed CV ZX diagram.
 
-    Raises:
+    Raises
     ------
-    ValueError:
+    ValueError
         If the graph is malformed or missing required attributes.
     """
     # Find the root node
@@ -378,7 +378,7 @@ def find_node_by_external_output(
         2. If diagram is a container: uses its output_mapping to find the sub-diagram
            and internal port, then recurses into that sub-diagram
 
-    Parameters:
+    Parameters
     ----------
     diagram : Diagram
         The diagram to search within.
@@ -387,7 +387,7 @@ def find_node_by_external_output(
     G : nx.DiGraph
         The graph containing the nodes.
 
-    Returns:
+    Returns
     -------
     tuple[int | None, int | None]
         (node_id, internal_port) of the proper node handling this external port,
@@ -436,7 +436,7 @@ def find_node_by_external_input(
         2. If diagram is a container: uses its input_mapping to find the sub-diagram
            and internal port, then recurses into that sub-diagram
 
-    Parameters:
+    Parameters
     ----------
     diagram : Diagram
         The diagram to search within.
@@ -445,7 +445,7 @@ def find_node_by_external_input(
     G : nx.DiGraph
         The graph containing the nodes.
 
-    Returns:
+    Returns
     -------
     tuple[int | None, int | None]
         (node_id, internal_port) of the proper node handling this external input port,
@@ -484,12 +484,12 @@ def get_proper_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-argume
     Proper nodes represent actual operations (spiders, gates, etc.)
     and have kind='proper'.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph to search for proper nodes.
 
-    Returns:
+    Returns
     -------
     list[int]
         List of node IDs for all proper nodes in the graph.
@@ -503,12 +503,12 @@ def get_container_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-arg
     Container nodes represent structural elements (CompositionDiagram,
     TensorDiagram, ContractedDiagram) and have kind='container'.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph to search for container nodes.
 
-    Returns:
+    Returns
     -------
     list[int]
         List of node IDs for all container nodes in the graph.
@@ -521,12 +521,12 @@ def get_root_node(G: nx.DiGraph) -> int | None:  # ruff: ignore[invalid-argument
 
     The root node is the container node with is_root=True.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph to search for the root node.
 
-    Returns:
+    Returns
     -------
     int | None
         The node ID of the root container, or None if no root is found.
@@ -540,14 +540,14 @@ def get_root_node(G: nx.DiGraph) -> int | None:  # ruff: ignore[invalid-argument
 def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:  # ruff: ignore[invalid-argument-name]
     """Get the immediate container of a node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
     node_id : int
         The node ID to find the container for.
 
-    Returns:
+    Returns
     -------
     int | None
         The node ID of the immediate container, or None if the node is the root.
@@ -559,14 +559,14 @@ def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:  # ruff:
 def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:  # ruff: ignore[invalid-argument-name]
     """Get the sub-diagram node IDs of a container node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the container node.
     container_node : int
         The node ID of the container node.
 
-    Returns:
+    Returns
     -------
     list[int]
         List of sub-diagram node IDs, or an empty list if the node is not
@@ -581,14 +581,14 @@ def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:  # ruff: 
 def get_connectivity(G: nx.DiGraph, container_node: int) -> dict[int, dict[int, int]] | None:  # ruff: ignore[invalid-argument-name]
     """Get the connectivity dictionary of a CompositionDiagram container node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the container node.
     container_node : int
         The node ID of the composition container node.
 
-    Returns:
+    Returns
     -------
     dict[int, dict[int, int]] | None
         The connectivity dictionary if the node is a CompositionDiagram,
@@ -603,14 +603,14 @@ def get_connectivity(G: nx.DiGraph, container_node: int) -> dict[int, dict[int, 
 def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | None:  # ruff: ignore[invalid-argument-name]
     """Get the contracted connections of a ContractedDiagram container node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the container node.
     container_node : int
         The node ID of the contracted container node.
 
-    Returns:
+    Returns
     -------
     dict | None
         A dictionary with keys 'I1', 'I2', 'J1', 'J2' if the node is a
@@ -632,14 +632,14 @@ def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:  # 
 
     This includes both proper nodes and nested container nodes.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the nodes.
     container_node : int
         The node ID of the container.
 
-    Returns:
+    Returns
     -------
     list[int]
         List of node IDs belonging to the container.
@@ -658,7 +658,7 @@ def _convert_diagram_to_graph(
     This function recursively converts a diagram and its sub-diagrams
     to graph nodes. It returns the node ID of the root diagram.
 
-    Parameters:
+    Parameters
     ----------
     diagram : Diagram
         The diagram to convert.
@@ -670,7 +670,7 @@ def _convert_diagram_to_graph(
     is_root : bool, default=False
         Whether this diagram is the root (outermost) diagram.
 
-    Returns:
+    Returns
     -------
     int
         The node ID of the root diagram in the graph, or -1 if the diagram
@@ -697,7 +697,7 @@ def _add_proper_node(  # ruff: ignore[complex-structure, too-many-branches]
     Proper nodes have kind='proper' and store all relevant attributes
     including type, phase, port information, and its container ID.
 
-    Parameters:
+    Parameters
     ----------
     diagram : ProperDiagram | CompactDiagram
         The proper diagram to add as a node.
@@ -706,7 +706,7 @@ def _add_proper_node(  # ruff: ignore[complex-structure, too-many-branches]
     container_id : int | None
         The node ID of the immediate container of this proper diagram.
 
-    Returns:
+    Returns
     -------
     int
         The node ID of the added proper node.
@@ -860,7 +860,7 @@ def _add_composition_node(
     If multiple connections exist between the same pair of proper nodes, they
     are stored as lists of source_port and target_port on a single edge.
 
-    Parameters:
+    Parameters
     ----------
     diagram : CompositionDiagram
         The composition diagram to add as a container node.
@@ -872,12 +872,12 @@ def _add_composition_node(
     is_root : bool, default=False
         Whether this is the root (outermost) diagram.
 
-    Returns:
+    Returns
     -------
     int
         The node ID of the added composition container node.
 
-    Notes:
+    Notes
     -----
     The connectivity dictionary follows the convention:
         connectivity[i] connects diagrams[i] → diagrams[i+1]
@@ -994,7 +994,7 @@ def _add_tensor_node(
 
     No edges are added between tensor components since they are parallel.
 
-    Parameters:
+    Parameters
     ----------
     diagram : TensorDiagram
         The tensor diagram to add as a container node.
@@ -1005,7 +1005,7 @@ def _add_tensor_node(
     is_root : bool, default=False
         Whether this is the root (outermost) diagram.
 
-    Returns:
+    Returns
     -------
     int
         The node ID of the added tensor container node.
@@ -1077,7 +1077,7 @@ def _add_contracted_node(  # ruff: ignore[complex-structure]
 
     Internal edges are added for both directions of contraction.
 
-    Parameters:
+    Parameters
     ----------
     diagram : ContractedDiagram
         The contracted diagram to add as a container node.
@@ -1088,7 +1088,7 @@ def _add_contracted_node(  # ruff: ignore[complex-structure]
     is_root : bool, default=False
         Whether this is the root (outermost) diagram.
 
-    Returns:
+    Returns
     -------
     int
         The node ID of the added contracted container node.
@@ -1224,21 +1224,21 @@ def _add_contracted_node(  # ruff: ignore[complex-structure]
 def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a diagram from a graph node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
 
-    Returns:
+    Returns
     -------
     Diagram
         The reconstructed diagram.
 
-    Raises:
+    Raises
     ------
-    ValueError:
+    ValueError
         If the node type is unknown.
     """
     attrs = G.nodes[node_id]
@@ -1263,21 +1263,21 @@ def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ign
 def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[complex-structure, invalid-argument-name, too-many-return-statements, too-many-branches, too-many-locals]
     """Reconstruct a proper diagram from a graph node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
 
-    Returns:
+    Returns
     -------
     Diagram
         The reconstructed diagram.
 
-    Raises:
+    Raises
     ------
-    ValueError:
+    ValueError
         If the node type is not among proper diagram types.
     """
     attrs = G.nodes[node_id]
@@ -1345,21 +1345,21 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: i
 def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a CompositionDiagram from a graph node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
 
-    Returns:
+    Returns
     -------
     Diagram
         The reconstructed CompositionDiagram.
 
-    Raises:
+    Raises
     ------
-    ValueError:
+    ValueError
         If the connectivity is malformed.
     """
     attrs = G.nodes[node_id]
@@ -1417,14 +1417,14 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ru
 def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a TensorDiagram from a graph node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
 
-    Returns:
+    Returns
     -------
     Diagram
         The reconstructed diagram.
@@ -1441,21 +1441,21 @@ def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: i
 def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a ContractedDiagram from a graph node.
 
-    Parameters:
+    Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
 
-    Returns:
+    Returns
     -------
     Diagram
         The reconstructed diagram.
 
-    Raises:
+    Raises
     ------
-    ValueError:
+    ValueError
         If the ContractedDiagram node misses first_id or second_id.
     """
     attrs = G.nodes[node_id]

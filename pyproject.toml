@@ -44,6 +44,13 @@ dependencies = [
 
 [project.optional-dependencies]
 all = []
+docs = [
+  "sphinx",
+  "sphinx_copybutton",
+  "sphinxcontrib-bibtex",
+  "myst-parser",
+  "furo",
+]
 dev = [
   # Test
   "pytest",
@@ -56,12 +63,8 @@ dev = [
   "mqc3 @ git+https://github.com/HidehiroYonezawa/mqc3.git",
 
   # Document
-  "sphinx",
-  "sphinx_copybutton",
-  "sphinxcontrib-bibtex",
-  "myst-parser",
+  "cvzx[docs]",
   "myst-nb",
-  "furo",
   "jupyter",
   "ipykernel",
 ]

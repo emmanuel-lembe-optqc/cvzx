@@ -5,8 +5,8 @@ built from proper diagrams (spiders, Fourier, Swap). Each gate is a subclass
 of CompactDiagram and provides a expand() method that returns the
 equivalent CompositionDiagram or TensorDiagram of basic CV ZX elements.
 
-References:
------------
+References
+----------
 [1] Nagayoshi et al., CV ZX calculus, Sec. II.C, Table I
 """
 
@@ -43,7 +43,7 @@ class CompactDiagram(Diagram):
         - Deferring expansion until necessary (e.g., for optimization or visualization)
         - Creating reusable composite blocks
 
-    Attributes:
+    Attributes
     ----------
     label : str
         A label to display on the diagram (e.g., "R(θ)", "CZ", "BS(π/4)").
@@ -63,7 +63,7 @@ class CompactDiagram(Diagram):
     def expand(self) -> Diagram:
         """Expand the compact diagram to its full decomposition.
 
-        Returns:
+        Returns
         -------
         Diagram
             The full decomposition. If no decomposition is set, returns self.
@@ -75,7 +75,7 @@ class CompactDiagram(Diagram):
     def can_expand(self) -> bool:
         """Check if the diagram has a decomposition set.
 
-        Returns:
+        Returns
         -------
         bool
             True if decomposition is not None.
@@ -85,12 +85,12 @@ class CompactDiagram(Diagram):
     def with_decomposition(self, decomp: Diagram) -> "CompactDiagram":
         """Return a new CompactDiagram with the given decomposition.
 
-        Parameters:
+        Parameters
         ----------
         decomp : Diagram
             The decomposition to attach.
 
-        Returns:
+        Returns
         -------
         CompactDiagram
             A new CompactDiagram with the same label but with decomposition set.
@@ -113,7 +113,7 @@ class CompactDiagram(Diagram):
         subclass (`MeasurementGate`) has a true adjoint that isn't
         compact-representable (see its own `conjugate()` docstring).
 
-        Returns:
+        Returns
         -------
         Diagram
             A new CompactDiagram with the conjugated label and decomposition.
@@ -136,19 +136,19 @@ class CompactDiagram(Diagram):
     def tensor(self, other: Diagram, expand_self: bool = False) -> Diagram:  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
         """Tensor product of this compact diagram with another diagram.
 
-        Parameters:
+        Parameters
         ----------
         other : Diagram
             Diagram to tensor with.
         expand_self : bool, default=False
             If True, expand this diagram before tensoring.
 
-        Returns:
+        Returns
         -------
         Diagram
             Tensor product diagram.
 
-        Notes:
+        Notes
         -----
         - If both are CompactDiagram and self is not expanded, keep compact.
         - If expand_self is True, self is expanded first.
@@ -172,7 +172,7 @@ class CompactDiagram(Diagram):
     def compose(self, other: Diagram, connectivity: dict | None = None, expand_self: bool = False) -> Diagram:  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
         """Compose this compact diagram with another diagram.
 
-        Parameters:
+        Parameters
         ----------
         other : Diagram
             Diagram to apply after self (other ∘ self).
@@ -182,12 +182,12 @@ class CompactDiagram(Diagram):
         expand_self : bool, default=False
             If True, expand this diagram before composing.
 
-        Returns:
+        Returns
         -------
         Diagram
             Composition diagram (other ∘ self).
 
-        Notes:
+        Notes
         -----
         - If both are CompactDiagram and self is not expanded, keep compact.
         - If expand_self is True, self is expanded first.
@@ -234,7 +234,7 @@ class CompactDiagram(Diagram):
     def is_proper(self) -> bool:
         """Compact diagrams are not proper..
 
-        Returns:
+        Returns
         -------
             bool
         """
@@ -244,7 +244,7 @@ class CompactDiagram(Diagram):
     def num_inputs(self) -> int:
         """Number of input wires.
 
-        Returns:
+        Returns
         -------
         int
             Number of input ports.
@@ -255,7 +255,7 @@ class CompactDiagram(Diagram):
     def num_outputs(self) -> int:
         """Number of output wires.
 
-        Returns:
+        Returns
         -------
         int
             Number of output ports.
@@ -265,9 +265,9 @@ class CompactDiagram(Diagram):
     def __post_init__(self) -> None:
         """Initialize the compact diagram.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If label is empty or None.
             If label exceeds 5 characters.
         """
@@ -279,7 +279,7 @@ class CompactDiagram(Diagram):
     def __repr__(self) -> str:
         """Return string representation of the compact diagram.
 
-        Returns:
+        Returns
         -------
         str
             String showing the label and input/output counts if available.
@@ -315,7 +315,11 @@ class DisplacementGate(CompactDiagram):
     decomposition : Diagram | None
         Cached decomposition of the gate.
 
-    Examples:
+    References
+    ----------
+    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.1, Eq. (57)
+
+    Examples
     --------
     >>> # Numeric displacement
     >>> D = DisplacementGate(0.5 + 0.3j)
@@ -336,9 +340,6 @@ class DisplacementGate(CompactDiagram):
     >>> meas = QSpider(1, 0, ZxPoly({1: m}))
     >>> D = Displacement(m + I*2, parametric=True, feedforward=True, measurement_ids = {meas.id})
 
-    References:
-    ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.1, Eq. (57)
     """
 
     alpha: float | int | complex | Expr
@@ -359,12 +360,12 @@ class DisplacementGate(CompactDiagram):
             D(a) = Q(√2 Im(a) x) ∘ P(√2 Re(a) x)
             where Re(a) and Im(a) are symbolic expressions.
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition of p-spider then q-spider.
 
-        Examples:
+        Examples
         --------
         >>> # Numeric displacement
         >>> D = DisplacementGate(0.5 + 0.3j)
@@ -404,18 +405,18 @@ class DisplacementGate(CompactDiagram):
             Dictionary mapping symbols to values.
             Keys can be Symbol objects or strings.
 
-        Returns:
+        Returns
         -------
         DisplacementGate
             A new DisplacementGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
-        Examples:
+        Examples
         --------
         >>> from sympy import symbols
         >>> a, b = symbols('a b')
@@ -453,12 +454,12 @@ class DisplacementGate(CompactDiagram):
             Parameter values as keyword arguments.
             Keys are parameter names (strings), values are numeric.
 
-        Returns:
+        Returns
         -------
         DisplacementGate
             A new DisplacementGate with evaluated parameters.
 
-        Examples:
+        Examples
         --------
         >>> from sympy import symbols
         >>> a, b = symbols('a b')
@@ -477,12 +478,12 @@ class DisplacementGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the displacement gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the displacement gate.
 
-        Examples:
+        Examples
         --------
         >>> from sympy import symbols
         >>> a, b = symbols('a b')
@@ -497,7 +498,7 @@ class DisplacementGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of displacement gate is displacement with negated alpha.
 
-        Returns:
+        Returns
         -------
         DisplacementGate
             D(-a)
@@ -509,7 +510,7 @@ class DisplacementGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the displacement gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the displacement amplitude alpha.
@@ -560,7 +561,7 @@ class DisplacementGate(CompactDiagram):
     def _get_re_im(self) -> tuple[float, float] | tuple[Expr, Expr]:
         """Extract real and imaginary parts of alpha.
 
-        Returns:
+        Returns
         -------
         tuple
             (real_part, imag_part) as either numeric or symbolic values.
@@ -586,7 +587,7 @@ class DisplacementGate(CompactDiagram):
         degree : int
             Degree of the monomial. Default 1 for linear phase.
 
-        Returns:
+        Returns
         -------
         ZxPoly
             Phase polynomial with the given coefficient.
@@ -621,13 +622,17 @@ class PhaseRotationGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    Raises:
+    Raises
     ------
     ValueError
         If theta is an odd multiple of π/2 (where tan is infinite).
         For these cases, use Fourier2 or composition of Fourier gates.
 
-    Examples:
+    References
+    ----------
+    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.2, Eq. (58)
+
+    Examples
     --------
     >>> # Numeric phase rotation
     >>> R = PhaseRotationGate(np.pi/4)
@@ -639,9 +644,6 @@ class PhaseRotationGate(CompactDiagram):
     >>> R = PhaseRotationGate(theta, parametric=True)
     >>> decomp = R.expand()
 
-    References:
-    ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.2, Eq. (58)
     """
 
     theta: float | int | complex | Expr
@@ -659,12 +661,12 @@ class PhaseRotationGate(CompactDiagram):
 
         R(θ) = P(tan(θ/2)/2) ∘ Q(-sinθ/2) ∘ P(tan(θ/2)/2)
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition of three q-spiders.
 
-        Examples:
+        Examples
         --------
         >>> R = PhaseRotationGate(np.pi/4)
         >>> decomp = R.expand()
@@ -686,14 +688,14 @@ class PhaseRotationGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         PhaseRotationGate
             A new PhaseRotationGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -726,7 +728,7 @@ class PhaseRotationGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         PhaseRotationGate
             A new PhaseRotationGate with evaluated parameters.
@@ -743,7 +745,7 @@ class PhaseRotationGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the phase rotation gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -755,7 +757,7 @@ class PhaseRotationGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of phase rotation is rotation by negative angle.
 
-        Returns:
+        Returns
         -------
         PhaseRotationGate
             R(-θ)
@@ -767,7 +769,7 @@ class PhaseRotationGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the phase rotation gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the rotation angle theta.
@@ -791,9 +793,9 @@ class PhaseRotationGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the phase rotation gate and validate parameters.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `theta` is an odd multiple of pi/2 (see `_validate_theta`),
             or if `feedforward` is set and `measurement_ids` is not a
             non-empty set.
@@ -828,7 +830,7 @@ class PhaseRotationGate(CompactDiagram):
     def _get_tan_half(self) -> float | int | complex | Expr:
         """Get tan(θ/2) for the decomposition.
 
-        Returns:
+        Returns
         -------
             float | int | complex | Expr
         """
@@ -839,7 +841,7 @@ class PhaseRotationGate(CompactDiagram):
     def _get_sin(self) -> float | int | complex | Expr:
         """Get sin(θ) for the decomposition.
 
-        Returns:
+        Returns
         -------
             float | int | complex | Expr
         """
@@ -874,7 +876,11 @@ class SqueezingGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    Examples:
+    References
+    ----------
+    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.3, Eq. (59)
+
+    Examples
     --------
     >>> # Numeric squeezing
     >>> S = SqueezingGate(0.5)
@@ -886,9 +892,6 @@ class SqueezingGate(CompactDiagram):
     >>> S = SqueezingGate(exp(-r), parametric=True)
     >>> decomp = S.expand()
 
-    References:
-    ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.3, Eq. (59)
     """
 
     tau: float | int | complex | Expr
@@ -907,12 +910,12 @@ class SqueezingGate(CompactDiagram):
         Sq(τ) = Q(a) ∘ P(b) ∘ Q(c) ∘ P(d)
         where a = τ(1-τ)/4, b = -1/τ, c = (τ-1)/4, d = 1
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition of Q, P, Q, P spiders in sequence.
 
-        Examples:
+        Examples
         --------
         >>> S = SqueezingGate(0.5)
         >>> decomp = S.expand()
@@ -934,14 +937,14 @@ class SqueezingGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         SqueezingGate
             A new SqueezingGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -974,7 +977,7 @@ class SqueezingGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         SqueezingGate
             A new SqueezingGate with evaluated parameters.
@@ -991,7 +994,7 @@ class SqueezingGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the squeezing gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -1003,7 +1006,7 @@ class SqueezingGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of squeezing gate is squeezing with reciprocal parameter.
 
-        Returns:
+        Returns
         -------
         SqueezingGate
             Sq(1/τ)
@@ -1015,7 +1018,7 @@ class SqueezingGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the squeezing gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the squeezing parameter tau.
@@ -1035,9 +1038,9 @@ class SqueezingGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the squeezing gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -1071,7 +1074,7 @@ class SqueezingGate(CompactDiagram):
     ]:
         """Get the four coefficients for the spider decomposition.
 
-        Returns:
+        Returns
         -------
         tuple
             (a, b, c, d) where:
@@ -1123,12 +1126,17 @@ class ControlledSumGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    Raises:
+    Raises
     ------
     ValueError
         If control == target (must be different modes).
 
-    Examples:
+    References
+    ----------
+    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.4, Eq. (61)-(62)
+    [4] Yoshikawa et al., QRL configuration, Sec. IV.C.3
+
+    Examples
     --------
     >>> # Unbiased CSUM
     >>> C = ControlledSumGate(control=2, target=1)
@@ -1140,10 +1148,6 @@ class ControlledSumGate(CompactDiagram):
     >>> C = ControlledSumGate(gain=g, control=2, target=1, parametric=True)
     >>> decomp = C.expand()
 
-    References:
-    ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.4, Eq. (61)-(62)
-    [4] Yoshikawa et al., QRL configuration, Sec. IV.C.3
     """
 
     gain: float | int | complex | Expr = 1.0
@@ -1171,12 +1175,12 @@ class ControlledSumGate(CompactDiagram):
 
         The squeezing is applied to the control mode.
 
-        Returns:
+        Returns
         -------
         Diagram
             ContractedDiagram for unbiased, CompositionDiagram for biased.
 
-        Examples:
+        Examples
         --------
         >>> C = ControlledSumGate(control=2, target=1)
         >>> decomp = C.expand()
@@ -1234,14 +1238,14 @@ class ControlledSumGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         ControlledSumGate
             A new ControlledSumGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -1274,7 +1278,7 @@ class ControlledSumGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         ControlledSumGate
             A new ControlledSumGate with evaluated parameters.
@@ -1291,7 +1295,7 @@ class ControlledSumGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the CSUM gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -1305,7 +1309,7 @@ class ControlledSumGate(CompactDiagram):
 
         (e^{-i g q_c p_t})† = e^{+i g q_c p_t} = CSUM(-g)
 
-        Returns:
+        Returns
         -------
         ControlledSumGate
             CSUM with gain = -g (same control/target).
@@ -1317,7 +1321,7 @@ class ControlledSumGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the controlled-sum gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the control/target modes and gain (if not 1).
@@ -1369,7 +1373,7 @@ class ControlledSumGate(CompactDiagram):
     def _is_unbiased(self) -> bool:
         """Check if this is an unbiased CSUM gate (gain = 1).
 
-        Returns:
+        Returns
         -------
         bool
         """
@@ -1389,7 +1393,7 @@ class ControlledZGate(CompactDiagram):
     parametric : bool
         If True, treat gain as symbolic parameter. Default False.
 
-    Attributes:
+    Attributes
     ----------
     gain : float | int | Expr
         Gain parameter (symbolic or numeric).
@@ -1404,7 +1408,11 @@ class ControlledZGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    Examples:
+    References
+    ----------
+    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.5, Eq. (63)-(64)
+
+    Examples
     --------
     >>> # Unbiased CZ
     >>> CZ = ControlledZGate()
@@ -1416,9 +1424,6 @@ class ControlledZGate(CompactDiagram):
     >>> CZ = ControlledZGate(gain=g, parametric=True)
     >>> decomp = CZ.expand()
 
-    References:
-    ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.5, Eq. (63)-(64)
     """
 
     gain: float | int | complex | Expr = 1.0
@@ -1441,12 +1446,12 @@ class ControlledZGate(CompactDiagram):
         Biased CZ [3] Eq. (64):
             CZ(g) = (Sq(g⁻¹) ⊗ Id) ∘ CZ(1) ∘ (Sq(g) ⊗ Id)
 
-        Returns:
+        Returns
         -------
         Diagram
             Composition of Fourier, CSUM, Fourier.
 
-        Examples:
+        Examples
         --------
         >>> CZ = ControlledZGate()
         >>> decomp = CZ.expand()
@@ -1500,14 +1505,14 @@ class ControlledZGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         ControlledZGate
             A new ControlledZGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -1540,7 +1545,7 @@ class ControlledZGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         ControlledZGate
             A new ControlledZGate with evaluated parameters.
@@ -1557,7 +1562,7 @@ class ControlledZGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the CZ gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -1569,7 +1574,7 @@ class ControlledZGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of CZ is CZ with same gain (self-adjoint).
 
-        Returns:
+        Returns
         -------
         ControlledZGate
             CZ(g)
@@ -1581,7 +1586,7 @@ class ControlledZGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the controlled-Z gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the gain if not 1.
@@ -1595,9 +1600,9 @@ class ControlledZGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the controlled-Z gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -1624,7 +1629,7 @@ class ControlledZGate(CompactDiagram):
     def _is_unbiased(self) -> bool:
         """Check if this is an unbiased CSUM gate (gain = 1).
 
-        Returns:
+        Returns
         -------
         bool
         """
@@ -1645,7 +1650,7 @@ class BeamsplitterGate(CompactDiagram):
     parametric : bool
         If True, treat theta as symbolic parameter. Default False.
 
-    Attributes:
+    Attributes
     ----------
     theta : float | int | Expr
         Beamsplitter angle (symbolic or numeric).
@@ -1660,7 +1665,11 @@ class BeamsplitterGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    Examples:
+    References
+    ----------
+    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.6, Eq. (66)-(67)
+
+    Examples
     --------
     >>> # 50:50 beamsplitter
     >>> BS = BeamsplitterGate(np.pi/4)
@@ -1672,9 +1681,6 @@ class BeamsplitterGate(CompactDiagram):
     >>> BS = BeamsplitterGate(theta, parametric=True)
     >>> decomp = BS.expand()
 
-    References:
-    ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.6, Eq. (66)-(67)
     """
 
     theta: float | int | complex | Expr
@@ -1690,12 +1696,12 @@ class BeamsplitterGate(CompactDiagram):
     def expand(self) -> Diagram:
         """Decompose beamsplitter using squeezing and CSUM gates.
 
-        Returns:
+        Returns
         -------
         Diagram
             Composition following [3] Eq. (66) or simplified Eq. (67).
 
-        Examples:
+        Examples
         --------
         >>> BS = BeamsplitterGate(np.pi/4)
         >>> decomp = BS.expand()
@@ -1750,14 +1756,14 @@ class BeamsplitterGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         BeamsplitterGate
             A new BeamsplitterGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -1790,7 +1796,7 @@ class BeamsplitterGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         BeamsplitterGate
             A new BeamsplitterGate with evaluated parameters.
@@ -1807,7 +1813,7 @@ class BeamsplitterGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the beamsplitter gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -1819,7 +1825,7 @@ class BeamsplitterGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of beamsplitter is beamsplitter with negated angle.
 
-        Returns:
+        Returns
         -------
         BeamsplitterGate
             BS(-θ)
@@ -1831,7 +1837,7 @@ class BeamsplitterGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the beamsplitter gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the beamsplitter angle theta.
@@ -1845,9 +1851,9 @@ class BeamsplitterGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the beamsplitter gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -1876,7 +1882,7 @@ class BeamsplitterGate(CompactDiagram):
     def _is_balanced(self) -> bool:
         """Check if this is a balanced 50:50 beamsplitter.
 
-        Returns:
+        Returns
         -------
         bool
         """
@@ -1909,7 +1915,11 @@ class CubicPhaseGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider (non_gaussian).
 
-    Examples:
+    References
+    ----------
+    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.7, Eq. (68)
+
+    Examples
     --------
     >>> # Numeric cubic phase gate
     >>> CPG = CubicPhaseGate(0.5)
@@ -1921,9 +1931,6 @@ class CubicPhaseGate(CompactDiagram):
     >>> CPG = CubicPhaseGate(gamma, parametric=True)
     >>> decomp = CPG.expand()
 
-    References:
-    ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.7, Eq. (68)
     """
 
     gamma: float | int | Expr
@@ -1939,12 +1946,12 @@ class CubicPhaseGate(CompactDiagram):
     def expand(self) -> QSpider:
         """Decompose cubic phase gate into a single q-spider with cubic phase.
 
-        Returns:
+        Returns
         -------
         QSpider
             q-spider with phase function f(x) = y x³.
 
-        Examples:
+        Examples
         --------
         >>> CPG = CubicPhaseGate(0.5)
         >>> spider = CPG.expand()
@@ -1959,14 +1966,14 @@ class CubicPhaseGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         CubicPhaseGate
             A new CubicPhaseGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -1999,7 +2006,7 @@ class CubicPhaseGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         CubicPhaseGate
             A new CubicPhaseGate with evaluated parameters.
@@ -2016,7 +2023,7 @@ class CubicPhaseGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the cubic phase gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -2028,7 +2035,7 @@ class CubicPhaseGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of cubic phase gate is cubic phase with negated gamma.
 
-        Returns:
+        Returns
         -------
         CubicPhaseGate
             CPG(-y)
@@ -2040,7 +2047,7 @@ class CubicPhaseGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the cubic phase gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the cubic phase strength gamma.
@@ -2052,9 +2059,9 @@ class CubicPhaseGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the cubic phase gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -2107,16 +2114,17 @@ class ShearXInvariantGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    Examples:
-    --------
-    >>> P = ShearXInvariantGate(0.3)
-    >>> P.expand()
-
-    References:
+    References
     ----------
     mqc3 `intrinsic.ShearXInvariant`; a quadratic-phase q-spider implements
     this shear directly, the same pattern used by `PhaseRotationGate` and
     `SqueezingGate` for [3] Eq. (58)-(59).
+
+    Examples
+    --------
+    >>> P = ShearXInvariantGate(0.3)
+    >>> P.expand()
+
     """
 
     kappa: float | int | Expr
@@ -2134,7 +2142,7 @@ class ShearXInvariantGate(CompactDiagram):
 
         P(kappa) = Q(kappa)
 
-        Returns:
+        Returns
         -------
         QSpider
             q-spider with phase function f(x) = kappa * x^2.
@@ -2149,14 +2157,14 @@ class ShearXInvariantGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         ShearXInvariantGate
             A new ShearXInvariantGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -2189,7 +2197,7 @@ class ShearXInvariantGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         ShearXInvariantGate
             A new ShearXInvariantGate with evaluated parameters.
@@ -2206,7 +2214,7 @@ class ShearXInvariantGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the shear gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -2218,7 +2226,7 @@ class ShearXInvariantGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of the shear gate is the shear with negated kappa.
 
-        Returns:
+        Returns
         -------
         ShearXInvariantGate
             P(-kappa)
@@ -2230,7 +2238,7 @@ class ShearXInvariantGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the shear gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the shear strength kappa.
@@ -2242,9 +2250,9 @@ class ShearXInvariantGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the shear gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -2296,16 +2304,17 @@ class ShearPInvariantGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    Examples:
-    --------
-    >>> Q = ShearPInvariantGate(0.3)
-    >>> Q.expand()
-
-    References:
+    References
     ----------
     mqc3 `intrinsic.ShearPInvariant`; a quadratic-phase p-spider implements
     this shear directly, the same pattern used by `PhaseRotationGate` and
     `SqueezingGate` for [3] Eq. (58)-(59).
+
+    Examples
+    --------
+    >>> Q = ShearPInvariantGate(0.3)
+    >>> Q.expand()
+
     """
 
     eta: float | int | Expr
@@ -2323,7 +2332,7 @@ class ShearPInvariantGate(CompactDiagram):
 
         Q(eta) = P(eta)
 
-        Returns:
+        Returns
         -------
         PSpider
             p-spider with phase function f(x) = eta * x^2.
@@ -2338,14 +2347,14 @@ class ShearPInvariantGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         ShearPInvariantGate
             A new ShearPInvariantGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -2378,7 +2387,7 @@ class ShearPInvariantGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         ShearPInvariantGate
             A new ShearPInvariantGate with evaluated parameters.
@@ -2395,7 +2404,7 @@ class ShearPInvariantGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the shear gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -2407,7 +2416,7 @@ class ShearPInvariantGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of the shear gate is the shear with negated eta.
 
-        Returns:
+        Returns
         -------
         ShearPInvariantGate
             Q(-eta)
@@ -2419,7 +2428,7 @@ class ShearPInvariantGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the shear gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing the shear strength eta.
@@ -2431,9 +2440,9 @@ class ShearPInvariantGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the shear gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -2505,7 +2514,7 @@ class ArbitraryGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    References:
+    References
     ----------
     mqc3 `intrinsic.Arbitrary`; decomposed here via cvzx's existing
     `PhaseRotationGate` and `SqueezingGate` ([3] Eq. (58)-(59)) with the
@@ -2527,7 +2536,7 @@ class ArbitraryGate(CompactDiagram):
     def expand(self) -> CompositionDiagram:
         """Decompose into rotation-squeeze-rotation.
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition of two phase rotations around a squeezing gate.
@@ -2548,14 +2557,14 @@ class ArbitraryGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         ArbitraryGate
             A new ArbitraryGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -2596,7 +2605,7 @@ class ArbitraryGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         ArbitraryGate
             A new ArbitraryGate with evaluated parameters.
@@ -2613,7 +2622,7 @@ class ArbitraryGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the arbitrary gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -2632,7 +2641,7 @@ class ArbitraryGate(CompactDiagram):
         is again of the form `R(alpha')S(lam')R(beta')` with
         `alpha' = -beta`, `lam' = -lam`, `beta' = -alpha`.
 
-        Returns:
+        Returns
         -------
         ArbitraryGate
             Arbitrary(-beta, -alpha, -lam)
@@ -2644,7 +2653,7 @@ class ArbitraryGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the arbitrary gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing alpha, beta, lam.
@@ -2656,9 +2665,9 @@ class ArbitraryGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the arbitrary gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -2688,7 +2697,7 @@ class ArbitraryGate(CompactDiagram):
     def _get_tau(self) -> float | int | complex | Expr:
         """Get tau = e^lam for the squeezing gate.
 
-        Returns:
+        Returns
         -------
         float | int | complex | Expr
         """
@@ -2730,7 +2739,7 @@ class Squeezing45Gate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    References:
+    References
     ----------
     mqc3 `intrinsic.Squeezing45`; a special case of `ArbitraryGate`.
     """
@@ -2748,7 +2757,7 @@ class Squeezing45Gate(CompactDiagram):
     def expand(self) -> CompositionDiagram:
         """Decompose into rotation-squeeze-rotation at fixed +/- pi/4 angles.
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition of two fixed phase rotations around a squeezing gate.
@@ -2769,14 +2778,14 @@ class Squeezing45Gate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         Squeezing45Gate
             A new Squeezing45Gate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -2809,7 +2818,7 @@ class Squeezing45Gate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         Squeezing45Gate
             A new Squeezing45Gate with evaluated parameters.
@@ -2826,7 +2835,7 @@ class Squeezing45Gate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the 45-degree squeezing gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -2840,7 +2849,7 @@ class Squeezing45Gate(CompactDiagram):
 
         Since `S_V(c)^dagger = S_V(1/c)` and `1/cot(theta) = cot(pi/2-theta)`.
 
-        Returns:
+        Returns
         -------
         Squeezing45Gate
             Squeezing45(pi/2 - theta)
@@ -2852,7 +2861,7 @@ class Squeezing45Gate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the 45-degree squeezing gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing theta.
@@ -2864,9 +2873,9 @@ class Squeezing45Gate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the 45-degree squeezing gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -2891,7 +2900,7 @@ class Squeezing45Gate(CompactDiagram):
     def _get_tau(self) -> float | int | complex | Expr:
         """Get tau = tan(theta) for the squeezing gate.
 
-        Returns:
+        Returns
         -------
         float | int | complex | Expr
         """
@@ -2936,7 +2945,7 @@ class TwoModeShearGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    References:
+    References
     ----------
     mqc3 `intrinsic.TwoModeShear`; decomposed here as a diagonal shear on
     each mode (see `ShearXInvariantGate`) composed with `ControlledZGate`.
@@ -2958,7 +2967,7 @@ class TwoModeShearGate(CompactDiagram):
 
         P2(a, b) = CZ(g=-b) after (P(a) tensor P(a))
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Tensor of two shears, followed by a controlled-Z gate.
@@ -2977,14 +2986,14 @@ class TwoModeShearGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         TwoModeShearGate
             A new TwoModeShearGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -3021,7 +3030,7 @@ class TwoModeShearGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         TwoModeShearGate
             A new TwoModeShearGate with evaluated parameters.
@@ -3038,7 +3047,7 @@ class TwoModeShearGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the two-mode shear gate.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -3062,7 +3071,7 @@ class TwoModeShearGate(CompactDiagram):
         shear's adjoint is defined independently of whatever convention
         that method follows.
 
-        Returns:
+        Returns
         -------
         TwoModeShearGate
             P2(-a, -b)
@@ -3074,7 +3083,7 @@ class TwoModeShearGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the two-mode shear gate.
 
-        Returns:
+        Returns
         -------
         str
             String showing a and b.
@@ -3086,9 +3095,9 @@ class TwoModeShearGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the two-mode shear gate.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -3160,7 +3169,7 @@ class MeasurementGate(CompactDiagram):
     spider_type : str
         Type identifier for the spider.
 
-    References:
+    References
     ----------
     mqc3 `intrinsic.Measurement`.
     """
@@ -3178,7 +3187,7 @@ class MeasurementGate(CompactDiagram):
     def expand(self) -> CompositionDiagram:
         """Decompose into a rotation followed by an x-basis effect.
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Rotation into alignment, followed by a q-spider effect.
@@ -3196,14 +3205,14 @@ class MeasurementGate(CompactDiagram):
         mapping : dict
             Dictionary mapping symbols to values.
 
-        Returns:
+        Returns
         -------
         MeasurementGate
             A new MeasurementGate with substituted parameters.
 
-        Raises:
+        Raises
         ------
-        TypeError:
+        TypeError
             If this gate is parametric but its parameter is not a sympy
             Expr (should not occur: `__post_init__` always converts it).
 
@@ -3236,7 +3245,7 @@ class MeasurementGate(CompactDiagram):
         **kwargs : dict
             Parameter values as keyword arguments.
 
-        Returns:
+        Returns
         -------
         MeasurementGate
             A new MeasurementGate with evaluated parameters.
@@ -3253,7 +3262,7 @@ class MeasurementGate(CompactDiagram):
     def get_parameters(self) -> set[Symbol]:
         """Get all symbolic parameters in the measurement effect.
 
-        Returns:
+        Returns
         -------
         set[Symbol]
             Set of symbols used in the gate.
@@ -3274,7 +3283,7 @@ class MeasurementGate(CompactDiagram):
         is constructed here explicitly: a zero-phase state followed by the
         inverse rotation.
 
-        Returns:
+        Returns
         -------
         Diagram
             A 0-in-1-out state diagram, the adjoint of this effect.
@@ -3287,7 +3296,7 @@ class MeasurementGate(CompactDiagram):
     def __repr__(self) -> str:
         """Return string representation of the measurement effect.
 
-        Returns:
+        Returns
         -------
         str
             String showing theta.
@@ -3299,9 +3308,9 @@ class MeasurementGate(CompactDiagram):
     def __post_init__(self) -> None:
         """Initialize the measurement effect.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If `feedforward` is set and `measurement_ids` is not a
             non-empty set.
         """
@@ -3326,7 +3335,7 @@ class MeasurementGate(CompactDiagram):
     def _get_phi(self) -> float | Expr:
         """Get the cvzx rotation angle pi/2 - theta.
 
-        Returns:
+        Returns
         -------
         float | Expr
         """
@@ -3352,7 +3361,7 @@ class MeasurementGate(CompactDiagram):
         Only applies in numeric mode -- parametric angles skip
         `PhaseRotationGate`'s own validation the same way already.
 
-        Returns:
+        Returns
         -------
         Diagram
             `PhaseRotationGate`, `Fourier`, or `FourierInv`, as appropriate.
@@ -3376,15 +3385,15 @@ class MeasurementGate(CompactDiagram):
 def is_numeric(expr: Expr) -> bool:
     """Check if a sympy expression is purely numeric.
 
-    Parameters:
+    Parameters
     ----------
-    exp : Expr
+    expr : Expr
         Symbolic parameter.
 
-    Returns:
+    Returns
     -------
     bool
-
+        True if `expr` has no free symbols.
     """
     return len(expr.free_symbols) == 0
 
@@ -3392,7 +3401,7 @@ def is_numeric(expr: Expr) -> bool:
 def create_compact_diagram(label: str, num_inputs: int, num_outputs: int, decomp: Diagram) -> CompactDiagram:
     """Create a compact diagram for a given diagram.
 
-    Parameters:
+    Parameters
     ----------
     label : str
         Label for the block.
@@ -3403,7 +3412,7 @@ def create_compact_diagram(label: str, num_inputs: int, num_outputs: int, decomp
     decomp : Diagram
         Diagram to compact.
 
-    Returns:
+    Returns
     -------
     CompactDiagram
         A compact diagram representing the block.
@@ -3419,12 +3428,12 @@ def create_compact_diagram(label: str, num_inputs: int, num_outputs: int, decomp
 def expand_all(diagram: Diagram) -> Diagram:
     """Recursively expand all two mode diagrams instances in a diagram.
 
-    Parameters:
+    Parameters
     ----------
     diagram : Diagram
         The diagram to expand.
 
-    Returns:
+    Returns
     -------
     Diagram
         The expanded diagram with all CompactDiagram expanded.

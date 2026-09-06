@@ -94,7 +94,7 @@ def _build_four_mode_circuit():  # ruff: ignore[missing-return-type-private-func
       untouched modes, left alone by every rule here -- present just to
       keep the circuit from being trivially only-CSUM-gates.
 
-    Returns:
+    Returns
     -------
     CompositionDiagram
         A fresh 4-mode circuit (3 inputs, 4 outputs) built from new gate

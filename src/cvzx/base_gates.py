@@ -20,13 +20,13 @@ class ZxPoly(Poly):
     numeric and symbolic coefficients. Zero coefficients are omitted from the
     dictionary representation.
 
-    Parameters:
+    Parameters
     ----------
     coeffs : dict[int, float | Expr]
         Dictionary mapping degree → coefficient. For numeric coefficients,
         returns Python floats; for symbolic coefficients, returns sympy expressions.
 
-    Examples:
+    Examples
     --------
     >>> p = ZxPoly({0: 1.0, 2: -0.5})  # 1 - 0.5·x²
     >>> q = ZxPoly({1: 2.0})            # 2·x
@@ -64,12 +64,12 @@ class ZxPoly(Poly):
         *args, **kwargs
             Additional arguments passed to sympy.Poly constructor.
 
-        Returns:
+        Returns
         -------
         ZxPoly
             A new ZxPoly instance.
 
-        Examples:
+        Examples
         --------
         >>> # From coefficient dictionary
         >>> p = ZxPoly({0: 1.0, 2: -0.5})
@@ -117,7 +117,7 @@ class ZxPoly(Poly):
         *args, **kwargs
             Additional arguments passed to sympy.Poly constructor.
 
-        Notes:
+        Notes
         -----
         When initialized from a coefficient dictionary, the instance is
         already fully created in __new__, so this method does nothing.
@@ -134,13 +134,13 @@ class ZxPoly(Poly):
         are omitted. Numeric coefficients are converted to Python floats
         for compatibility, while symbolic coefficients remain as sympy expressions.
 
-        Returns:
+        Returns
         -------
         dict[int, float | Expr]
             Dictionary mapping degree to coefficient. Returns empty dict
             for the zero polynomial.
 
-        Examples:
+        Examples
         --------
         >>> p = ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})
         >>> p.coeffs
@@ -176,12 +176,12 @@ class ZxPoly(Poly):
         - Linear term is shown as 'c·x'
         - Higher-degree terms are shown as 'c·x^n'
 
-        Returns:
+        Returns
         -------
         str
             String representation of the polynomial.
 
-        Examples:
+        Examples
         --------
         >>> p = ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})
         >>> repr(p)
@@ -224,7 +224,7 @@ class ZxPoly(Poly):
         other : object
             Object to compare with.
 
-        Returns:
+        Returns
         -------
         bool
             True if other is a ZxPoly or Poly with identical coefficients,
@@ -240,7 +240,7 @@ class ZxPoly(Poly):
         Returns a hash based on the polynomial representation, allowing
         ZxPoly instances to be used as dictionary keys.
 
-        Returns:
+        Returns
         -------
         int
             Hash value for the polynomial.
@@ -264,7 +264,7 @@ class Diagram(ABC):
 
     _id_counter = count(1)
 
-    def __init__(self) -> None:  # ruff: ignore[undocumented-public-init]
+    def __init__(self) -> None:
         self._id = next(Diagram._id_counter)
 
     @abstractmethod
@@ -276,7 +276,7 @@ class Diagram(ABC):
         other : Diagram
             Diagram to place in parallel (vertically).
 
-        Returns:
+        Returns
         -------
         Diagram
             New diagram representing self ⊗ other.
@@ -296,7 +296,7 @@ class Diagram(ABC):
         connectivity: dict
             Dictionary indicating how the diagrams are connected.
 
-        Returns:
+        Returns
         -------
         Diagram
             New diagram representing other ∘ self.
@@ -310,7 +310,7 @@ class Diagram(ABC):
         phase functions by -1. For Fourier diagrams, conjugation
         interchanges Fourier and inverse Fourier.
 
-        Returns:
+        Returns
         -------
         Diagram
             New diagram representing D†.
@@ -328,7 +328,7 @@ class Diagram(ABC):
             - inverse fourier
             - squared fourier
 
-        Returns:
+        Returns
         -------
         bool
             True if diagram is one of the basic generators.
@@ -338,8 +338,8 @@ class Diagram(ABC):
     def id(self) -> int:
         """ID of the diagram.
 
-        Returns:
-        --------
+        Returns
+        -------
             int
                 ID of the diagram.
         """
@@ -350,7 +350,7 @@ class Diagram(ABC):
     def num_inputs(self) -> int:
         """Number of input wires (open edges pointing inward).
 
-        Returns:
+        Returns
         -------
         int
             Number of input ports.
@@ -361,7 +361,7 @@ class Diagram(ABC):
     def num_outputs(self) -> int:
         """Number of output wires (open edges pointing outward).
 
-        Returns:
+        Returns
         -------
         int
             Number of output ports.
@@ -374,14 +374,15 @@ class ProperDiagram(Diagram):
 
     Proper diagrams are atomic generators that cannot be decomposed
     into smaller diagrams. They include:
-        - QSpider: position-basis spider with polynomial phase
-        - PSpider: momentum-basis spider with polynomial phase
-        - Swap: swaps two modes
-        - Fourier: Fourier transform between q and p bases
-        - FourierInv: inverse Fourier transform
-        - Fourier2: squared Fourier transform (π/2 rotation)
 
-    References:
+    - QSpider: position-basis spider with polynomial phase
+    - PSpider: momentum-basis spider with polynomial phase
+    - Swap: swaps two modes
+    - Fourier: Fourier transform between q and p bases
+    - FourierInv: inverse Fourier transform
+    - Fourier2: squared Fourier transform (π/2 rotation)
+
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
@@ -397,7 +398,7 @@ class ProperDiagram(Diagram):
         other : Diagram
             Diagram to place in parallel.
 
-        Returns:
+        Returns
         -------
         TensorDiagram
             Tensor product of self and other.
@@ -417,14 +418,15 @@ class ProperDiagram(Diagram):
         connectivity: dict
             Dictionary indicating how the diagrams are connected.
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition other ∘ self.
 
-        Raises:
+        Raises
         ------
-        ValueError: if the connectivity dictionary coherent with the inputs of
+        ValueError
+            If the connectivity dictionary coherent with the inputs of
             self and/or the outputs of the input diagram.
         """
         if connectivity is None:
@@ -452,7 +454,7 @@ class ProperDiagram(Diagram):
     def is_proper(self) -> bool:
         """Proper diagrams are always proper by definition.
 
-        Returns:
+        Returns
         -------
         bool
             Always True for ProperDiagram instances.
@@ -463,7 +465,7 @@ class ProperDiagram(Diagram):
     def num_inputs(self) -> int:
         """Number of input wires.
 
-        Returns:
+        Returns
         -------
         int
             Number of input ports.
@@ -474,7 +476,7 @@ class ProperDiagram(Diagram):
     def num_outputs(self) -> int:
         """Number of output wires.
 
-        Returns:
+        Returns
         -------
         int
             Number of output ports.
@@ -487,7 +489,7 @@ class ProperDiagram(Diagram):
     def __repr__(self) -> str:
         """Return string representation of the proper diagram.
 
-        Returns:
+        Returns
         -------
         str
             String representation of the diagram.
@@ -497,20 +499,22 @@ class ProperDiagram(Diagram):
 
 @dataclass
 class ContractedDiagram(Diagram):
-    """Diagram resulting from contracting (tracing) outputs to inputs in both directions.
+    r"""Diagram resulting from contracting (tracing) outputs to inputs in both directions.
 
     This is the output of the contraction rule apply to a tensor diagram of two diagrams D1 and D2
-    from [3] Eq. (51):
-        ∫∫ ds̄ dȳ ⟨s_i| D1 |s_j⟩ ⊗ q⟨s_j| D2 |s_i⟩
+    from [3] Eq. (51)::
+
+        ∫∫ ds̄ dȳ ⟨s_i\| D1 \|s_j⟩ ⊗ q⟨s_j\| D2 \|s_i⟩
 
     The connections are:
-        - (I1, I2): outputs I1 of first diagram connect to inputs I2 of second diagram (forward)
-        - (J1, J2): outputs J2 of second diagram connect to inputs J1 of first diagram (feedback)
+
+    - (I1, I2): outputs I1 of first diagram connect to inputs I2 of second diagram (forward)
+    - (J1, J2): outputs J2 of second diagram connect to inputs J1 of first diagram (feedback)
 
     After connection, the integral over the connected variables is implicit in the
     diagrammatic language. Only unconnected wires remain as external inputs/outputs.
 
-    Attributes:
+    Attributes
     ----------
     diagrams : list[Diagram]
         List containing [first, second] (D1, D2)
@@ -527,12 +531,12 @@ class ContractedDiagram(Diagram):
     J2 : Sequence[int]
         Indices of outputs from second diagram that connect to first diagram
 
-    Notes:
+    Notes
     -----
-    The lengths must satisfy: |I1| = |I2| and |J1| = |J2|
+    The lengths must satisfy: \|I1\| = \|I2\| and \|J1\| = \|J2\|
     The connection is made in order: I1[0] connects to I2[0], I1[1] to I2[1], etc.
 
-    References:
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Definition 11, Eq. (51)
     """
@@ -552,9 +556,9 @@ class ContractedDiagram(Diagram):
         J1: Sequence[int],  # ruff: ignore[invalid-argument-name]
         J2: Sequence[int],  # ruff: ignore[invalid-argument-name]
     ) -> None:
-        """Initialize ContractedDiagram with two diagrams and connection indices.
+        r"""Initialize ContractedDiagram with two diagrams and connection indices.
 
-        Parameters:
+        Parameters
         ----------
         first : Diagram
             First diagram (D1)
@@ -569,15 +573,16 @@ class ContractedDiagram(Diagram):
         J2 : Sequence[int]
             Indices of outputs from second diagram that connect to first diagram
 
-        Raises:
+        Raises
         ------
-        ValueError: If I1, J1, I2, or J2 contains duplicate indices
-                    If |I1| != |I2| or |J1| != |J2|
-                    If |I1| = |I2| = |J1| = |J2| = 0
-                    If I1 indices are out of range for first diagram outputs
-                    If I2 indices are out of range for second diagram inputs
-                    If J1 indices are out of range for first diagram inputs
-                    If J2 indices are out of range for second diagram outputs
+        ValueError
+            If I1, J1, I2, or J2 contains duplicate indices.
+            If \|I1\| != \|I2\| or \|J1\| != \|J2\|.
+            If \|I1\| = \|I2\| = \|J1\| = \|J2\| = 0.
+            If I1 indices are out of range for first diagram outputs.
+            If I2 indices are out of range for second diagram inputs.
+            If J1 indices are out of range for first diagram inputs.
+            If J2 indices are out of range for second diagram outputs.
         """
         super().__init__()
         self.diagrams = [first, second]
@@ -664,7 +669,7 @@ class ContractedDiagram(Diagram):
         other : Diagram
             Diagram to place in parallel with self.
 
-        Returns:
+        Returns
         -------
         TensorDiagram
             New tensor diagram with self.diagrams + [other].
@@ -684,14 +689,15 @@ class ContractedDiagram(Diagram):
         connectivity: dict
             Dictionary indicating how the diagrams are connected.
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition other ∘ self.
 
-        Raises:
+        Raises
         ------
-        ValueError: if the connectivity dictionary coherent with the inputs of
+        ValueError
+            If the connectivity dictionary coherent with the inputs of
             self and/or the outputs of the input diagram.
         """
         if connectivity is None:
@@ -721,7 +727,7 @@ class ContractedDiagram(Diagram):
 
         (trace_{I1,I2,J1,J2}(D2 ∘ D1))† = trace_{J1,J2,I1,I2}(D1† ∘ D2†)
 
-        Returns:
+        Returns
         -------
         ContractedDiagram
             New contracted diagram with order reversed and connection sets swapped.
@@ -738,7 +744,7 @@ class ContractedDiagram(Diagram):
     def is_proper(self) -> bool:
         """Tensor of proper diagrams is not a basic generator.
 
-        Returns:
+        Returns
         -------
         bool
             Always False for composite diagrams.
@@ -776,7 +782,13 @@ class ContractedDiagram(Diagram):
         return self._kept_second_outputs
 
     def __repr__(self) -> str:
-        """Return string representation of the contracted diagram."""
+        """Return string representation of the contracted diagram.
+
+        Returns
+        -------
+        str
+            String showing the two diagrams and their connections.
+        """
         return f"Contract({self.first}, {self.second}, I1={self.I1}, I2={self.I2}, J1={self.J1}, J2={self.J2})"
 
 
@@ -791,7 +803,7 @@ class TensorDiagram(Diagram):
         For diagrams [D1, D2, D3] with respective inputs (2, 1, 3)
         and outputs (1, 3, 2), the tensor has inputs = 6, outputs = 6.
 
-    References:
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Definition 9
     """
@@ -802,37 +814,41 @@ class TensorDiagram(Diagram):
         self,
         diagram_pairs: Sequence[tuple[int, Sequence[int], Sequence[int]]],
     ) -> None:
-        """Perform partial trace by connecting outputs of some diagrams to inputs of others.
+        r"""Perform partial trace by connecting outputs of some diagrams to inputs of others.
 
         Contract the diagram by connecting specified output wires of certain diagrams
         to specified input wires of other diagrams. The contracted diagrams must be
         consecutive in the tensor product.
 
-        This implements diagram contraction as defined in [3] Eq. (51):
-            ∫∫ ds̄ dȳ ⟨s_i| D1 |s_j⟩ ⊗ q⟨s_j| D2 |s_i⟩
+        This implements diagram contraction as defined in [3] Eq. (51)::
+
+            ∫∫ ds̄ dȳ ⟨s_i\| D1 \|s_j⟩ ⊗ q⟨s_j\| D2 \|s_i⟩
 
         Parameters
         ----------
         diagram_pairs : Sequence[tuple[int, Sequence[int], Sequence[int]]]
             Each tuple contains:
-                - diagram index of the first/second diagram
-                - output wire indices from that diagram to contract
-                - input wire indices from that diagram to contract
+
+            - diagram index of the first/second diagram
+            - output wire indices from that diagram to contract
+            - input wire indices from that diagram to contract
+
             The output wires from the first diagram are connected to the input wires
             of the second diagram. And the input wires of the first diagram are
             connected to the output wires of the second diagram.
 
-        Raises:
+        Raises
         ------
-        ValueError: If diagram_pairs is empty.
-                    If first diagram index is out of range.
-                    If second diagram index is out of range.
-                    If contracted diagrams are not consecutive (|first - second| != 1).
-                    If input wire index is out of range for the second diagram.
-                    If output wires contain duplicate indices.
-                    If input wires contain duplicate indices.
+        ValueError
+            If diagram_pairs is empty.
+            If first diagram index is out of range.
+            If second diagram index is out of range.
+            If contracted diagrams are not consecutive (\|first - second\| != 1).
+            If input wire index is out of range for the second diagram.
+            If output wires contain duplicate indices.
+            If input wires contain duplicate indices.
 
-        Notes:
+        Notes
         -----
         The contraction operation is only valid when the contracted diagrams
         are adjacent in the tensor product. This restriction is to draw the
@@ -844,7 +860,7 @@ class TensorDiagram(Diagram):
         Only the unconsumed inputs and outputs wire from the first diagram and
         from the second diagram remain as external wires.
 
-        References:
+        References
         ----------
         [3] Nagayoshi et al., CV ZX calculus, Definition 11
         """
@@ -938,7 +954,7 @@ class TensorDiagram(Diagram):
         other : Diagram
             Diagram to place in parallel with self.
 
-        Returns:
+        Returns
         -------
         TensorDiagram
             New tensor diagram with self.diagrams + [other].
@@ -958,14 +974,15 @@ class TensorDiagram(Diagram):
         connectivity: dict
             Dictionary indicating how the diagrams are connected.
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition other ∘ self.
 
-        Raises:
+        Raises
         ------
-        ValueError: if the connectivity dictionary coherent with the inputs of
+        ValueError
+            If the connectivity dictionary coherent with the inputs of
             self and/or the outputs of the input diagram.
         """
         if connectivity is None:
@@ -995,7 +1012,7 @@ class TensorDiagram(Diagram):
 
         (A ⊗ B ⊗ ...)† = A† ⊗ B† ⊗ ...
 
-        Returns:
+        Returns
         -------
         TensorDiagram
             New tensor diagram with conjugated components.
@@ -1005,7 +1022,7 @@ class TensorDiagram(Diagram):
     def is_proper(self) -> bool:
         """Tensor of proper diagrams is not a basic generator.
 
-        Returns:
+        Returns
         -------
         bool
             Always False for composite diagrams.
@@ -1016,7 +1033,7 @@ class TensorDiagram(Diagram):
     def num_inputs(self) -> int:
         """Number of input wires (sum of components' inputs).
 
-        Returns:
+        Returns
         -------
         int
             Total number of input ports.
@@ -1027,7 +1044,7 @@ class TensorDiagram(Diagram):
     def num_outputs(self) -> int:
         """Number of output wires (sum of components' outputs).
 
-        Returns:
+        Returns
         -------
         int
             Total number of output ports.
@@ -1068,12 +1085,12 @@ class TensorDiagram(Diagram):
 
         This only flattens TensorDiagrams, not CompositionDiagrams.
 
-        Parameters:
+        Parameters
         ----------
         diagram : Diagram
             The diagram to modify.
 
-        Returns:
+        Returns
         -------
         Diagram
         """
@@ -1112,7 +1129,7 @@ class TensorDiagram(Diagram):
     def __repr__(self) -> str:
         """Return string representation of the tensor diagram.
 
-        Returns:
+        Returns
         -------
         str
             String representation showing all components.
@@ -1131,11 +1148,11 @@ class CompositionDiagram(Diagram):
         For diagrams [D1, D2, D3], the composition is D3 ∘ D2 ∘ D1.
         Inputs come from D1, outputs from D3.
 
-    Notes:
+    Notes
     -----
     Composition is associative, so we store a flat sequence.
 
-    References:
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Definition 10
     """
@@ -1151,7 +1168,7 @@ class CompositionDiagram(Diagram):
         other : Diagram
             Diagram to place in parallel.
 
-        Returns:
+        Returns
         -------
         TensorDiagram
             Tensor product of self and other.
@@ -1171,14 +1188,15 @@ class CompositionDiagram(Diagram):
         connectivity: dict
             Dictionary indicating how the diagrams are connected.
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             Composition other ∘ self.
 
-        Raises:
+        Raises
         ------
-        ValueError: if the connectivity dictionary coherent with the inputs of
+        ValueError
+            If the connectivity dictionary coherent with the inputs of
             self and/or the outputs of the input diagram.
         """
         if connectivity is None:
@@ -1215,7 +1233,7 @@ class CompositionDiagram(Diagram):
 
         (A ∘ B ∘ ...)† = ...† ∘ B† ∘ A†
 
-        Returns:
+        Returns
         -------
         CompositionDiagram
             New composition with order reversed and components conjugated.
@@ -1225,7 +1243,7 @@ class CompositionDiagram(Diagram):
     def is_proper(self) -> bool:
         """Composition of proper diagrams is not a basic generator.
 
-        Returns:
+        Returns
         -------
         bool
             Always False for composite diagrams.
@@ -1236,7 +1254,7 @@ class CompositionDiagram(Diagram):
     def num_inputs(self) -> int:
         """Number of input wires (from first diagram).
 
-        Returns:
+        Returns
         -------
         int
             Number of input ports.
@@ -1247,7 +1265,7 @@ class CompositionDiagram(Diagram):
     def num_outputs(self) -> int:
         """Number of output wires (from last diagram).
 
-        Returns:
+        Returns
         -------
         int
             Number of output ports.
@@ -1257,9 +1275,9 @@ class CompositionDiagram(Diagram):
     def __post_init__(self) -> None:
         """Initialise composition diagram by validating consecutive composition.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If any consecutive diagrams have mismatched input/output counts.
             If the connectivity dictionary is coherent with the input/output
                 of diagrams.
@@ -1303,7 +1321,7 @@ class CompositionDiagram(Diagram):
     def __repr__(self) -> str:
         """Return string representation of the composition diagram.
 
-        Returns:
+        Returns
         -------
         str
             String representation showing all components in order.
@@ -1313,7 +1331,7 @@ class CompositionDiagram(Diagram):
 
 @dataclass
 class QSpider(ProperDiagram):
-    """q-spider: position-basis spider with polynomial phase.
+    r"""q-spider: position-basis spider with polynomial phase.
 
     Represents the diagram:
         ┌─────┐
@@ -1323,9 +1341,9 @@ class QSpider(ProperDiagram):
     where f(x) is a real polynomial phase function.
 
     Matrix elements:
-        ∫ ds e^{i f(s)} |s...s⟩_qm ⟨s...s|_qn
+        ∫ ds e^{i f(s)} \|s...s⟩_qm ⟨s...s\|_qn
 
-    References:
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
@@ -1337,7 +1355,7 @@ class QSpider(ProperDiagram):
     def conjugate(self) -> Diagram:
         """Conjugate: negate phase, keep q-spider type.
 
-        Returns:
+        Returns
         -------
         QSpider
             New QSpider with negated phase.
@@ -1347,7 +1365,7 @@ class QSpider(ProperDiagram):
     def __repr__(self) -> str:
         """Return string representation of the q-spider.
 
-        Returns:
+        Returns
         -------
         str
             String showing phase function and number of wires.
@@ -1359,7 +1377,7 @@ class QSpider(ProperDiagram):
 
 @dataclass
 class PSpider(ProperDiagram):
-    """p-spider: momentum-basis spider with polynomial phase.
+    r"""p-spider: momentum-basis spider with polynomial phase.
 
     Represents the diagram:
         ┌─────┐
@@ -1370,9 +1388,9 @@ class PSpider(ProperDiagram):
     real polynomial phase function.
 
     Matrix elements:
-        ∫ dt e^{-i f(t)} |t...t⟩_pm ⟨t...t|_pn
+        ∫ dt e^{-i f(t)} \|t...t⟩_pm ⟨t...t\|_pn
 
-    References:
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
@@ -1384,7 +1402,7 @@ class PSpider(ProperDiagram):
     def conjugate(self) -> Diagram:
         """Conjugate: negate phase, keep p-spider type.
 
-        Returns:
+        Returns
         -------
         PSpider
             New PSpider with negated phase.
@@ -1394,7 +1412,7 @@ class PSpider(ProperDiagram):
     def __repr__(self) -> str:
         """Return string representation of the p-spider.
 
-        Returns:
+        Returns
         -------
         str
             String showing phase function and number of wires.
@@ -1406,18 +1424,20 @@ class PSpider(ProperDiagram):
 
 @dataclass
 class Swap(ProperDiagram):
-    """Swap diagram: exchanges two modes.
+    r"""Swap diagram: exchanges two modes.
 
-    Represents the diagram:
-        ┌───┐
-    ────┤ X ├────
-    ────┤   ├────
-        └───┘
+    Represents the diagram::
 
-    Matrix elements:
-        ∫ ds ds' |s', s⟩⟨s, s'|
+            ┌───┐
+        ────┤ X ├────
+        ────┤   ├────
+            └───┘
 
-    References:
+    Matrix elements::
+
+        ∫ ds ds' \|s', s⟩⟨s, s'\|
+
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
@@ -1428,7 +1448,7 @@ class Swap(ProperDiagram):
     def conjugate(self) -> Diagram:
         """Swap is self-conjugate.
 
-        Returns:
+        Returns
         -------
         Swap
             New Swap instance.
@@ -1438,7 +1458,7 @@ class Swap(ProperDiagram):
     def __repr__(self) -> str:
         """Return string representation of the swap diagram.
 
-        Returns:
+        Returns
         -------
         str
             "Swap()"
@@ -1487,7 +1507,7 @@ class VoidDiagram(ProperDiagram):
     def conjugate(self) -> Diagram:
         """Void is self-conjugate (there is no phase to negate).
 
-        Returns:
+        Returns
         -------
         VoidDiagram
             New VoidDiagram with the same arity.
@@ -1497,7 +1517,7 @@ class VoidDiagram(ProperDiagram):
     def __repr__(self) -> str:
         """Return string representation of the void diagram.
 
-        Returns:
+        Returns
         -------
         str
             "VoidDiagram(num_inputs, num_outputs)"
@@ -1507,7 +1527,7 @@ class VoidDiagram(ProperDiagram):
 
 @dataclass
 class Fourier(ProperDiagram):
-    """Fourier transform diagram.
+    r"""Fourier transform diagram.
 
     Represents the diagram:
         ┌───┐
@@ -1517,9 +1537,9 @@ class Fourier(ProperDiagram):
     Transforms between position and momentum bases.
 
     Matrix elements:
-        ∫ du |u⟩_p ⟨u|_q
+        ∫ du \|u⟩_p ⟨u\|_q
 
-    References:
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
@@ -1530,7 +1550,7 @@ class Fourier(ProperDiagram):
     def conjugate(self) -> Diagram:
         """Conjugate of Fourier is inverse Fourier.
 
-        Returns:
+        Returns
         -------
         FourierInv
             Inverse Fourier diagram.
@@ -1540,7 +1560,7 @@ class Fourier(ProperDiagram):
     def __repr__(self) -> str:
         """Return string representation of the Fourier diagram.
 
-        Returns:
+        Returns
         -------
         str
             "Fourier()"
@@ -1550,7 +1570,7 @@ class Fourier(ProperDiagram):
 
 @dataclass
 class FourierInv(ProperDiagram):
-    """Inverse Fourier transform diagram.
+    r"""Inverse Fourier transform diagram.
 
     Represents the diagram:
         ┌────┐
@@ -1558,9 +1578,9 @@ class FourierInv(ProperDiagram):
         └────┘
 
     Matrix elements:
-        ∫ du |u⟩_q ⟨u|_p
+        ∫ du \|u⟩_q ⟨u\|_p
 
-    References:
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
@@ -1571,7 +1591,7 @@ class FourierInv(ProperDiagram):
     def conjugate(self) -> Diagram:
         """Conjugate of inverse Fourier is Fourier.
 
-        Returns:
+        Returns
         -------
         Fourier
             Fourier diagram.
@@ -1581,7 +1601,7 @@ class FourierInv(ProperDiagram):
     def __repr__(self) -> str:
         """Return string representation of the inverse Fourier diagram.
 
-        Returns:
+        Returns
         -------
         str
             "FourierInv()"
@@ -1591,7 +1611,7 @@ class FourierInv(ProperDiagram):
 
 @dataclass
 class Fourier2(ProperDiagram):
-    """Squared Fourier transform diagram.
+    r"""Squared Fourier transform diagram.
 
     Represents the diagram:
         ┌────┐
@@ -1601,9 +1621,9 @@ class Fourier2(ProperDiagram):
     This is equivalent to a π rotation in phase space.
 
     Matrix elements:
-        ∫ ds |-s⟩_q ⟨s|_q
+        ∫ ds \|-s⟩_q ⟨s\|_q
 
-    References:
+    References
     ----------
     [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
@@ -1614,7 +1634,7 @@ class Fourier2(ProperDiagram):
     def conjugate(self) -> Diagram:
         """F² is self-conjugate.
 
-        Returns:
+        Returns
         -------
         Fourier2
             New Fourier2 instance.
@@ -1624,7 +1644,7 @@ class Fourier2(ProperDiagram):
     def __repr__(self) -> str:
         """Return string representation of the squared Fourier diagram.
 
-        Returns:
+        Returns
         -------
         str
             "Fourier2()"
@@ -1636,29 +1656,31 @@ def flatten_composition(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-st
     """Recursively flatten any CompositionDiagram found in the diagram.
 
     This method recursively traverses the diagram and flattens:
-        1. Single-element compositions → return the element directly
-        2. Nested compositions → extract and merge their diagrams, preserving connectivity
-        3. Compositions inside TensorDiagram → flatten the composition
-        4. Compositions inside ContractedDiagram → flatten the composition
+
+    1. Single-element compositions → return the element directly
+    2. Nested compositions → extract and merge their diagrams, preserving connectivity
+    3. Compositions inside TensorDiagram → flatten the composition
+    4. Compositions inside ContractedDiagram → flatten the composition
 
     When flattening nested compositions, the connectivity is adjusted to reflect
     the flattened structure.
 
-    Examples:
-        - CompositionDiagram([A]) → A
-        - CompositionDiagram([A, CompositionDiagram([B, C]), D])
-        → CompositionDiagram([A, B, C, D])
-        - TensorDiagram([CompositionDiagram([A, B]), C])
-        → TensorDiagram([CompositionDiagram([A, B]), C])  # Composition inside Tensor is NOT flattened
-        - CompositionDiagram([TensorDiagram([A, B]), C])
-        → CompositionDiagram([TensorDiagram([A, B]), C])  # Tensor inside Composition is NOT flattened
+    Examples::
 
-    Parameters:
+        CompositionDiagram([A]) → A
+        CompositionDiagram([A, CompositionDiagram([B, C]), D])
+            → CompositionDiagram([A, B, C, D])
+        TensorDiagram([CompositionDiagram([A, B]), C])
+            → TensorDiagram([CompositionDiagram([A, B]), C])  # Composition inside Tensor is NOT flattened
+        CompositionDiagram([TensorDiagram([A, B]), C])
+            → CompositionDiagram([TensorDiagram([A, B]), C])  # Tensor inside Composition is NOT flattened
+
+    Parameters
     ----------
     diagram : Diagram
         The diagram to flatten.
 
-    Returns:
+    Returns
     -------
     Diagram
         Flattened diagram with no nested compositions.

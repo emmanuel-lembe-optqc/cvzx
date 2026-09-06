@@ -62,21 +62,21 @@ def _require[T](value: T | None, message: str) -> T:
     runs at least once), but that guarantee is not visible to the type checker
     from local control flow alone.
 
-    Parameters:
+    Parameters
     ----------
     value: T | None
         The value expected to be non-None at this point.
     message: str
         Error message if the invariant does not hold.
 
-    Returns:
+    Returns
     -------
     T
         The narrowed, non-None value.
 
-    Raises:
+    Raises
     ------
-    RuntimeError:
+    RuntimeError
         If value is None, meaning the invariant this call relies on was violated.
     """
     if value is None:
@@ -88,7 +88,7 @@ def _require[T](value: T | None, message: str) -> T:
 class VisualizerConfig:
     """Configuration for diagram visualization.
 
-    Attributes:
+    Attributes
     ----------
     node_radius : float
         Each proper diagram is drawn inside a square of radius node_radius.
@@ -130,9 +130,9 @@ class VisualizerConfig:
     def __post_init__(self) -> None:
         """Validate parameters and compute derived spacing values.
 
-        Raises:
+        Raises
         ------
-        ValueError:
+        ValueError
             If vertical_factor <= 2.
         """
         if self.vertical_factor <= 2:  # ruff: ignore[magic-value-comparison]
@@ -160,14 +160,14 @@ class DiagramVisualizer:
     def visualize(self, diagram: Diagram, title: str = "") -> plt.Figure:
         """Visualize a diagram.
 
-        Parameters:
+        Parameters
         ----------
         diagram : Diagram
             The diagram to visualize.
         title : str
             Title for the figure.
 
-        Returns:
+        Returns
         -------
         plt.Figure
             Matplotlib figure.
@@ -209,7 +209,7 @@ class DiagramVisualizer:
     ) -> tuple[float, bool]:
         """Find the vertical shift corresponding to a diagram in a contracted diagram.
 
-        Parameters:
+        Parameters
         ----------
         diagram : Diagram
             Input diagram.
@@ -222,7 +222,7 @@ class DiagramVisualizer:
         radius : float
             radius of the diagram.
 
-        Returns:
+        Returns
         -------
         tuple[float, bool]
             The vertical shift, and whether the diagram goes through a tensor diagram.
@@ -292,7 +292,7 @@ class DiagramVisualizer:
     ) -> tuple[list[Position], list[Position], float]:
         """Draw a proper diagram (single node).
 
-        Parameters:
+        Parameters
         ----------
         ax : plt.Axes
             Matplotlib axes
@@ -327,7 +327,7 @@ class DiagramVisualizer:
             List of indices of output wires from bottom to top not involved in a
             partial trace. This parameter is computed inside _draw_contracted_diagram.
 
-        Returns:
+        Returns
         -------
         list[Position]
             Lists of output indices that will serve as the input indices of the
@@ -478,7 +478,7 @@ class DiagramVisualizer:
     ) -> tuple[list[Position], list[Position], float | list[float]]:
         """Draw a composition diagram.
 
-        Parameters:
+        Parameters
         ----------
         ax : plt.Axes
             Matplotlib axes
@@ -516,7 +516,7 @@ class DiagramVisualizer:
             List of indices of output wires from bottom to top not involved in a
             partial trace. This parameter is computed inside _draw_contracted_diagram.
 
-        Returns:
+        Returns
         -------
         list[Position]
             Lists of output indices that will serve as the input indices of the
@@ -625,7 +625,7 @@ class DiagramVisualizer:
     ) -> tuple[list[Position], list[Position], list[float]]:
         """Draw a tensor diagram (parallel).
 
-        Parameters:
+        Parameters
         ----------
         ax : plt.Axes
             Matplotlib axes
@@ -664,7 +664,7 @@ class DiagramVisualizer:
             List of indices of output wires from bottom to top not involved in a
             partial trace. This parameter is computed inside _draw_contracted_diagram.
 
-        Returns:
+        Returns
         -------
         list[Position]
             Lists of output indices that will serve as the input indices of the
@@ -785,7 +785,7 @@ class DiagramVisualizer:
             - External wires use kept_first_inputs, kept_first_outputs,
               kept_second_inputs, kept_second_outputs
 
-        Parameters:
+        Parameters
         ----------
         ax : plt.Axes
             Matplotlib axes
@@ -824,7 +824,7 @@ class DiagramVisualizer:
             List of indices of output wires from bottom to top not involved in a
             partial trace. This parameter is computed inside _draw_contracted_diagram.
 
-        Returns:
+        Returns
         -------
         list[Position]
             Lists of output indices that will serve as the input indices of the
@@ -1242,7 +1242,7 @@ class DiagramVisualizer:
     ) -> tuple[list[Position], list[Position], float | list[float]]:
         """Draw a sub-diagram at specified coordinates and return port positions.
 
-        Parameters:
+        Parameters
         ----------
         ax : plt.Axes
             Matplotlib axes
@@ -1280,7 +1280,7 @@ class DiagramVisualizer:
             List of indices of output wires from bottom to top not involved in a
             partial trace. This parameter is computed inside _draw_contracted_diagram.
 
-        Returns:
+        Returns
         -------
         list[Position]
             Lists of output indices that will serve as the input indices of the
@@ -1356,12 +1356,10 @@ class DiagramVisualizer:
     ) -> tuple[list[Position], list[Position], float]:
         """Draw a swap node.
 
-        Parameters:
+        Parameters
         ----------
         ax : plt.Axes
             Matplotlib axes
-        diagram : Diagram
-            The sub-diagram to draw
         x: float
             First coordinate of the diagram
         y: float
@@ -1391,7 +1389,7 @@ class DiagramVisualizer:
             List of indices of output wires from bottom to top not involved in a
             partial trace. This parameter is computed inside _draw_contracted_diagram.
 
-        Returns:
+        Returns
         -------
         list[Position]
             Lists of output indices that will serve as the input indices of the
@@ -1495,7 +1493,7 @@ class DiagramVisualizer:
     ) -> tuple[list[Position], list[Position], float]:
         """Draw a Fourier node.
 
-        Parameters:
+        Parameters
         ----------
         ax : plt.Axes
             Matplotlib axes
@@ -1530,7 +1528,7 @@ class DiagramVisualizer:
             List of indices of output wires from bottom to top not involved in a
             partial trace. This parameter is computed inside _draw_contracted_diagram.
 
-        Returns:
+        Returns
         -------
         list[Position]
             Lists of output indices that will serve as the input indices of the
@@ -1609,12 +1607,10 @@ class DiagramVisualizer:
     def _draw_feedforward(self, ax: plt.Axes) -> None:
         """Draw the classical link corresponding to feedforwards.
 
-        Parameters:
+        Parameters
         ----------
         ax : plt.Axes
             Matplotlib axes
-        diagram: Diagram
-            Input diagram.
         """
         for node_id in self.reg.displacement_gates:
             if self.graph.nodes[node_id]["feedforward"]:
@@ -1644,13 +1640,13 @@ class DiagramVisualizer:
     def _format_phase(self, phase: ZxPoly | str) -> str:  # ruff: ignore[too-many-branches]
         """Format phase polynomial or Compact Diagram label for display.
 
-        Parameters:
+        Parameters
         ----------
         phase: ZxPoly | str
             Real polynomial describing a p/q spider. Or label denoting a
             CompactDiagram
 
-        Returns:
+        Returns
         -------
         str
             String display of the phase polynomial
@@ -1685,12 +1681,12 @@ class DiagramVisualizer:
     def _get_spider_type(self, diagram: ProperDiagram | CompactDiagram) -> str:  # ruff: ignore[too-many-return-statements]
         """Get spider type string from diagram instance.
 
-        Parameters:
+        Parameters
         ----------
             diagram: ProperDiagram | CompactDiagram
                 Input proper diagram.
 
-        Returns:
+        Returns
         -------
             str
                 Type of the input proper diagram.
@@ -1726,7 +1722,7 @@ class DiagramVisualizer:
     def _reorder_positions(self, connectivity: dict[int, int], positions: list[Position]) -> list[Position]:
         """Reorder input positions of a diagram inside a composition diagram according to the connectivity.
 
-        Parameters:
+        Parameters
         ----------
             connectivity : dict[int, int]
                 Dictionary indicating how the output position of a sub_diagram
@@ -1735,7 +1731,7 @@ class DiagramVisualizer:
                 List of positions of the sub_diagram which must be reordered
                 according to the connectivity
 
-        Returns:
+        Returns
         -------
             list[Position]
                 Reorder positions
@@ -1757,7 +1753,7 @@ class DiagramVisualizer:
 def visualize_before_after(diagram_before: Diagram, diagram_after: Diagram, test_name: str, rule_name: str) -> None:
     """Visualize diagrams before and after applying a rewriting rule.
 
-    Parameters:
+    Parameters
     ----------
     diagram_before : Diagram
         Diagram before applying the identity rule.
@@ -1808,7 +1804,7 @@ def visualize_before_after(diagram_before: Diagram, diagram_after: Diagram, test
 def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None = None) -> plt.Figure:
     """Convenience function to visualize a diagram.
 
-    Parameters:
+    Parameters
     ----------
     diagram : Diagram
         The diagram to visualize.
@@ -1817,7 +1813,7 @@ def visualize(diagram: Diagram, title: str = "", config: VisualizerConfig | None
     config : VisualizerConfig | None
         Visualization configuration.
 
-    Returns:
+    Returns
     -------
     plt.Figure
         Matplotlib figure.
@@ -1834,12 +1830,12 @@ def normalize_radiuses(radiuses: list[float]) -> list[float]:
     avoid line superpositions when connecting outputs/inputs of D1 to
     inputs/outputs of D2 of the contracted diagram.
 
-    Parameters:
+    Parameters
     ----------
     radiuses: list[float]
         List of input radiuses.
 
-    Returns:
+    Returns
     -------
     list[float]
         List of radiuses normalized.
@@ -1860,7 +1856,7 @@ def normalize_radiuses(radiuses: list[float]) -> list[float]:
 def is_wiring_diagram(diagram: Diagram) -> bool:
     """Check if a diagram is a wiring (identity) diagram.
 
-    Returns:
+    Returns
     -------
     bool
     """

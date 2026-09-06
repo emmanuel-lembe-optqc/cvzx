@@ -4,6 +4,7 @@ exclude = [
     "**/pb/mqc3_cloud/**/*.py",  # exclude protobuf generated files
     "**/pb/mqc3_cloud/**/*.pyi", # exclude protobuf generated files
     "**/.ipynb_checkpoints/**",  # exclude Jupyter checkpoints
+    "docs/**",                   # Sphinx config/build output, not part of the cvzx package
 ]
 preview = true
 target-version = "py312"
@@ -14,6 +15,9 @@ ignore = [
     "COM812",  # missing-trailing-comma
     "CPY001",  # missing-copyright-notice
     "D104",    # undocumented-public-package
+    "D401",    # non-imperative-mood (excluded by the "google" convention this project used before;
+               # kept off now that "numpy" enables it, since many docstrings here lead with a noun
+               # phrase describing the value/state rather than an imperative verb)
     "ERA001",  # commented-out-code
     "FA102",   # future-required-type-annotation
     "FIX002",  # line-contains-todo
@@ -52,4 +56,4 @@ ignore = [
 ]
 
 [lint.pydocstyle]
-convention = "google"
+convention = "numpy"

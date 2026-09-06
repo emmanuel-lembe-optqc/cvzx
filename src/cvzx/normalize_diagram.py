@@ -117,7 +117,7 @@ _Token = tuple
 def _make_identity_wire() -> Diagram:
     """Build a fresh 1-mode identity spider to pad an untouched row.
 
-    Returns:
+    Returns
     -------
     Diagram
         A brand-new `QSpider(1, 1, 0)` (each call mints its own id, so
@@ -137,7 +137,7 @@ def _leaf_diagram(graph: nx.DiGraph, leaf_id: int) -> Diagram:
     always in, so this reuses its own leaf-reconstruction helper rather
     than inventing a second way to rebuild a leaf from its attributes.
 
-    Returns:
+    Returns
     -------
     Diagram
         The rebuilt leaf.
@@ -163,7 +163,7 @@ def _resolve_input(graph: nx.DiGraph, node_id: int, port: int) -> tuple[int, int
     port : int
         The port index, local to `node_id`.
 
-    Returns:
+    Returns
     -------
     tuple[int, int]
         `(leaf_id, leaf_port)` of the leaf that ultimately owns this
@@ -193,7 +193,7 @@ def _resolve_output(graph: nx.DiGraph, node_id: int, port: int) -> tuple[int, in
 
     See `_resolve_input` -- this is its output-side mirror.
 
-    Returns:
+    Returns
     -------
     tuple[int, int]
         `(leaf_id, leaf_port)` of the leaf that ultimately owns this
@@ -232,7 +232,7 @@ def _natural_key(graph: nx.DiGraph, leaf_id: int) -> tuple[int, ...]:
     instead of always appending it after every other row regardless of
     where it actually sits in the source diagram.
 
-    Returns:
+    Returns
     -------
     tuple[int, ...]
         The leaf's row-index key, root-to-leaf.
@@ -260,7 +260,7 @@ def _token_natural_key(graph: nx.DiGraph, token: _Token, root_id: int) -> tuple[
     resolve it to -- so `EXT_IN` tokens and leaf tokens compare
     correctly against each other in one shared key space.
 
-    Returns:
+    Returns
     -------
     tuple[int, ...]
         The owning leaf's `_natural_key`.
@@ -285,7 +285,7 @@ def _natural_insertion_index(
     linear scan for the first existing token whose key exceeds the new
     leaf's -- i.e. an insertion-sort position, not a fresh sort.
 
-    Returns:
+    Returns
     -------
     int
         The index into `active` the new leaf's row should be inserted
@@ -301,7 +301,7 @@ def _natural_insertion_index(
 def _is_wide(attrs: dict) -> bool:
     """Classify a leaf as "wide" (touches more than one mode).
 
-    Returns:
+    Returns
     -------
     bool
         True if the leaf touches more than one mode.
@@ -317,7 +317,7 @@ def _build_pred_map(
 ) -> dict[tuple[int, int], _Token]:
     """Build the leaf-level predecessor wire map.
 
-    Returns:
+    Returns
     -------
     dict
         `pred_of[(leaf, in_port)]` is the token feeding that input:
@@ -354,7 +354,7 @@ def _is_bare_identity(attrs: dict) -> bool:
     nothing-but-wiring never has to be represented as its own type-1
     stage.
 
-    Returns:
+    Returns
     -------
     bool
         True if `attrs` describes a plain 1-mode identity wire.
@@ -396,7 +396,7 @@ def _strip_identity_leaves(
     pred_of : dict
         As returned by `_build_pred_map`, before any elision.
 
-    Returns:
+    Returns
     -------
     tuple[list[int], dict, Callable]
         The filtered `leaves` list (identity ids removed), the
@@ -426,14 +426,14 @@ def _assign_stages(  # ruff: ignore[complex-structure, too-many-branches, too-ma
 ) -> dict[int, int]:
     """Greedily assign each leaf a "micro-layer" index (module docstring, step 1).
 
-    Returns:
+    Returns
     -------
     dict[int, int]
         `stage_of[leaf_id]`: the micro-layer this leaf lands in.
 
-    Raises:
+    Raises
     ------
-    ValueError:
+    ValueError
         If the leaf-level wire graph is not a DAG (a cycle was detected).
     """
     leaf_attrs = {leaf: graph.nodes[leaf] for leaf in leaves}
@@ -522,7 +522,7 @@ def _assign_stages(  # ruff: ignore[complex-structure, too-many-branches, too-ma
 class _Row:
     """One in-progress row (mode) of a stage under construction.
 
-    Attributes:
+    Attributes
     ----------
     content : list[int]
         Leaf ids chained onto this row so far, in causal order.
@@ -545,7 +545,7 @@ class _Row:
 def _finalize_row(graph: nx.DiGraph, row: _Row) -> Diagram:
     """Turn one row's accumulated leaf chain into a single `Diagram`.
 
-    Returns:
+    Returns
     -------
     Diagram
         A bare identity wire if `row` is empty, the row's sole leaf if
@@ -587,7 +587,7 @@ def _build_narrow_rows(  # ruff: ignore[too-many-arguments, too-many-positional-
     pred_of : dict
         As returned by `_build_pred_map`.
 
-    Returns:
+    Returns
     -------
     list[_Row]
         One `_Row` per position `active` started with, plus one per
@@ -679,7 +679,7 @@ def _absorb_final_permutation(
         The diagram's true external-output tokens, in its own declared
         output order.
 
-    Returns:
+    Returns
     -------
     bool
         True if the last stage's own elements were successfully
@@ -710,6 +710,12 @@ def _absorb_final_permutation(
 
     target_pos = {token: i for i, token in enumerate(desired_final_tokens)}
     for _element, _in_toks, out_toks in blocks:
+        if not out_toks:
+            # A 0-output (effect) element contributes nothing to
+            # `desired_final_tokens`, so its position can't be verified
+            # against it -- fall back to a genuine trailing permutation
+            # stage instead, same as the multi-port-splitting case below.
+            return False
         positions = [target_pos[t] for t in out_toks]
         if positions != list(range(positions[0], positions[0] + len(positions))):
             return False
@@ -736,7 +742,7 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
         A compact-form diagram (i.e. one that has not yet been passed
         through `expand_two_mode_gates`).
 
-    Returns:
+    Returns
     -------
     Diagram
         A `CompositionDiagram` of alternating type-1 (`TensorDiagram`

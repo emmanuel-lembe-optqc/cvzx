@@ -42,7 +42,7 @@ class OptimizeResult(NamedTuple):
     unpacking works, while also allowing `.graph`/`.diagram` attribute
     access at call sites where that reads more clearly.
 
-    Attributes:
+    Attributes
     ----------
     graph : nx.DiGraph
         The simplified graph, AFTER the end-of-pipeline
@@ -70,14 +70,14 @@ def _build_rules(*, assume_infinite_squeezing: bool) -> list[RewriteRule]:
     exposes, and both are only sound under the idealized-eigenstate
     assumption `assume_infinite_squeezing` names.
 
-    Parameters:
+    Parameters
     ----------
     assume_infinite_squeezing : bool
         Whether to include the rules that are only exact for idealized
         (infinite squeezing) eigenstates: `CopyRule`, and
         `TerminalAbsorptionRule`'s squeezing/cross-color-discard sub-cases.
 
-    Returns:
+    Returns
     -------
     list[RewriteRule]
         The rules to run, in the order they should be tried each round.
@@ -97,14 +97,14 @@ def _build_rules(*, assume_infinite_squeezing: bool) -> list[RewriteRule]:
 def _simplify_to_fixed_point(graph: nx.DiGraph, rules: list[RewriteRule]) -> bool:
     """Apply `rules` to `graph` in-place, repeatedly, until none of them match.
 
-    Parameters:
+    Parameters
     ----------
     graph : nx.DiGraph
         The graph to simplify in-place.
     rules : list[RewriteRule]
         The rules to try each pass, in order.
 
-    Returns:
+    Returns
     -------
     bool
         True if at least one rule matched (and so `graph` was modified) at
@@ -177,7 +177,7 @@ def optimize(
     feed into more rewriting, analysis, or another `RewriteRule`, and the
     pre-cleanup diagram, ready for visualization.
 
-    Parameters:
+    Parameters
     ----------
     diagram : Diagram
         The diagram to simplify.
@@ -192,7 +192,7 @@ def optimize(
         diagram never reaches a fixed point. Defaults to
         `_DEFAULT_MAX_ROUNDS`.
 
-    Returns:
+    Returns
     -------
     OptimizeResult
         A `(graph, diagram)` named tuple: the cleaned `nx.DiGraph`, and the
