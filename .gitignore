@@ -43,6 +43,11 @@ build/
 *.pdf
 *.svg
 
+# ...except the documentation's own diagram assets
+!docs/source/_static/*.png
+!docs/source/_static/*.pdf
+!docs/source/_static/*.svg
+
 # Local configuration
 *.local.py
 *.local.cfg

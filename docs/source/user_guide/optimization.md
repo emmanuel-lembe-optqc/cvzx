@@ -92,6 +92,22 @@ actually matching is discarded rather than committed, and `max_rounds` is a safe
 against a diagram that never reaches a fixed point (it should not be hit in practice —
 raise an issue if you find a circuit that does; `optimize()` logs a warning if it is).
 
+## Performance
+
+`optimize()`'s round loop does `O(n)` work per round in diagram size, not
+`O(rounds × rules × n)`: `_simplify_to_fixed_point` only rebuilds its internal `GateRegister`
+(the O(1)-lookup index `match()` uses so it doesn't have to scan the whole graph for, say,
+every rotation gate) right after a rule actually applies a change — never merely because a
+pass moves on to the next rule. A rule whose `match()` finds nothing leaves the graph, and
+therefore every category the registry indexes, untouched, so rebuilding in that case would be
+pure wasted work; as a round approaches the fixed point and fewer rules still match, this
+saves more and more rebuilds. `to_graph`/`to_diagram` also no longer carry a defensive
+`deepcopy` of the diagram they convert — nothing in that conversion walk mutates its input
+(pinned down by `tests/nx_graph/test_nx_graph.py::TestToGraphDoesNotMutateInput`), so the copy
+was pure overhead, on the order of a third of `to_graph`'s own cost on a realistic circuit.
+Neither change affects what `optimize()` computes, only how much work it takes to get there —
+see {doc}`../dev_guide/rewrite_engine` for the registry-sync rationale in more detail.
+
 ## Debugging with logs
 
 `cvzx.normalize_diagram`, `cvzx.nx_rewrite_rules`, and `cvzx.optimize` each log through the

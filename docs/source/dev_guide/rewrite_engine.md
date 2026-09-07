@@ -69,9 +69,13 @@ source of truth (the graph is), and nothing updates it automatically. A rule's
 `apply_single` that adds or removes nodes is responsible for calling
 `registry.add_node()`/`remove_node()` itself, or the caller must rebuild the registry with
 `build_from_graph()` before the next `match()` call. `cvzx.optimize._simplify_to_fixed_point`
-rebuilds the registry fresh before every rule in every pass for exactly this reason — it is
-simpler and cheap enough at the circuit sizes this library targets to rebuild than to audit
-every rule's node bookkeeping for registry-sync correctness.
+rebuilds the registry fresh right after a rule actually applies a change to the graph —
+never merely because a pass moves on to the next rule, since a rule whose `match()` returns
+nothing leaves the graph (and therefore every category the registry indexes) untouched, so a
+rebuild in that case would be pure wasted work for no change in behavior. It still rebuilds
+from scratch, rather than patching incrementally, whenever a rule *did* just mutate the
+graph: that's simpler and cheap enough at the circuit sizes this library targets than
+auditing every rule's node bookkeeping for registry-sync correctness.
 
 ## `VoidDiagram`: a transient bookkeeping leaf, not a calculus generator
 

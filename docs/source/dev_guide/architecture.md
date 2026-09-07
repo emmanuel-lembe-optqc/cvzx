@@ -76,38 +76,9 @@ example and how to register an alternative.
 
 ### The `optimize()` step in more detail
 
-```text
-Diagram
-  │
-  ▼
-normalize_diagram()  ── alternating type-1 (narrow-gate) / type-2 (one wide gate) stages
-  │                     (see normalization.md — this MUST run before expansion, because it
-  │                     only understands compact-form 2-mode gates)
-  ▼
-[assume_infinite_squeezing?] expand_two_mode_gates()  ── BS/CSUM -> ContractedDiagram
-  │
-  ▼
-to_graph()
-  │
-  ▼
-┌─────────────────────────────────────────────────────────┐
-│ repeat to a fixed point:                                 │
-│   IdentityRule → FusionRule → ChainReductionRule →       │
-│   FourierNormalizationRule → TerminalAbsorptionRule →    │
-│   [assume_infinite_squeezing?] CopyRule                  │
-└─────────────────────────────────────────────────────────┘
-  │
-  ▼
-to_diagram()  ── fed back into normalize_diagram() for another round,
-  │              until a round changes nothing (or max_rounds is hit)
-  ▼
-to_diagram(graph)  ── captured as `.diagram` (pre-cleanup snapshot)
-  │
-  ▼
-remove_void_and_identity_nodes()  ── run exactly once, on the graph only
-  │
-  ▼
-OptimizeResult(graph=<cleaned graph>, diagram=<pre-cleanup snapshot>)
+```{image} ../_static/optimize_round_detail.png
+:alt: optimize() round detail, from Diagram to OptimizeResult
+:width: 100%
 ```
 
 The two outputs are captured at different points *on purpose*: `remove_void_and_identity_nodes`
