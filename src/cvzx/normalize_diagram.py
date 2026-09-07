@@ -14,84 +14,21 @@ that rewrites an arbitrary (compact-form) `Diagram` into a canonical
       type-2 touches on either side, or a bare identity wire on a row
       nothing happens on.
 
-Why this exists
-----------------
-Several rewrite rules (`ChainReductionRule`, `TerminalAbsorptionRule`)
-only ever look for two matchable leaves that are *directly adjacent
-elements of one flat `CompositionDiagram`* -- i.e. same immediate
-parent, consecutive `sub_diagram_ids`. A diagram built up the "natural"
-way (e.g. an ancilla prepared mid-circuit via a width-changing
-sub-`CompositionDiagram` nested inside one row of a wider
-`TensorDiagram`, as in `_build_four_mode_circuit`) can easily end up
-with two same-row, back-to-back 1-mode gates that are *not* siblings of
-one flat composition, simply because of how the tree happens to be
-nested -- so those rules never see them. Normalizing first makes same-
-container matching sufficient everywhere, without requiring
-`ChainReductionRule`/`TerminalAbsorptionRule` themselves to grow any
-cross-container matching logic (unlike `CopyRule`, which needed exactly
-that).
-
-How it works
--------------
-The algorithm operates on the *leaf-level wire graph* obtained from
-`to_graph()` (every "composition" edge in that graph already connects
-two fully-resolved leaves, regardless of how deeply either sits nested
-inside `TensorDiagram`/`CompositionDiagram` containers -- see
-`CopyRule`'s docstring for the same observation). Leaves are classified
-as *wide* (touches more than one mode: `max(num_inputs, num_outputs) >
-1`) or *narrow* (a 1-mode gate, a state, an effect, a plain identity
-wire, or a `VoidDiagram` -- everything with `num_inputs <= 1` and
-`num_outputs <= 1`).
-
-1. Leaves are given a greedy topological "micro-layer" index: each wide
-   leaf claims an entire layer to itself (no narrow leaf may share it);
-   narrow leaves pack into the earliest layer available to them that
-   isn't claimed by a wide leaf. This never violates the underlying
-   causal (wire) order, since a leaf's layer is always strictly after
-   every leaf feeding one of its inputs.
-2. Wide leaves, in layer order, become the sequence of type-2 stages.
-   The narrow leaves are partitioned into "runs" -- the (possibly
-   empty) stretch of narrow layers strictly between one type-2 stage
-   and the next (or before the first / after the last) -- and each run
-   becomes one type-1 stage.
-3. Each stage is built by tracking, per currently-open mode ("row"), an
-   opaque *token* identifying which leaf/port (or which external input)
-   last produced that wire. A type-1 run chains whichever leaves from
-   that run land on a given row into one `CompositionDiagram`, in
-   causal order (an untouched row gets a bare identity wire); a state
-   opens a brand new row, an effect closes one. A type-2 stage places
-   the wide leaf plus one identity wire per untouched row. Tokens are
-   never mutated by identity-wire insertion, so a leaf's true
-   predecessor is always found correctly however many filler wires end
-   up sitting structurally in between.
-4. Every stage boundary is joined with an explicit `connectivity` dict
-   (built by looking up, for every token the next stage expects, which
-   port position the previous stage produced it at) -- stages are
-   free to reorder rows internally (a 2-mode gate whose two touched
-   modes were not adjacent, say), so this is never assumed to be the
-   identity map. The very first stage's row order is fixed to match the
-   diagram's own external input order (nothing precedes it to permute
-   against, so it is built directly in that order to begin with).
-   Nothing similarly precedes the very last stage's own *output* order
-   from the outside either, so if the content naturally produced by the
-   last run doesn't already match the diagram's real external output
-   order, one small trailing stage of bare identity wires is appended,
-   built directly in the required order and connected back to the
-   natural order via the same connectivity mechanism.
-
-Scope and limitations
-----------------------
-This is designed to run on *compact*-form diagrams (before
-`expand_two_mode_gates`), where a 2-mode gate is a single leaf rather
-than a `ContractedDiagram` of two smaller pieces. If the graph contains
-any `ContractedDiagram` container, this function conservatively returns
-the input diagram unchanged rather than risk mis-normalizing internal
-wire-bending it does not attempt to trace through.
+Several rewrite rules (`ChainReductionRule`, `TerminalAbsorptionRule`) only
+match two leaves that are directly adjacent elements of one flat
+`CompositionDiagram`; normalizing first makes that check sufficient
+everywhere, instead of requiring every such rule to grow `CopyRule`-style
+cross-container matching logic. This is only designed to run on
+*compact*-form diagrams (before `expand_two_mode_gates`) -- if the graph
+contains any `ContractedDiagram`, it conservatively returns the input
+diagram unchanged. See the docs' dev guide ("Type-1/type-2 stage
+normalization") for the full algorithm walkthrough and design rationale.
 """
 
 from __future__ import annotations
 
 import heapq
+import logging
 import math
 from typing import TYPE_CHECKING
 
@@ -104,6 +41,8 @@ if TYPE_CHECKING:
     import networkx as nx
 
 __all__ = ["normalize_diagram"]
+
+logger = logging.getLogger(__name__)
 
 _ZERO = ZxPoly({})
 
@@ -752,14 +691,25 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
         `diagram` contains no leaves at all, or contains a
         `ContractedDiagram` (out of scope -- see module docstring),
         `diagram` is returned unchanged.
+
+    Raises
+    ------
+    TypeError
+        If `diagram` is not a `Diagram` instance.
     """
+    if not isinstance(diagram, Diagram):
+        msg = f"normalize_diagram() expects a Diagram, got {type(diagram).__name__}."
+        raise TypeError(msg)
+
     graph = to_graph(diagram)
     root_id = get_root_node(graph)
     if root_id is None:
+        logger.debug("normalize_diagram: empty diagram, nothing to do")
         return diagram
 
     for _n, attrs in graph.nodes(data=True):
         if attrs.get("container_type") == "contracted":
+            logger.debug("normalize_diagram: contains a ContractedDiagram, left unchanged")
             return diagram
 
     leaves = [n for n, attrs in graph.nodes(data=True) if attrs.get("kind") in {"proper", "compact"}]
@@ -945,6 +895,7 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
             perm_elements = [_make_identity_wire() for _ in desired_final_tokens]
             stage_records.append((perm_elements, desired_final_tokens, [(leaf.id, 0) for leaf in perm_elements]))
 
+    logger.debug("normalize_diagram: built %d stage(s)", len(stage_records))
     stages = [elements[0] if len(elements) == 1 else TensorDiagram(elements) for elements, _, _ in stage_records]
 
     if len(stages) == 1:

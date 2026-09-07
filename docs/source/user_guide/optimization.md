@@ -90,4 +90,24 @@ re-expanding to expose further copy patterns (e.g. `ChainReductionRule` merging 
 `ControlledSumGate`s on the same modes). A round that only expanded gates without any rule
 actually matching is discarded rather than committed, and `max_rounds` is a safety cap
 against a diagram that never reaches a fixed point (it should not be hit in practice —
-raise an issue if you find a circuit that does).
+raise an issue if you find a circuit that does; `optimize()` logs a warning if it is).
+
+## Debugging with logs
+
+`cvzx.normalize_diagram`, `cvzx.nx_rewrite_rules`, and `cvzx.optimize` each log through the
+standard `logging` module (which rule matched, how many rounds/passes ran, and a warning if
+`max_rounds` is hit) — useful when a diagram isn't simplifying the way you expect. They only
+ever emit records; nothing is written anywhere until you configure logging yourself. The
+easiest way to do that is `cvzx.logging_config.setup_file_logging()`, called once early in
+your script:
+
+```python
+from cvzx.logging_config import setup_file_logging
+
+setup_file_logging()  # writes to ./logs/ by default; pass log_dir=... to change that
+```
+
+This gives each of the three loggers above its own file under the log directory
+(`normalize_diagram.log`, `nx_rewrite_rules.log`, `optimize.log`) instead of one mixed-together
+file, so you can tell, e.g., "did `FusionRule` ever match" apart from "did the round loop
+converge" at a glance.

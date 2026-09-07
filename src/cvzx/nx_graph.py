@@ -14,7 +14,6 @@ Key design decisions:
     - All port connections are stored as edges with port information
 """
 
-from copy import deepcopy
 from typing import cast
 
 import networkx as nx
@@ -316,7 +315,7 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
         Directed graph representation of the diagram with all nodes and edges.
     """
     graph = nx.DiGraph()
-    root_id = _convert_diagram_to_graph(deepcopy(diagram), graph, container_id=None, is_root=True)
+    root_id = _convert_diagram_to_graph(diagram, graph, container_id=None, is_root=True)
 
     # Mark the root node
     if root_id is not None and root_id != -1:

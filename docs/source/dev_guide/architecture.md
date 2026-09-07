@@ -48,21 +48,31 @@ through a `RewriteRule`) is responsible for updating the registry itself.
 ## The full pipeline: `CircuitRepr` to `MachineryRepr`
 
 The end-to-end path from a user-authored mqc3 `CircuitRepr` down to a QPU's `MachineryRepr`,
-through `cvzx`'s own canonicalization/optimization and mqc3's downstream embedding machinery:
+through `cvzx`'s own canonicalization/optimization and mqc3's downstream embedding machinery
+(every box below is the actual function call that performs that step):
 
 ```{image} ../_static/pipeline_overview.png
-:alt: CircuitRepr to MachineryRepr pipeline
+:alt: Compiler pipeline overview, from CircuitRepr to MachineryRepr
 :width: 100%
 ```
 
 `cvzx.circuit_to_diagram.from_circuit_repr` and `cvzx.diagram_to_circuit.to_circuit_repr` are
-the two halves of the round trip at the `Diagram` boundary (labelled `circ_to_diag.py`/
-`diag_to_circ.py` in the diagram above); `cvzx.lowering.graph_to_dependency_dag` is the
-pluggable dispatch point that hands the canonicalized diagram off to mqc3's own
-`DependencyDAG`/`GraphEmbedder`/`machinery.compose` chain — the bundled `"mqc3"` backend does
-this via `to_circuit_repr` followed by mqc3's `_DependencyBuilder.from_circuit()`, but a
-different QPU can register its own `LoweringBackend` (see `cvzx.lowering`'s module docstring)
-without touching any of the other steps.
+the two halves of the round trip at the `Diagram` boundary; `cvzx.lowering.graph_to_machinery_repr`
+is the pluggable dispatch point that carries the canonicalized diagram the rest of the way to a
+concrete `MachineryRepr`, through mqc3's own `DependencyDAG`/`GraphEmbedder`/`GraphRepr` chain.
+
+`cvzx.lowering` exists as a plugin point (rather than hardcoding one fixed
+`Diagram -> MachineryRepr` path) because mqc3 already treats the embedding step as one of its
+own: `GraphEmbedder` is an abstract base class, with `beamsearch.py`/`greedy.py` as two concrete
+strategies for embedding a `DependencyDAG` into a `GraphRepr` differently (trading off layout
+quality against how expensive the search is). A `LoweringBackend` lets a QPU pick a different
+embedding strategy, or skip the `CircuitRepr` round-trip entirely and build the `DependencyDAG`
+directly from the diagram's own structure, without touching `get_backend`,
+`graph_to_machinery_repr`, or any other registered backend. The bundled `"mqc3"` backend is
+deliberately the simplest correct implementation: `to_circuit_repr`, mqc3's own
+`DependencyDAG(circuit)` constructor, `GreedyEmbedder` (the simpler of mqc3's two embedders),
+and `MachineryRepr.from_graph_repr` — see {doc}`../user_guide/circuit_conversion` for a worked
+example and how to register an alternative.
 
 ### The `optimize()` step in more detail
 

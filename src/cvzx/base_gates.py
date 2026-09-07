@@ -384,7 +384,7 @@ class ProperDiagram(Diagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
 
     _num_inputs: int
@@ -538,7 +538,7 @@ class ContractedDiagram(Diagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Definition 11, Eq. (51)
+    [1] Nagayoshi et al., CV ZX calculus, Definition 11, Eq. (51)
     """
 
     diagrams: list[Diagram]
@@ -805,7 +805,7 @@ class TensorDiagram(Diagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Definition 9
+    [1] Nagayoshi et al., CV ZX calculus, Definition 9
     """
 
     diagrams: Sequence[Diagram]
@@ -862,7 +862,7 @@ class TensorDiagram(Diagram):
 
         References
         ----------
-        [3] Nagayoshi et al., CV ZX calculus, Definition 11
+        [1] Nagayoshi et al., CV ZX calculus, Definition 11
         """
         if not diagram_pairs:
             msg = "diagram_pairs cannot be empty"
@@ -1154,7 +1154,7 @@ class CompositionDiagram(Diagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Definition 10
+    [1] Nagayoshi et al., CV ZX calculus, Definition 10
     """
 
     diagrams: Sequence[Diagram]
@@ -1345,7 +1345,7 @@ class QSpider(ProperDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
 
     phase: ZxPoly
@@ -1392,7 +1392,7 @@ class PSpider(ProperDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
 
     phase: ZxPoly
@@ -1439,7 +1439,7 @@ class Swap(ProperDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
 
     _num_inputs: int = field(default=2, init=False)
@@ -1541,7 +1541,7 @@ class Fourier(ProperDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
 
     _num_inputs: int = field(default=1, init=False)
@@ -1582,7 +1582,7 @@ class FourierInv(ProperDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
 
     _num_inputs: int = field(default=1, init=False)
@@ -1625,7 +1625,7 @@ class Fourier2(ProperDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
     """
 
     _num_inputs: int = field(default=1, init=False)

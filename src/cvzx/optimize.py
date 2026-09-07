@@ -11,6 +11,7 @@ the graph is no longer guaranteed to be losslessly representable as a nested
 for visualization instead of re-deriving one from the cleaned graph.
 """
 
+import logging
 from typing import NamedTuple
 
 import networkx as nx
@@ -29,6 +30,8 @@ from cvzx.nx_rewrite_rules import (
     expand_two_mode_gates,
     remove_void_and_identity_nodes,
 )
+
+logger = logging.getLogger(__name__)
 
 # Upper bound on the number of expand/simplify rounds `optimize()` runs, as a
 # safety net against a pathological diagram that never reaches a fixed point.
@@ -109,17 +112,35 @@ def _simplify_to_fixed_point(graph: nx.DiGraph, rules: list[RewriteRule]) -> boo
     bool
         True if at least one rule matched (and so `graph` was modified) at
         any point during this call.
+
+    Notes
+    -----
+    `GateRegister` is rebuilt from scratch only right after a rule actually
+    applies a change to `graph` -- never merely because a pass moves on to
+    the next rule. A rule whose `match()` returns nothing leaves `graph`
+    (and therefore every category the registry indexes) untouched, so the
+    registry already on hand is still exactly correct for whichever rule is
+    tried next; rebuilding in that case would be pure wasted `O(N)` work for
+    no change in behavior. This relies on nothing about how any individual
+    rule mutates the graph -- only on `RewriteRule.apply_rule`'s own
+    guarantee that "no match" means "no mutation" (see the dev guide's
+    "Keeping GateRegister in sync" for why rules themselves don't maintain
+    the registry incrementally).
     """
     changed = False
+    n_passes = 0
+    registry = GateRegister()
+    registry.build_from_graph(graph)
     while True:
+        n_passes += 1
         pass_changed = False
         for rule in rules:
-            registry = GateRegister()
-            registry.build_from_graph(graph)
             if rule.match(graph, registry):
                 rule.apply_rule(graph, registry)
                 pass_changed = True
+                registry.build_from_graph(graph)
         if not pass_changed:
+            logger.debug("_simplify_to_fixed_point: reached fixed point after %d pass(es)", n_passes)
             return changed
         changed = True
 
@@ -132,50 +153,15 @@ def optimize(
 ) -> OptimizeResult:
     """Simplify a diagram by repeatedly applying the CV ZX rewrite rules.
 
-    Each round: (1) if `assume_infinite_squeezing`, expand every
-    `BeamsplitterGate`/`ControlledSumGate` into its `ContractedDiagram` form
-    via `expand_two_mode_gates` (never `ControlledZGate` -- see that
-    function's docstring for why); (2) convert to the graph representation
-    once; (3) run `IdentityRule`, `FusionRule`, `ChainReductionRule`,
-    `FourierNormalizationRule`, `TerminalAbsorptionRule` and, when
-    `assume_infinite_squeezing`, `CopyRule` to a fixed point over that graph;
-    (4) convert back to a diagram to feed the next round. Rounds repeat
-    because folding/absorbing gates can combine adjacent two-mode gates
-    (e.g. two `ControlledSumGate`s on the same modes into one, via
-    `ChainReductionRule`) that themselves need expanding again to expose
-    further copy patterns.
-
-    A round that expands two-mode gates but has no rule actually match is
-    discarded rather than committed: expansion alone is not a simplification,
-    so the state from before that round is kept instead of a
-    gratuitously-expanded one.
-
-    With `assume_infinite_squeezing=False` (the default), only the rules
-    that are exact for any physical state run: `IdentityRule`, `FusionRule`,
-    `ChainReductionRule`, `FourierNormalizationRule`, and rotation absorption
-    within `TerminalAbsorptionRule`. Two-mode gates are never expanded and
-    `CopyRule` never runs, since both are only sound when terminal states
-    are treated as idealized (infinite squeezing) eigenstates.
-
-    Once the round loop reaches a fixed point, `to_diagram(graph)` is
-    captured -- this is the value returned as `.diagram` -- and THEN
-    `remove_void_and_identity_nodes` runs once on the graph: it strips
-    every transient `VoidDiagram` `CopyRule` left behind (genuinely
-    shrinking whichever container held it) and gives `IdentityRule` one
-    more pass to remove any identity spider that removal exposed. That
-    final step can restructure the graph in ways a nested `Diagram` tree
-    can no longer losslessly express, which is exactly why the diagram
-    snapshot is taken beforehand rather than derived from the cleaned
-    graph afterward.
-
-    The `Diagram` tree (`CompositionDiagram`/`TensorDiagram`/`ContractedDiagram`
-    nesting `Diagram` leaves) is a good representation for visualizing a
-    circuit, but it's a poor one to compute with further: matching and
-    rewriting need the flat, randomly-addressable `nx.DiGraph` form (that's
-    what every rule in `cvzx.nx_rewrite_rules` operates on) instead of walking
-    a nested tree. `optimize()` returns both: the cleaned graph, ready to
-    feed into more rewriting, analysis, or another `RewriteRule`, and the
-    pre-cleanup diagram, ready for visualization.
+    Each round: optionally expand two-mode gates (`assume_infinite_squeezing`),
+    convert to the graph representation, run every rule to a fixed point,
+    then convert back to a diagram for the next round -- rounds repeat
+    because folding/absorbing gates can expose further reductions (e.g. two
+    `ControlledSumGate`s merging into one that itself needs re-expanding).
+    See the user guide ("Optimizing a diagram") for what
+    `assume_infinite_squeezing` unlocks and worked examples of each, and
+    the dev guide ("Architecture overview") for the full round-by-round
+    breakdown.
 
     Parameters
     ----------
@@ -197,11 +183,20 @@ def optimize(
     OptimizeResult
         A `(graph, diagram)` named tuple: the cleaned `nx.DiGraph`, and the
         `Diagram` as it stood right before the final cleanup pass.
+
+    Raises
+    ------
+    TypeError
+        If `diagram` is not a `Diagram` instance.
     """
+    if not isinstance(diagram, Diagram):
+        msg = f"optimize() expects a Diagram, got {type(diagram).__name__}."
+        raise TypeError(msg)
+
     rules = _build_rules(assume_infinite_squeezing=assume_infinite_squeezing)
     graph = to_graph(diagram)
 
-    for _ in range(max_rounds):
+    for round_index in range(max_rounds):
         # Normalize into alternating type-1/type-2 stages *before* any
         # expansion: `normalize_diagram` only understands compact-form
         # 2-mode gates (a single leaf) and bails out as a no-op the
@@ -221,10 +216,16 @@ def optimize(
         if not _simplify_to_fixed_point(candidate_graph, rules):
             # Nothing matched this round -- expanding (if we did) didn't
             # unlock anything, so keep the state from before this round.
+            logger.debug("optimize: converged after %d round(s)", round_index)
             break
 
         graph = candidate_graph
         diagram = to_diagram(graph)
+    else:
+        logger.warning(
+            "optimize: reached max_rounds=%d without converging -- result may not be fully simplified",
+            max_rounds,
+        )
 
     pre_cleanup_diagram = to_diagram(graph)
     remove_void_and_identity_nodes(graph)

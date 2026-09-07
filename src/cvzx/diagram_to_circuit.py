@@ -9,27 +9,18 @@ mqc3 intrinsic operations.
 
 Why walk the *canonical* form and not an arbitrary one
 -------------------------------------------------------
-`normalize_diagram` decomposes every diagram down to the same flat set
-of primitive leaves regardless of how they were originally grouped --
-in particular, a diagram built from a single `intrinsic.BeamSplitter`
-or `intrinsic.Squeezing` operation (via `circuit_to_diagram`, which expresses
-both as multi-leaf compositions -- see that module's docstring) comes
-back out as *separate* canonical stages, not as one reassembled
-`BeamSplitter`/`Squeezing` op. This module does not attempt to pattern-
-match such compositions back together: it translates each primitive
-leaf independently into its own mqc3 op(s). The result is semantically
-equivalent to the original circuit (verified leaf-by-leaf below) but
-not necessarily *op-for-op* identical to whatever `CircuitRepr` (if
-any) originally produced the diagram -- a `BeamSplitter(sqrt_r,
-theta_rel)` round-trips as a `PhaseRotation` + `BeamSplitter(sqrt_r,
-0)` + two more `PhaseRotation`s, for instance, not as a single
-`BeamSplitter(sqrt_r, theta_rel)` call. This also means the input
-`Diagram` must not already be the target of `optimize()`'s algebraic
-spider-fusion rewrites (as opposed to `normalize_diagram`'s purely
-structural ones): a fused spider can end up with a phase polynomial
-that no longer matches any of the primitive shapes this module
-recognizes, in which case conversion raises `NotImplementedError`
-rather than silently producing something else.
+`normalize_diagram` decomposes every diagram to the same flat set of
+primitive leaves regardless of how they were originally grouped, so this
+module translates each primitive leaf independently rather than pattern-
+matching compositions back into, e.g., a single `BeamSplitter` op -- the
+result is semantically equivalent to the original circuit but not
+necessarily *op-for-op* identical (see the user guide, "Converting to and
+from mqc3 circuits", for a worked example). The input `Diagram` must also
+not already be the target of `optimize()`'s algebraic spider-fusion
+rewrites (as opposed to `normalize_diagram`'s purely structural ones): a
+fused spider's phase polynomial may no longer match any primitive shape
+this module recognizes, in which case conversion raises
+`NotImplementedError` rather than silently producing something else.
 
 Per-leaf conversion formulas
 -----------------------------

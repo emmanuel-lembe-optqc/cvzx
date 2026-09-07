@@ -1103,3 +1103,95 @@ class TestgraphraphConversion:
         tensor = TensorDiagram([self.q1, self.q2])
         graph = to_graph(tensor)
         assert get_connectivity(graph, tensor.id) is None
+
+
+class TestToGraphDoesNotMutateInput:
+    """`to_graph` must be a pure read of the `diagram` it is given.
+
+    `to_graph` used to open with `deepcopy(diagram)` before walking it,
+    apparently as a defensive copy against the walk mutating the input --
+    but nothing in `_convert_diagram_to_graph` or the `_add_*_node`
+    helpers it dispatches to (`_add_proper_node`, `_add_composition_node`,
+    `_add_tensor_node`, `_add_contracted_node`) ever writes back onto the
+    `Diagram` objects it visits; they only read `.id` (assigned once, at
+    construction, from `Diagram`'s own id counter -- never by graph
+    conversion), `.diagrams`/`.first`/`.second`, and gate attributes such
+    as `.phase`/`.feedforward`/`.measurement_ids`. The `deepcopy` was
+    removed once that was confirmed (it was roughly a third of `to_graph`'s
+    own cost on a realistic circuit). These tests pin the "no mutation"
+    invariant down explicitly, so a future change that reintroduces a
+    mutating step in that walk fails a test here instead of silently
+    invalidating the assumption the removal relied on.
+
+    The snapshot these tests compare against is deliberately independent
+    of `cvzx.nx_graph` -- it walks the `Diagram` tree directly via
+    `vars()` on every object, rather than routing through `to_graph`
+    itself. A fingerprint built *by calling* the function under test
+    would be blind to exactly the bug it's meant to catch: a mutation
+    `to_graph` performs on its input would show up identically in a
+    "before" and an "after" snapshot if both snapshots were themselves
+    produced by calling `to_graph`.
+    """
+
+    def _snapshot(self, diagram: Diagram) -> str:
+        """A recursive, `cvzx.nx_graph`-independent snapshot of every object.
+
+        Captures every object's own attributes (via `vars()`), so any
+        mutation -- whether to a field `to_graph` exposes on its output
+        graph or not -- changes the result.
+        """
+        if isinstance(diagram, (TensorDiagram, CompositionDiagram)):
+            own = {k: v for k, v in vars(diagram).items() if k != "diagrams"}
+            children = tuple(self._snapshot(d) for d in diagram.diagrams)
+            return repr((type(diagram).__name__, own, children))
+        if isinstance(diagram, ContractedDiagram):
+            own = {k: v for k, v in vars(diagram).items() if k not in {"first", "second"}}
+            return repr((type(diagram).__name__, own, self._snapshot(diagram.first), self._snapshot(diagram.second)))
+        # Proper / compact leaf: no children to recurse into.
+        return repr((type(diagram).__name__, dict(vars(diagram))))
+
+    def test_to_graph_does_not_mutate_a_flat_diagram(self):
+        """A single composed gate, including a feedforward/measurement_ids leaf."""
+        meas = QSpider(1, 0, ZxPoly({1: 2.0}))
+        gate = DisplacementGate(alpha=1.0 + 0.5j, feedforward=True, measurement_ids={meas.id})
+        diagram = CompositionDiagram([QSpider(1, 1, ZxPoly({2: 2.0})), gate])
+
+        before = self._snapshot(diagram)
+        to_graph(diagram)
+        after = self._snapshot(diagram)
+
+        assert before == after
+
+    def test_to_graph_does_not_mutate_a_deeply_nested_diagram(self):
+        """Tensor(Contracted(...), Composition(...)) -- exercises every container kind."""
+        contracted = ContractedDiagram(
+            QSpider(1, 2, ZxPoly({2: 2.0})),
+            PSpider(2, 1, ZxPoly({3: 3.0})),
+            [0],
+            [0],
+            [0],
+            [0],
+        )
+        composition = CompositionDiagram([QSpider(1, 1, ZxPoly({})), PhaseRotationGate(theta=pi / 4)])
+        diagram = TensorDiagram([contracted, composition])
+
+        before = self._snapshot(diagram)
+        to_graph(diagram)
+        after = self._snapshot(diagram)
+
+        assert before == after
+
+    def test_to_graph_called_twice_gives_identical_results(self):
+        """A second call on an already-converted-once diagram must match the first.
+
+        This would only diverge if the first call had mutated something
+        the second call's structure depends on.
+        """
+        diagram = CompositionDiagram([QSpider(1, 1, ZxPoly({2: 2.0})), PSpider(1, 1, ZxPoly({3: 3.0}))])
+
+        first = to_graph(diagram)
+        second = to_graph(diagram)
+
+        assert first.number_of_nodes() == second.number_of_nodes()
+        assert first.number_of_edges() == second.number_of_edges()
+        assert repr(to_diagram(first)) == repr(to_diagram(second))

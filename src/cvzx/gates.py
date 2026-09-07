@@ -317,7 +317,7 @@ class DisplacementGate(CompactDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.1, Eq. (57)
+    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.1, Eq. (57)
 
     Examples
     --------
@@ -630,7 +630,7 @@ class PhaseRotationGate(CompactDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.2, Eq. (58)
+    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.2, Eq. (58)
 
     Examples
     --------
@@ -878,7 +878,7 @@ class SqueezingGate(CompactDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.3, Eq. (59)
+    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.3, Eq. (59)
 
     Examples
     --------
@@ -1133,7 +1133,7 @@ class ControlledSumGate(CompactDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.4, Eq. (61)-(62)
+    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.4, Eq. (61)-(62)
     [4] Yoshikawa et al., QRL configuration, Sec. IV.C.3
 
     Examples
@@ -1410,7 +1410,7 @@ class ControlledZGate(CompactDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.5, Eq. (63)-(64)
+    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.5, Eq. (63)-(64)
 
     Examples
     --------
@@ -1667,7 +1667,7 @@ class BeamsplitterGate(CompactDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.6, Eq. (66)-(67)
+    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.6, Eq. (66)-(67)
 
     Examples
     --------
@@ -1917,7 +1917,7 @@ class CubicPhaseGate(CompactDiagram):
 
     References
     ----------
-    [3] Nagayoshi et al., CV ZX calculus, Sec. II.C.7, Eq. (68)
+    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.7, Eq. (68)
 
     Examples
     --------

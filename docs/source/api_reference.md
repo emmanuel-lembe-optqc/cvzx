@@ -84,6 +84,15 @@ the order described in {doc}`dev_guide/architecture`.
    :show-inheritance:
 ```
 
+## `cvzx.logging_config`
+
+```{eval-rst}
+.. automodule:: cvzx.logging_config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
 ## `cvzx.visualize_base_gates`
 
 ```{eval-rst}

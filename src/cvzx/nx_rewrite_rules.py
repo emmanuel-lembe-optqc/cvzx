@@ -8,6 +8,7 @@ References
 [1] Nagayoshi et al., CV ZX calculus, 2024
 """
 
+import logging
 import math
 from abc import ABC, abstractmethod
 from typing import Any
@@ -22,6 +23,8 @@ from cvzx.nx_graph import (
     to_diagram,
     to_graph,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RewriteRule(ABC):
@@ -98,11 +101,17 @@ class RewriteRule(ABC):
         -------
         nx.DiGraph
             The modified graph.
+
+        Raises
+        ------
+        TypeError
+            If `self.match()` returns a match that is not a dict.
         """
         # Find all matches
         matches = self.match(graph, registry)
 
         if not matches:
+            logger.debug("%s: no matches", type(self).__name__)
             return graph
 
         # Group by container and apply each group's matches in reverse
@@ -110,12 +119,19 @@ class RewriteRule(ABC):
         groups: dict[object, list] = {}
         group_order: list[object] = []
         for match in matches:
-            key = match.get("container_id") if isinstance(match, dict) else None
+            if not isinstance(match, dict):
+                msg = (
+                    f"{type(self).__name__}.match() returned a non-dict match "
+                    f"({match!r}, type {type(match).__name__}); every match must be a dict."
+                )
+                raise TypeError(msg)
+            key = match.get("container_id")
             if key not in groups:
                 groups[key] = []
                 group_order.append(key)
             groups[key].append(match)
 
+        logger.debug("%s: %d match(es), applying", type(self).__name__, len(matches))
         for key in group_order:
             for match in reversed(groups[key]):
                 self.apply_single(graph, match)
@@ -2532,7 +2548,7 @@ class CopyRule(RewriteRule):
         copy_sub_ids[copy_sub_ids.index(copy_spider_id)] = void_id
 
 
-class IdentityRemovalRule(RewriteRule):
+class VoidRemovalRule(RewriteRule):
     """End-of-pipeline cleanup: strip transient `VoidDiagram` placeholders.
 
     Unlike every other rule in this module, this is NOT meant to run
@@ -2672,7 +2688,7 @@ def remove_void_and_identity_nodes(graph: nx.DiGraph) -> nx.DiGraph:
 
     Two passes, in order:
 
-    1. `IdentityRemovalRule` removes every remaining `VoidDiagram`,
+    1. `VoidRemovalRule` removes every remaining `VoidDiagram`,
        shrinking its TensorDiagram parent's arity by the Void's own arity
        and rippling that change upward -- the real removal `CopyRule`
        deferred.
@@ -2696,7 +2712,7 @@ def remove_void_and_identity_nodes(graph: nx.DiGraph) -> nx.DiGraph:
     """
     void_registry = GateRegister()
     void_registry.build_from_graph(graph)
-    IdentityRemovalRule().apply_rule(graph, void_registry)
+    VoidRemovalRule().apply_rule(graph, void_registry)
 
     identity_rule = IdentityRule()
     while True:

@@ -9,7 +9,7 @@ absorption, Fourier normalization, the copy rule, ...) until nothing more matche
 The gate set and naming conventions follow MQC3's `graph`/`circuit` operations, so a `cvzx` diagram optimized with `cvzx.optimize.optimize` is meant to
 compile down cleanly onto that machinery's measurement-angle model. `cvzx.circuit_to_diagram`
 and `cvzx.diagram_to_circuit` convert to and from an actual mqc3 `CircuitRepr`, and
-`cvzx.lowering` carries a diagram the rest of the way to mqc3's own `DependencyDAG` machinery
+`cvzx.lowering` carries a diagram the rest of the way to a concrete mqc3 `MachineryRepr`
 via a pluggable per-QPU backend.
 
 This documentation has three parts:
