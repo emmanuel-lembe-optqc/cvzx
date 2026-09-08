@@ -24,7 +24,7 @@ from cvzx.base_gates import (
     ZxPoly,
 )
 from cvzx.gates import BeamsplitterGate, ControlledSumGate, PhaseRotationGate, SqueezingGate
-from cvzx.nx_graph import GateRegister, to_diagram, to_graph
+from cvzx.nx_graph import to_diagram, to_graph
 from cvzx.nx_rewrite_rules import CopyRule, apply_rule_to_diagram, expand_two_mode_gates
 
 
@@ -191,9 +191,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 1: P(φ, 1, n) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ ... (n times)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["copy_spider_id"] == self.q_0_1.id
@@ -207,9 +205,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 1: P(φ, 1, 3) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ ... (3 times)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_3])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["n_copies"] == 3
 
@@ -217,9 +213,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 2: Q(g, 1, 0) ∘ P(φ, n, 1) → Q(g, 1, 0) ⊗ ... (n times)."""
         comp = CompositionDiagram([self.p_2_1, self.q_1_0])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["copy_spider_id"] == self.q_1_0.id
@@ -232,9 +226,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 3: Q(φ, 1, n) ∘ P(g, 0, 1) → P(g, 0, 1) ⊗ ... (n times)."""
         comp = CompositionDiagram([self.p_0_1, self.q_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["copy_spider_id"] == self.p_0_1.id
@@ -247,9 +239,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 4: P(g, 1, 0) ∘ Q(φ, n, 1) → P(g, 1, 0) ⊗ ... (n times)."""
         comp = CompositionDiagram([self.q_2_1, self.p_1_0])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["copy_spider_id"] == self.p_1_0.id
@@ -262,45 +252,35 @@ class TestCopyRule(unittest.TestCase):
         """No match when copied spider's phase is NOT in R₁[X]."""
         comp = CompositionDiagram([self.q_0_1_bad, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_no_copy_bad_phase_case_2(self):
         """No match when copied spider's phase is NOT in R₁[X] (case 2)."""
         comp = CompositionDiagram([self.p_2_1, self.q_1_0_bad])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_no_copy_bad_phase_case_3(self):
         """No match when copied spider's phase is NOT in R₁[X] (case 3)."""
         comp = CompositionDiagram([self.p_0_1_bad, self.q_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_no_copy_bad_phase_case_4(self):
         """No match when copied spider's phase is NOT in R₁[X] (case 4)."""
         comp = CompositionDiagram([self.q_2_1, self.p_1_0_bad])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_no_copy_not_spider(self):
         """No match when disappearing spider is not a spider."""
         comp = CompositionDiagram([self.q_0_1, self.fourier])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_no_copy_wrong_arity(self):
@@ -308,18 +288,14 @@ class TestCopyRule(unittest.TestCase):
         p_1_0_shape = PSpider(1, 0, self.phi_any)  # valid successor to q_0_1, but not 1->n
         comp = CompositionDiagram([self.q_0_1, p_1_0_shape])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_copy_with_extra_elements(self):
         """Match when the composition has extra content trailing the pattern."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_2, self.swap])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["copy_spider_id"] == self.q_0_1.id
@@ -332,20 +308,16 @@ class TestCopyRule(unittest.TestCase):
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         tensor = TensorDiagram([self.fourier, comp, self.swap])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
-        assert matches[0]["container_id"] in reg.composition_nodes
+        assert matches[0]["container_id"] in graph.registry.composition_nodes
 
     def test_match_nested_in_composition(self):
         """Match copy pattern inside a nested composition (pattern must lead)."""
         inner = CompositionDiagram([self.q_0_1, self.p_1_2])
         outer = CompositionDiagram([inner, self.swap])
         graph = to_graph(outer)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == inner.id
 
@@ -354,9 +326,7 @@ class TestCopyRule(unittest.TestCase):
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         contracted = ContractedDiagram(comp, self.swap, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
 
@@ -369,9 +339,7 @@ class TestCopyRule(unittest.TestCase):
             self.q_1_0,  # Pattern 2
         ])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 2
 
     # -------------------------------------------------------------------------
@@ -382,9 +350,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 1: P(φ, 1, 2) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ Q(g, 0, 1)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -397,9 +363,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 1: P(φ, 1, 3) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ Q(g, 0, 1) ⊗ Q(g, 0, 1)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_3])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -411,9 +375,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 2: Q(g, 1, 0) ∘ P(φ, 2, 1) → Q(g, 1, 0) ⊗ Q(g, 1, 0)."""
         comp = CompositionDiagram([self.p_2_1, self.q_1_0])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -426,9 +388,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 3: Q(φ, 1, 2) ∘ P(g, 0, 1) → P(g, 0, 1) ⊗ P(g, 0, 1)."""
         comp = CompositionDiagram([self.p_0_1, self.q_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -441,9 +401,7 @@ class TestCopyRule(unittest.TestCase):
         """Case 4: P(g, 1, 0) ∘ Q(φ, 2, 1) → P(g, 1, 0) ⊗ P(g, 1, 0)."""
         comp = CompositionDiagram([self.q_2_1, self.p_1_0])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -457,9 +415,7 @@ class TestCopyRule(unittest.TestCase):
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         tensor = TensorDiagram([self.fourier, comp, self.swap])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -477,9 +433,7 @@ class TestCopyRule(unittest.TestCase):
         inner = CompositionDiagram([self.q_0_1, self.p_1_2])
         outer = CompositionDiagram([inner, self.swap])
         graph = to_graph(outer)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -494,9 +448,7 @@ class TestCopyRule(unittest.TestCase):
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         contracted = ContractedDiagram(comp, self.swap, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -509,9 +461,7 @@ class TestCopyRule(unittest.TestCase):
         """Verify a (0,1) copy spider's arity is preserved across all copies (n=4)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_4])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -525,9 +475,7 @@ class TestCopyRule(unittest.TestCase):
         """Verify a (1,0) copy spider's arity is preserved across all copies (n=4)."""
         comp = CompositionDiagram([self.p_4_1, self.q_1_0])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -545,9 +493,7 @@ class TestCopyRule(unittest.TestCase):
         """Full rule application case 1."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
 
         assert isinstance(result, TensorDiagram)
@@ -558,9 +504,7 @@ class TestCopyRule(unittest.TestCase):
         """Full rule application case 2."""
         comp = CompositionDiagram([self.p_2_1, self.q_1_0])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
 
         assert isinstance(result, TensorDiagram)
@@ -571,9 +515,7 @@ class TestCopyRule(unittest.TestCase):
         """Full rule application case 3."""
         comp = CompositionDiagram([self.p_0_1, self.q_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
 
         assert isinstance(result, TensorDiagram)
@@ -584,9 +526,7 @@ class TestCopyRule(unittest.TestCase):
         """Full rule application case 4."""
         comp = CompositionDiagram([self.q_2_1, self.p_1_0])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
 
         assert isinstance(result, TensorDiagram)
@@ -602,9 +542,7 @@ class TestCopyRule(unittest.TestCase):
             self.q_1_0,  # Pattern 2
         ])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
 
         assert isinstance(result, CompositionDiagram)
@@ -618,9 +556,7 @@ class TestCopyRule(unittest.TestCase):
         """Full rule application when no match exists."""
         comp = CompositionDiagram([self.fourier, self.ph_rot])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert result == comp
 
@@ -628,9 +564,7 @@ class TestCopyRule(unittest.TestCase):
         """Full rule application with bad phase - no match."""
         comp = CompositionDiagram([self.q_0_1_bad, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert result == comp
 
@@ -640,9 +574,7 @@ class TestCopyRule(unittest.TestCase):
         middle = CompositionDiagram([inner, Swap()])
         outer = TensorDiagram([self.swap, middle, self.bs])
         graph = to_graph(outer)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
 
         assert isinstance(result, TensorDiagram)
@@ -659,9 +591,7 @@ class TestCopyRule(unittest.TestCase):
         """Copy rule with zero phase in copied spider."""
         comp = CompositionDiagram([self.q_0_1_zero, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
 
         assert isinstance(result, TensorDiagram)
@@ -672,9 +602,7 @@ class TestCopyRule(unittest.TestCase):
         """Copy rule where only the container remains."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
 
         assert isinstance(result, TensorDiagram)
@@ -691,9 +619,7 @@ class TestCopyRule(unittest.TestCase):
         q = QSpider(0, 1, phase)
         comp = CompositionDiagram([q, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["copy_spider_phase"] == phase
 
@@ -704,18 +630,14 @@ class TestCopyRule(unittest.TestCase):
         q = QSpider(0, 1, phase)
         comp = CompositionDiagram([q, self.p_1_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_copy_preserves_phase(self):
         """Verify copied spiders have exactly the same phase."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_3])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
 
@@ -735,14 +657,10 @@ class TestCopyRule(unittest.TestCase):
         comp2 = CompositionDiagram([self.q_0_1, p2])
 
         graph1 = to_graph(comp1)
-        reg1 = GateRegister()
-        reg1.build_from_graph(graph1)
-        matches1 = self.rule.match(graph1, reg1)
+        matches1 = self.rule.match(graph1)
 
         graph2 = to_graph(comp2)
-        reg2 = GateRegister()
-        reg2.build_from_graph(graph2)
-        matches2 = self.rule.match(graph2, reg2)
+        matches2 = self.rule.match(graph2)
 
         assert len(matches1) == 1
         assert len(matches2) == 1
@@ -753,9 +671,7 @@ class TestCopyRule(unittest.TestCase):
         p = PSpider(1, 2, phi_complex)
         comp = CompositionDiagram([self.q_0_1, p])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
@@ -771,9 +687,7 @@ class TestCopyRule(unittest.TestCase):
     def test_match_complex_comp1(self):
         """comp1 has exactly one copy pattern, trailed by an inert gate."""
         graph = to_graph(self.copy_comp1)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["copy_spider_id"] == self.copy_comp1_q.id
         assert matches[0]["n_copies"] == 2
@@ -781,9 +695,7 @@ class TestCopyRule(unittest.TestCase):
     def test_match_complex_comp2(self):
         """comp2 has exactly one copy pattern, nested inside a tensor branch."""
         graph = to_graph(self.copy_comp2)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["copy_spider_id"] == self.copy_comp2_p.id
         assert matches[0]["copy_spider_type"] == "P"
@@ -791,9 +703,7 @@ class TestCopyRule(unittest.TestCase):
     def test_match_complex_comp3(self):
         """comp3 has three copy patterns split across two nesting depths."""
         graph = to_graph(self.copy_comp3)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 3
         copy_spider_ids = {m["copy_spider_id"] for m in matches}
         assert copy_spider_ids == {
@@ -805,9 +715,7 @@ class TestCopyRule(unittest.TestCase):
     def test_match_complex_tensor1(self):
         """tensor1: the shallow branch's pattern plus comp1's pattern."""
         graph = to_graph(self.copy_tensor1)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 2
         copy_spider_ids = {m["copy_spider_id"] for m in matches}
         assert copy_spider_ids == {self.copy_tensor1_q.id, self.copy_comp1_q.id}
@@ -815,9 +723,7 @@ class TestCopyRule(unittest.TestCase):
     def test_match_complex_tensor2(self):
         """tensor2: tensor1's two matches plus comp2's nested match."""
         graph = to_graph(self.copy_tensor2)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 3
         copy_spider_ids = {m["copy_spider_id"] for m in matches}
         assert copy_spider_ids == {self.copy_tensor2_q.id, self.copy_comp1_q.id, self.copy_comp2_p.id}
@@ -825,9 +731,7 @@ class TestCopyRule(unittest.TestCase):
     def test_match_complex_tensor3(self):
         """tensor3: tensor2's three matches plus comp3's three matches."""
         graph = to_graph(self.copy_tensor3)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 6
         copy_spider_ids = {m["copy_spider_id"] for m in matches}
         assert copy_spider_ids == {
@@ -865,9 +769,7 @@ class TestCopyRule(unittest.TestCase):
         result = apply_rule_to_diagram(self.rule, self.copy_comp3)
         assert isinstance(result, CompositionDiagram)
         graph = to_graph(result)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_apply_rule_complex_tensor1(self):
         """Full rule application to tensor1: tensors flatten, comp1's shape survives."""
@@ -880,25 +782,19 @@ class TestCopyRule(unittest.TestCase):
         assert isinstance(result.diagrams[1], QSpider)
         assert isinstance(result.diagrams[2], CompositionDiagram)
         graph = to_graph(result)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_apply_rule_complex_tensor2(self):
         """Full rule application to tensor2 resolves all three independent patterns."""
         result = apply_rule_to_diagram(self.rule, self.copy_tensor2)
         graph = to_graph(result)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_apply_rule_complex_tensor3(self):
         """Full rule application to tensor3 resolves all six independent patterns."""
         result = apply_rule_to_diagram(self.rule, self.copy_tensor3)
         graph = to_graph(result)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_apply_rule_complex_contracted(self):
         """Full rule application inside a ContractedDiagram wrapping tensor2."""
@@ -909,9 +805,7 @@ class TestCopyRule(unittest.TestCase):
         result = apply_rule_to_diagram(self.rule, contracted)
         assert isinstance(result, ContractedDiagram)
         graph = to_graph(result)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     # -------------------------------------------------------------------------
     # 7. Cross-container matches: the copy spider and the disappearing
@@ -938,26 +832,32 @@ class TestCopyRule(unittest.TestCase):
         return expand_two_mode_gates(comp)
 
     def test_match_cross_container_csum_control(self):
-        """Only the opposite-color control state forms a copy-able pair.
+        """Both states form copy-able pairs into their respective ContractedDiagram half.
 
-        With control=2, CSUM's copy spider is a QSpider and its sum spider
-        is a PSpider. A PSpider control state is opposite-color from the
-        copy spider (a genuine copy-rule pattern); a QSpider target state
-        is SAME-color as the sum spider it feeds (ordinary fusion, not
-        this rule's job), so exactly one match is expected.
+        With control=2, CSUM's expansion contracts a QSpider (fed by the
+        control state) with a PSpider (fed by the target state); each of
+        those two spiders has exactly one raw port already consumed
+        internally by the other (the ContractedDiagram's own I1/I2), so
+        each one's *external* (kept) arity is (1, 1) -- and each state is
+        opposite-color from the leaf it feeds (P into Q, Q into P), so
+        both are genuine copy-rule patterns. Neither is "same color as
+        the spider it feeds": CSUM's expansion never puts a state next to
+        a same-color spider here, so there is nothing for FusionRule to
+        do in this diagram at all.
         """
         control_state = PSpider(0, 1, self.phase_x2)
         target_state = QSpider(0, 1, self.phase_x)
         comp = self._expanded_csum_with_states(control_state, target_state)
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
-        assert len(matches) == 1
-        assert matches[0]["same_parent"] is False
-        assert matches[0]["copy_container_type"] == "tensor"
-        assert matches[0]["disappear_container_type"] == "contracted"
-        assert matches[0]["n_copies"] == 2
+        matches = self.rule.match(graph)
+        assert len(matches) == 2
+        by_copy_id = {m["copy_spider_id"]: m for m in matches}
+        assert set(by_copy_id) == {control_state.id, target_state.id}
+        for m in by_copy_id.values():
+            assert m["same_parent"] is False
+            assert m["copy_container_type"] == "tensor"
+            assert m["disappear_container_type"] == "contracted"
+            assert m["n_copies"] == 1
 
     def test_match_cross_container_same_color_no_match(self):
         """Same-color control/target states never match CopyRule -- that's fusion."""
@@ -965,36 +865,39 @@ class TestCopyRule(unittest.TestCase):
         target_state = PSpider(0, 1, self.phase_x)  # same color as the PSpider sum spider
         comp = self._expanded_csum_with_states(control_state, target_state)
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_cross_container_bad_phase_no_match(self):
-        """A control state with phase not in R1[X] still can't be copied."""
+        """A control state with phase not in R1[X] still can't be copied.
+
+        The target state's own pair is unaffected (its phase IS in
+        R1[X]) and still matches on its own.
+        """
         control_state = PSpider(0, 1, self.phase_x3)
         target_state = QSpider(0, 1, self.phase_x)
         comp = self._expanded_csum_with_states(control_state, target_state)
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["copy_spider_id"] == target_state.id
 
     def test_apply_rule_cross_container_csum_control(self):
-        """Applying the rule pulls the control state inside the ContractedDiagram.
+        """Applying the rule pulls BOTH states inside the ContractedDiagram.
 
-        The result should be reconstructable, keep the same overall arity,
-        and have the control state's two copies now living inside the
-        ContractedDiagram alongside the (untouched) target state and sum
-        spider -- with no more copy-able matches left.
-
-        `apply_rule_to_diagram` applies CopyRule directly, with none of
+        With control=2, CSUM's expansion contracts a QSpider (fed by the
+        control state) with a PSpider (fed by the target state); each of
+        those two spiders has exactly one raw port already consumed
+        internally by the other (see
+        `test_match_cross_container_csum_control`), so BOTH matches
+        `match()` finds restructure the SAME ContractedDiagram -- one per
+        half. `apply_rule_to_diagram` applies CopyRule once, with none of
         `optimize()`'s end-of-pipeline `remove_void_and_identity_nodes`
-        cleanup -- so the target state comes back wrapped in
-        `Tensor([VoidDiagram(0, 1), QSpider(...)])`, not a bare `QSpider`:
-        the `VoidDiagram` is CopyRule's transient placeholder for the leg
-        the control state vacated when it moved into the ContractedDiagram
-        (see `VoidDiagram`'s docstring), reserving that slot's arity until
-        a real cleanup pass removes it for good.
+        cleanup -- so BOTH states' original slots in the outer
+        TensorDiagram come back as `VoidDiagram(0, 1)` (their content now
+        lives inside the ContractedDiagram instead, see `VoidDiagram`'s
+        docstring), and each half of the ContractedDiagram gains its own
+        `VoidDiagram(1, 0)` pad for the direct wire -- now subsumed --
+        that used to connect it to its state.
         """
         control_state = PSpider(0, 1, self.phase_x2)
         target_state = QSpider(0, 1, self.phase_x)
@@ -1006,18 +909,16 @@ class TestCopyRule(unittest.TestCase):
         assert result.num_inputs == 0
         assert result.num_outputs == 2
 
-        target_slot = result.diagrams[0]
-        assert isinstance(target_slot, TensorDiagram)
-        assert len(target_slot.diagrams) == 2
-        void, target = target_slot.diagrams
-        assert isinstance(void, VoidDiagram)
-        assert void.num_inputs == 0
-        assert void.num_outputs == 1
-        assert isinstance(target, QSpider)
-        assert target.phase == self.phase_x  # target_state, untouched
+        outer_tensor = result.diagrams[0]
+        assert isinstance(outer_tensor, TensorDiagram)
+        assert len(outer_tensor.diagrams) == 2
+        assert all(
+            isinstance(d, VoidDiagram) and d.num_inputs == 0 and d.num_outputs == 1 for d in outer_tensor.diagrams
+        )
 
         contracted = result.diagrams[1]
         assert isinstance(contracted, ContractedDiagram)
+
         assert isinstance(contracted.first, TensorDiagram)
         assert len(contracted.first.diagrams) == 3
         void_first = [d for d in contracted.first.diagrams if isinstance(d, VoidDiagram)]
@@ -1026,14 +927,25 @@ class TestCopyRule(unittest.TestCase):
         assert void_first[0].num_inputs == 1
         assert void_first[0].num_outputs == 0
         assert len(p_spiders) == 2
-        assert all(d.phase == self.phase_x2 for d in p_spiders)
-        assert isinstance(contracted.second, PSpider)
-        assert contracted.second.num_inputs == 2
+        assert all(d.num_inputs == 0 and d.num_outputs == 1 and d.phase == self.phase_x2 for d in p_spiders)
+
+        assert isinstance(contracted.second, TensorDiagram)
+        assert len(contracted.second.diagrams) == 3
+        void_second = [d for d in contracted.second.diagrams if isinstance(d, VoidDiagram)]
+        q_spiders = [d for d in contracted.second.diagrams if isinstance(d, QSpider)]
+        assert len(void_second) == 1
+        assert void_second[0].num_inputs == 1
+        assert void_second[0].num_outputs == 0
+        assert len(q_spiders) == 2
+        assert all(d.phase == self.phase_x for d in q_spiders)
+        # One QSpider copy is the kept-output "n_copies" instance (0, 1);
+        # the other fills the leg that used to be internally consumed,
+        # which needs shape (1, 0) -- see CopyRule.apply_single's
+        # docstring on why that shape is role- not copy_spider-determined.
+        assert {(d.num_inputs, d.num_outputs) for d in q_spiders} == {(0, 1), (1, 0)}
 
         graph = to_graph(result)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_apply_rule_cross_container_control_mode_one(self):
         """Same cross-container reduction with the control on mode 1 instead of 2."""
@@ -1047,9 +959,7 @@ class TestCopyRule(unittest.TestCase):
         assert result.num_inputs == 0
         assert result.num_outputs == 2
         graph = to_graph(result)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_apply_rule_cross_container_no_match_leaves_diagram_unchanged(self):
         """The same-color scenario is left untouched by CopyRule."""

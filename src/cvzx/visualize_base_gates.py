@@ -48,7 +48,7 @@ from cvzx.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
-from cvzx.nx_graph import GateRegister, to_graph
+from cvzx.nx_graph import to_graph
 
 # A single wire/node anchor point in the drawing, as (x, y) figure coordinates.
 type Position = tuple[float, float]
@@ -177,9 +177,9 @@ class DiagramVisualizer:
         ax.axis("off")
 
         # Build the graph corresponding to diagram
-        self.reg = GateRegister()
-        self.graph = to_graph(diagram)
-        self.reg.build_from_graph(self.graph)
+        self.cvzx_graph = to_graph(diagram)
+        self.graph = self.cvzx_graph.graph
+        self.reg = self.cvzx_graph.registry
 
         if title:
             ax.set_title(title, fontsize=self.config.fontsize)

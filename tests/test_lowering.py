@@ -1,9 +1,9 @@
-"""Tests for `cvzx.lowering` (the `Diagram -> MachineryRepr` backend registry).
+"""Tests for `cvzx.lowering` (the `Diagram -> DependencyDAG` backend registry).
 
 Checks the registry mechanics (a fresh backend can be registered and
 looked up, an unknown name raises with a helpful message, dispatch
 actually calls the requested backend) and that the bundled `"mqc3"`
-reference backend produces a real, well-formed mqc3 `MachineryRepr`
+reference backend produces a real, well-formed mqc3 `DependencyDAG`
 end to end from a cvzx `Diagram`.
 """
 
@@ -14,22 +14,20 @@ from typing import TYPE_CHECKING
 import pytest
 from mqc3.circuit import CircuitRepr
 from mqc3.circuit.ops import intrinsic
-from mqc3.machinery import MachineryRepr
+from mqc3.graph.embed.dep_dag import DependencyDAG
 
 from cvzx.circuit_to_diagram import from_circuit_repr
 from cvzx.lowering import (
     LoweringBackend,
     Mqc3ReferenceBackend,
     get_backend,
-    graph_to_machinery_repr,
+    graph_to_dependency_dag,
     list_backends,
     register_backend,
 )
 
 if TYPE_CHECKING:
     from cvzx.base_gates import Diagram
-
-_N_LOCAL_MACRONODES = 5
 
 
 def _simple_diagram() -> Diagram:
@@ -44,51 +42,48 @@ def test_mqc3_backend_is_registered_by_default():
     assert isinstance(get_backend("mqc3"), Mqc3ReferenceBackend)
 
 
-def test_graph_to_machinery_repr_default_backend_constructs_real_machinery_repr():
+def test_graph_to_dependency_dag_default_backend_constructs_real_dag():
     diagram = _simple_diagram()
-    machinery = graph_to_machinery_repr(diagram, n_local_macronodes=_N_LOCAL_MACRONODES)
-    assert isinstance(machinery, MachineryRepr)
-    assert machinery.n_local_macronodes == _N_LOCAL_MACRONODES
-    assert machinery.n_steps > 0
+    dag = graph_to_dependency_dag(diagram)
+    assert isinstance(dag, DependencyDAG)
+    assert dag.dag.number_of_nodes() > 0
 
 
-def test_graph_to_machinery_repr_explicit_mqc3_backend_matches_default():
+def test_graph_to_dependency_dag_explicit_mqc3_backend_matches_default():
     diagram = _simple_diagram()
-    default = graph_to_machinery_repr(diagram, n_local_macronodes=_N_LOCAL_MACRONODES)
-    explicit = graph_to_machinery_repr(diagram, n_local_macronodes=_N_LOCAL_MACRONODES, backend="mqc3")
-    assert default.n_local_macronodes == explicit.n_local_macronodes
-    assert default.n_steps == explicit.n_steps
+    default_dag = graph_to_dependency_dag(diagram)
+    explicit_dag = graph_to_dependency_dag(diagram, backend="mqc3")
+    assert default_dag.dag.number_of_nodes() == explicit_dag.dag.number_of_nodes()
+    assert default_dag.dag.number_of_edges() == explicit_dag.dag.number_of_edges()
 
 
 def test_unknown_backend_raises_key_error_listing_available_backends():
     with pytest.raises(KeyError, match="mqc3"):
-        graph_to_machinery_repr(_simple_diagram(), n_local_macronodes=_N_LOCAL_MACRONODES, backend="nonexistent_qpu")
+        graph_to_dependency_dag(_simple_diagram(), backend="nonexistent_qpu")
 
 
 def test_register_backend_adds_a_new_dispatchable_backend():
     """Check that a new QPU-specific backend can be added via the plugin design.
 
     Without touching the registry, `get_backend`, or
-    `graph_to_machinery_repr` at all -- this is the whole point of the
+    `graph_to_dependency_dag` at all -- this is the whole point of the
     plugin design.
     """
 
     @register_backend("_test_dummy_backend")
     class _DummyBackend(LoweringBackend):
-        def to_machinery_repr(self, diagram: Diagram, *, n_local_macronodes: int) -> MachineryRepr:
+        def to_dependency_dag(self, diagram: Diagram) -> DependencyDAG:
             # Delegate to the reference backend; this test only checks
             # that dispatch reaches a freshly-registered backend, not
             # that it does anything different.
-            return Mqc3ReferenceBackend().to_machinery_repr(diagram, n_local_macronodes=n_local_macronodes)
+            return Mqc3ReferenceBackend().to_dependency_dag(diagram)
 
     try:
         assert "_test_dummy_backend" in list_backends()
         diagram = _simple_diagram()
-        machinery = graph_to_machinery_repr(
-            diagram, n_local_macronodes=_N_LOCAL_MACRONODES, backend="_test_dummy_backend"
-        )
-        assert isinstance(machinery, MachineryRepr)
-        assert machinery.n_local_macronodes == _N_LOCAL_MACRONODES
+        dag = graph_to_dependency_dag(diagram, backend="_test_dummy_backend")
+        assert isinstance(dag, DependencyDAG)
+        assert dag.dag.number_of_nodes() > 0
     finally:
         # Registration is a module-level side effect; clean up so this
         # test doesn't leak state into other tests in the same run.

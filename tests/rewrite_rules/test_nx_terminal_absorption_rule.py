@@ -27,7 +27,7 @@ from cvzx.base_gates import (
     ZxPoly,
 )
 from cvzx.gates import BeamsplitterGate, DisplacementGate, PhaseRotationGate, SqueezingGate
-from cvzx.nx_graph import GateRegister, to_diagram, to_graph
+from cvzx.nx_graph import to_diagram, to_graph
 from cvzx.nx_rewrite_rules import TerminalAbsorptionRule, apply_rule_to_diagram
 
 
@@ -74,9 +74,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """R(theta) next to a QSpider effect matches, list order [R, effect]."""
         comp = CompositionDiagram([self.r1, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         lin, quad = self._expected_rotation(-3.0, self.theta1)
         assert isclose(matches[0]["result_phase"].coeffs[1], lin)
@@ -89,9 +87,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """R(theta) next to a QSpider state matches, list order [state, R]."""
         comp = CompositionDiagram([self.q_state, self.r1])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         lin, quad = self._expected_rotation(3.0, self.theta1)
         assert isclose(matches[0]["result_phase"].coeffs[1], lin)
@@ -103,9 +99,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Rotation does not fold into a PSpider terminal -- QSpider only."""
         comp = CompositionDiagram([self.r1, self.p_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_fourier2_effect(self):
         """Fourier2 next to a QSpider effect absorbs as R(pi), same formula.
@@ -116,9 +110,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """
         comp = CompositionDiagram([Fourier2(), self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         lin, _ = self._expected_rotation(-3.0, pi)
         assert isclose(matches[0]["result_phase"].coeffs[1], lin)
@@ -131,9 +123,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Fourier2 next to a QSpider state absorbs as R(pi) too."""
         comp = CompositionDiagram([self.q_state, Fourier2()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         lin, _ = self._expected_rotation(3.0, pi)
         assert isclose(matches[0]["result_phase"].coeffs[1], lin)
@@ -145,33 +135,25 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Fourier2 does not fold into a PSpider terminal -- QSpider only."""
         comp = CompositionDiagram([Fourier2(), self.p_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_fourier_no_match(self):
         """Fourier (theta=-pi/2 equivalent) is not absorbed."""
         comp = CompositionDiagram([Fourier(), self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_fourier_inv_no_match(self):
         """FourierInv (theta=+pi/2 equivalent) is not absorbed."""
         comp = CompositionDiagram([self.q_state, FourierInv()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_squeezing_effect_qspider(self):
         """Sq(tau) next to a QSpider effect matches, x -> x/tau."""
         comp = CompositionDiagram([self.sq1, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         assert len(matches) == 1
         assert isclose(matches[0]["result_phase"].coeffs[1], -3.0 / 2.0)
         assert matches[0]["result_type"] == "QSpider"
@@ -180,9 +162,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Sq(tau) next to a PSpider effect matches too -- either color."""
         comp = CompositionDiagram([self.sq1, self.p_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_type"] == "PSpider"
 
@@ -190,9 +170,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Sq(tau) next to a state matches, list order [state, Sq]."""
         comp = CompositionDiagram([self.q_state, self.sq1])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         assert len(matches) == 1
         assert isclose(matches[0]["result_phase"].coeffs[1], 3.0 / 2.0)
 
@@ -200,9 +178,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """A raw PSpider(1,1,f) folds into an adjacent QSpider effect, unchanged."""
         comp = CompositionDiagram([self.p_filler, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_type"] == "QSpider"
         assert matches[0]["result_phase"] == self.q_effect.phase
@@ -211,9 +187,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """A raw QSpider(1,1,f) folds into an adjacent PSpider effect, unchanged."""
         comp = CompositionDiagram([self.q_filler, self.p_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_type"] == "PSpider"
         assert matches[0]["result_phase"] == self.p_effect.phase
@@ -222,9 +196,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """A raw PSpider(1,1,f) folds into an adjacent QSpider state, unchanged."""
         comp = CompositionDiagram([self.q_state, self.p_filler])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_phase"] == self.q_state.phase
 
@@ -232,17 +204,13 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Same-color (1,1) spider next to the terminal is FusionRule's job."""
         comp = CompositionDiagram([self.q_filler, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_two_terminals_adjacent_no_match(self):
         """A state directly followed by an effect isn't a gate/terminal pattern."""
         comp = CompositionDiagram([self.q_state, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_no_unrelated_gate(self):
         """A terminal next to an unrelated gate does not match."""
@@ -251,25 +219,19 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         comp2 = CompositionDiagram([self.p_state, DisplacementGate(0.5)])
         for diagram in (comp, tensor, comp2):
             graph = to_graph(diagram)
-            reg = GateRegister()
-            reg.build_from_graph(graph)
-            assert len(self.rule.match(graph, reg)) == 0
+            assert len(self.rule.match(graph)) == 0
 
     def test_match_no_rotation_rotation(self):
         """Two rotations do not match this rule -- ChainReductionRule's job."""
         comp = CompositionDiagram([self.r1, PhaseRotationGate(self.theta2)])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_indices_and_node_ids(self):
         """Match records correct container/indices/node_ids for a simple pair."""
         comp = CompositionDiagram([self.r1, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["indices"] == [0, 1]
         assert matches[0]["node_ids"] == [self.r1.id, self.q_effect.id]
@@ -278,9 +240,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """State-end and effect-end absorptions both match in one call."""
         comp = CompositionDiagram([self.q_state, self.r1, self.sq1, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         assert len(matches) == 2
         assert matches[0]["indices"] == [0, 1]
         assert matches[1]["indices"] == [2, 3]
@@ -290,22 +250,27 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         comp = CompositionDiagram([self.r1, self.q_effect])
         tensor = TensorDiagram([self.swap, comp, self.bs])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
-        assert matches[0]["container_id"] in reg.composition_nodes
+        assert matches[0]["container_id"] in graph.registry.composition_nodes
 
     def test_match_nested_in_contracted(self):
         """Match a pattern inside a composition inside a ContractedDiagram."""
         comp = CompositionDiagram([self.r1, self.q_effect])
         contracted = ContractedDiagram(comp, self.swap, [], [], [0], [0])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
+
+    def test_match_excludes_gate_directly_in_contracted(self):
+        """A gate directly in a ContractedDiagram is never matched."""
+        filler_in_contracted = QSpider(1, 1, ZxPoly({1: 7.0}))
+        contracted = ContractedDiagram(self.r1, filler_in_contracted, [], [], [0], [0])
+        comp = CompositionDiagram([contracted, self.q_effect])
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 0
 
     # -------------------------------------------------------------------------
     # 2. Testing apply_single()
@@ -315,9 +280,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """R folded into a QSpider effect leaves a single modified effect."""
         comp = CompositionDiagram([self.r1, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -331,9 +294,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Fourier2 folded into a QSpider effect, same as R(pi)."""
         comp = CompositionDiagram([Fourier2(), self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -347,9 +308,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Sq folded into a state leaves a single modified state."""
         comp = CompositionDiagram([self.q_state, self.sq1])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         self.rule_idealized.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -361,9 +320,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Discarding a raw opposite-color spider leaves the terminal untouched."""
         comp = CompositionDiagram([self.p_filler, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule_idealized.match(graph, reg)
+        matches = self.rule_idealized.match(graph)
         self.rule_idealized.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -373,9 +330,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Folding leaves trailing content untouched."""
         comp = CompositionDiagram([self.q_state, self.r1, self.q_filler])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -393,9 +348,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         comp = CompositionDiagram([self.r1, self.q_effect])
         tensor = TensorDiagram([self.swap, comp, self.bs])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
@@ -409,9 +362,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         comp = CompositionDiagram([self.r1, self.q_effect])
         contracted = ContractedDiagram(comp, self.swap, [], [], [0], [0])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)
@@ -557,25 +508,19 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """The default (exact-only) rule does not match squeezing absorption."""
         comp = CompositionDiagram([self.sq1, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_default_rule_skips_cross_color_discard(self):
         """The default (exact-only) rule does not match cross-color discard."""
         comp = CompositionDiagram([self.p_filler, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_default_rule_still_matches_rotation(self):
         """Rotation absorption is exact and matches regardless of the flag."""
         comp = CompositionDiagram([self.r1, self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 1
+        assert len(self.rule.match(graph)) == 1
 
     def test_apply_rule_default_leaves_squeezing_effect_unreduced(self):
         """Full rule application with the default flag leaves Sq/terminal untouched."""
@@ -596,18 +541,14 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Theta an odd multiple of pi/2 does not match -- tan/1-over-cos undefined."""
         comp = CompositionDiagram([PhaseRotationGate(pi / 2, parametric=True), self.q_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_rotation_degree_too_high_no_match(self):
         """A quadratic (or higher) terminal phase does not match rotation absorption."""
         quadratic_effect = QSpider(1, 0, ZxPoly({2: 1.0, 1: -3.0}))
         comp = CompositionDiagram([self.r1, quadratic_effect])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_constant_term_carries_through_rotation(self):
         """A constant term in the terminal's phase survives the rotation fold unchanged."""

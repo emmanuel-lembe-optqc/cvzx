@@ -1,4 +1,4 @@
-"""Tests for graph extraction utilities for CV ZX diagrams.
+"""Tests for the CVZXGraph class and graph extraction utilities for CV ZX diagrams.
 
 These tests verify that to_graph correctly converts CV ZX diagrams to directed graphs
 and that to_diagram correctly reconstructs the original diagrams.
@@ -7,6 +7,7 @@ and that to_diagram correctly reconstructs the original diagrams.
 from math import pi
 from typing import cast
 
+import pytest
 from sympy import Expr, I, symbols
 
 from cvzx.base_gates import (
@@ -32,6 +33,8 @@ from cvzx.gates import (
     SqueezingGate,
 )
 from cvzx.nx_graph import (
+    CVZXGraph,
+    GateRegister,
     get_connectivity,
     get_contracted_connections,
     get_immediate_container,
@@ -40,6 +43,243 @@ from cvzx.nx_graph import (
     to_diagram,
     to_graph,
 )
+
+
+def _make_diagram() -> Diagram:
+    """Build a small representative diagram for the tests below.
+
+    Returns
+    -------
+    Diagram
+    """
+    zero = ZxPoly({})
+    state = QSpider(0, 1, zero)
+    sq = SqueezingGate(tau=0.5)
+    effect = QSpider(1, 0, zero)
+    return CompositionDiagram([state, sq, effect])
+
+
+class TestCVZXGraphConstruction:
+    """Test suite for CVZXGraph construction."""
+
+    def test_from_diagram_round_trips(self):
+        """from_diagram builds a graph whose to_diagram reproduces the input."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+        assert cvzx_graph.to_diagram() == diagram
+
+    def test_from_diagram_matches_to_graph(self):
+        """from_diagram's underlying graph matches a plain to_graph call."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+        expected_graph = to_graph(diagram)
+        assert set(cvzx_graph.graph.nodes) == set(expected_graph.graph.nodes)
+        assert set(cvzx_graph.graph.edges) == set(expected_graph.graph.edges)
+
+    def test_auto_builds_registry_when_none_given(self):
+        """Constructing without a registry builds one that matches the graph."""
+        diagram = _make_diagram()
+        graph = to_graph(diagram).graph
+        cvzx_graph = CVZXGraph(graph)
+
+        expected_registry = GateRegister()
+        expected_registry.build_from_graph(graph)
+
+        assert cvzx_graph.registry.squeezing_gates == expected_registry.squeezing_gates
+        assert cvzx_graph.registry.input_states == expected_registry.input_states
+        assert cvzx_graph.registry.measurement_nodes == expected_registry.measurement_nodes
+
+    def test_uses_explicit_registry_when_given(self):
+        """An explicitly passed registry is stored as-is, not rebuilt."""
+        diagram = _make_diagram()
+        graph = to_graph(diagram).graph
+        registry = GateRegister()
+        registry.build_from_graph(graph)
+
+        cvzx_graph = CVZXGraph(graph, registry)
+
+        assert cvzx_graph.registry is registry
+
+
+class TestCVZXGraphToDiagram:
+    """Test suite for CVZXGraph.to_diagram."""
+
+    def test_to_diagram_matches_module_level_function(self):
+        """to_diagram delegates to the module-level to_diagram function."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+        assert cvzx_graph.to_diagram() == to_diagram(cvzx_graph)
+
+    def test_to_diagram_raises_when_no_root(self):
+        """to_diagram raises ValueError if the graph has no root node."""
+        diagram = _make_diagram()
+        graph = to_graph(diagram).graph
+        for _, attrs in graph.nodes(data=True):
+            attrs.pop("is_root", None)
+
+        cvzx_graph = CVZXGraph(graph)
+        with pytest.raises(ValueError, match="No root node"):
+            cvzx_graph.to_diagram()
+
+
+class TestCVZXGraphRebuildRegistry:
+    """Test suite for CVZXGraph.rebuild_registry."""
+
+    def test_rebuild_registry_picks_up_direct_graph_mutation(self):
+        """rebuild_registry re-syncs the registry after a direct graph edit."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+
+        squeezing_nodes_before = set(cvzx_graph.registry.squeezing_gates)
+        assert squeezing_nodes_before
+
+        # Directly mutate the graph so the squeezing node is no longer typed
+        # as a squeezing gate, bypassing any incremental registry update.
+        node_id = next(iter(squeezing_nodes_before))
+        cvzx_graph.graph.nodes[node_id]["type"] = "Identity"
+
+        # Before rebuilding, the registry is stale (still reports the node).
+        assert node_id in cvzx_graph.registry.squeezing_gates
+
+        cvzx_graph.rebuild_registry()
+
+        assert node_id not in cvzx_graph.registry.squeezing_gates
+
+
+class TestCVZXGraphCopy:
+    """Test suite for CVZXGraph.copy."""
+
+    def test_copy_graph_is_independent(self):
+        """Mutating the copy's graph does not affect the original."""
+        diagram = _make_diagram()
+        original = CVZXGraph.from_diagram(diagram)
+        duplicate = original.copy()
+
+        duplicate.graph.add_node(-1, kind="proper", type="Identity")
+
+        assert -1 not in original.graph.nodes
+        assert -1 in duplicate.graph.nodes
+
+    def test_copy_registry_is_independent(self):
+        """Mutating the copy's registry does not affect the original."""
+        diagram = _make_diagram()
+        original = CVZXGraph.from_diagram(diagram)
+        duplicate = original.copy()
+
+        duplicate.registry.squeezing_gates.add(-1)
+
+        assert -1 not in original.registry.squeezing_gates
+        assert -1 in duplicate.registry.squeezing_gates
+
+    def test_copy_reconstructs_an_equal_diagram(self):
+        """A fresh copy still reconstructs the same diagram as the original."""
+        diagram = _make_diagram()
+        original = CVZXGraph.from_diagram(diagram)
+        duplicate = original.copy()
+
+        assert duplicate.to_diagram() == diagram
+        assert duplicate == original
+
+
+class TestCVZXGraphShapeProperties:
+    """Test suite for CVZXGraph.root_id, num_inputs, and num_outputs."""
+
+    def test_root_id_matches_get_root_node(self):
+        """root_id agrees with the root node found via get_root_node."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+        assert cvzx_graph.root_id == get_root_node(cvzx_graph)
+        assert cvzx_graph.root_id is not None
+
+    def test_root_id_is_none_when_no_root(self):
+        """root_id is None when the graph has no root node."""
+        diagram = _make_diagram()
+        graph = to_graph(diagram).graph
+        for _, attrs in graph.nodes(data=True):
+            attrs.pop("is_root", None)
+
+        cvzx_graph = CVZXGraph(graph)
+        assert cvzx_graph.root_id is None
+
+    def test_num_inputs_and_num_outputs_for_closed_diagram(self):
+        """A fully-terminated diagram has zero external inputs and outputs."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+        assert cvzx_graph.num_inputs == 0
+        assert cvzx_graph.num_outputs == 0
+
+    def test_num_inputs_and_num_outputs_for_open_diagram(self):
+        """An open diagram reports the correct external input/output counts."""
+        zero = ZxPoly({})
+        sq = SqueezingGate(tau=0.5)
+        open_diagram = TensorDiagram([sq, QSpider(0, 1, zero)])
+        cvzx_graph = CVZXGraph.from_diagram(open_diagram)
+        assert cvzx_graph.num_inputs == 1
+        assert cvzx_graph.num_outputs == 2
+
+    def test_num_inputs_raises_when_no_root(self):
+        """num_inputs raises ValueError if the graph has no root node."""
+        diagram = _make_diagram()
+        graph = to_graph(diagram).graph
+        for _, attrs in graph.nodes(data=True):
+            attrs.pop("is_root", None)
+
+        cvzx_graph = CVZXGraph(graph)
+        with pytest.raises(ValueError, match="No root node"):
+            _ = cvzx_graph.num_inputs
+
+
+class TestCVZXGraphDunderMethods:
+    """Test suite for CVZXGraph.__len__, __repr__, and __eq__."""
+
+    def test_len_matches_node_count(self):
+        """len() reports the number of nodes in the graph."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+        assert len(cvzx_graph) == cvzx_graph.graph.number_of_nodes()
+        assert len(cvzx_graph) > 0
+
+    def test_repr_contains_node_and_edge_counts(self):
+        """repr() reports node and edge counts."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+        text = repr(cvzx_graph)
+        assert "CVZXGraph" in text
+        assert str(cvzx_graph.graph.number_of_nodes()) in text
+        assert str(cvzx_graph.graph.number_of_edges()) in text
+
+    def test_eq_true_for_equal_diagrams(self):
+        """Two CVZXGraph instances built from equal diagrams compare equal."""
+        diagram = _make_diagram()
+        first = CVZXGraph.from_diagram(diagram)
+        second = CVZXGraph.from_diagram(diagram)
+        assert first == second
+
+    def test_eq_false_for_different_diagrams(self):
+        """Two CVZXGraph instances built from different diagrams compare unequal."""
+        first = CVZXGraph.from_diagram(_make_diagram())
+        zero = ZxPoly({})
+        other_diagram = TensorDiagram([QSpider(0, 1, zero), QSpider(0, 1, zero)])
+        second = CVZXGraph.from_diagram(other_diagram)
+        assert first != second
+
+    def test_eq_false_when_reconstruction_fails(self):
+        """A graph that cannot reconstruct a diagram is never equal to another."""
+        diagram = _make_diagram()
+        graph = to_graph(diagram).graph
+        for _, attrs in graph.nodes(data=True):
+            attrs.pop("is_root", None)
+
+        broken = CVZXGraph(graph)
+        other = CVZXGraph.from_diagram(diagram)
+        assert broken != other
+
+    def test_eq_not_implemented_for_other_types(self):
+        """__eq__ returns NotImplemented for objects that are not CVZXGraph."""
+        diagram = _make_diagram()
+        cvzx_graph = CVZXGraph.from_diagram(diagram)
+        assert cvzx_graph.__eq__(object()) is NotImplemented  # ruff: ignore[unnecessary-dunder-call]
+        assert cvzx_graph != object()
 
 
 class TestgraphraphConversion:
@@ -130,8 +370,8 @@ class TestgraphraphConversion:
 
     def _assert_roundtrip(self, diagram: Diagram) -> None:
         """Test roundtrip conversion: diagram → graph → diagram."""
-        graph = to_graph(diagram)
-        reconstructed = to_diagram(graph)
+        cvzx_graph = to_graph(diagram)
+        reconstructed = to_diagram(cvzx_graph)
         self._assert_diagram_equality(diagram, reconstructed)
 
     # =========================================================================
@@ -140,7 +380,8 @@ class TestgraphraphConversion:
 
     def test_proper_qspider(self):
         """Test conversion of a single QSpider."""
-        graph = to_graph(self.q1)
+        cvzx_graph = to_graph(self.q1)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         assert graph.number_of_edges() == 0
@@ -159,7 +400,8 @@ class TestgraphraphConversion:
 
     def test_proper_qspider_param(self):
         """Test conversion of a parametrized QSpider."""
-        graph = to_graph(self.q_param)
+        cvzx_graph = to_graph(self.q_param)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         assert graph.number_of_edges() == 0
@@ -178,7 +420,8 @@ class TestgraphraphConversion:
 
     def test_proper_pspider(self):
         """Test conversion of a single PSpider."""
-        graph = to_graph(self.p1)
+        cvzx_graph = to_graph(self.p1)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.p1.id]
@@ -189,7 +432,8 @@ class TestgraphraphConversion:
 
     def test_proper_pspider_param(self):
         """Test conversion of a parametrized PSpider."""
-        graph = to_graph(self.p_param)
+        cvzx_graph = to_graph(self.p_param)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         assert graph.number_of_edges() == 0
@@ -208,7 +452,8 @@ class TestgraphraphConversion:
 
     def test_proper_fourier(self):
         """Test conversion of a single Fourier gate."""
-        graph = to_graph(self.fourier)
+        cvzx_graph = to_graph(self.fourier)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.fourier.id]
@@ -221,7 +466,8 @@ class TestgraphraphConversion:
 
     def test_proper_swap(self):
         """Test conversion of a single Swap gate."""
-        graph = to_graph(self.swap)
+        cvzx_graph = to_graph(self.swap)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.swap.id]
@@ -233,7 +479,8 @@ class TestgraphraphConversion:
 
     def test_proper_multi_arity_spider(self):
         """Test conversion of a spider with multiple inputs/outputs."""
-        graph = to_graph(self.q_1x2)
+        cvzx_graph = to_graph(self.q_1x2)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.q_1x2.id]
@@ -246,7 +493,8 @@ class TestgraphraphConversion:
 
     def test_displacement(self):
         """Test conversion of a DisplacementGate."""
-        graph = to_graph(self.disp)
+        cvzx_graph = to_graph(self.disp)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.disp.id]
@@ -258,7 +506,8 @@ class TestgraphraphConversion:
 
     def test_displacement_param(self):
         """Test conversion of a parametrized DisplacementGate."""
-        graph = to_graph(self.disp_param)
+        cvzx_graph = to_graph(self.disp_param)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.disp_param.id]
@@ -273,7 +522,8 @@ class TestgraphraphConversion:
 
     def test_feedforward(self):
         """Test conversion of a feedforward DisplacementGate."""
-        graph = to_graph(self.disp_ff)
+        cvzx_graph = to_graph(self.disp_ff)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.disp_ff.id]
@@ -288,7 +538,8 @@ class TestgraphraphConversion:
 
     def test_rotation(self):
         """Test conversion of a PhaseRotationGate."""
-        graph = to_graph(self.ph_rot)
+        cvzx_graph = to_graph(self.ph_rot)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.ph_rot.id]
@@ -300,7 +551,8 @@ class TestgraphraphConversion:
 
     def test_rotation_param(self):
         """Test conversion of a parametrized PhaseRotationGate."""
-        graph = to_graph(self.ph_rot_param)
+        cvzx_graph = to_graph(self.ph_rot_param)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.ph_rot_param.id]
@@ -313,7 +565,8 @@ class TestgraphraphConversion:
 
     def test_squeezing(self):
         """Test conversion of a SqueezingGate."""
-        graph = to_graph(self.sq_gate)
+        cvzx_graph = to_graph(self.sq_gate)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.sq_gate.id]
@@ -325,7 +578,8 @@ class TestgraphraphConversion:
 
     def test_squeezing_param(self):
         """Test conversion of a parametrized SqueezingGate."""
-        graph = to_graph(self.sq_gate_param)
+        cvzx_graph = to_graph(self.sq_gate_param)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.sq_gate_param.id]
@@ -338,7 +592,8 @@ class TestgraphraphConversion:
 
     def test_beamsplitter(self):
         """Test conversion of a BeamsplitterGate."""
-        graph = to_graph(self.beam_splitter)
+        cvzx_graph = to_graph(self.beam_splitter)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.beam_splitter.id]
@@ -350,7 +605,8 @@ class TestgraphraphConversion:
 
     def test_beamsplitter_param(self):
         """Test conversion of a parametrized BeamsplitterGate."""
-        graph = to_graph(self.beam_splitter_param)
+        cvzx_graph = to_graph(self.beam_splitter_param)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.beam_splitter_param.id]
@@ -363,7 +619,8 @@ class TestgraphraphConversion:
 
     def test_controlledsumgate(self):
         """Test conversion of a ControlledSumGate."""
-        graph = to_graph(self.ctrl_sum_gate)
+        cvzx_graph = to_graph(self.ctrl_sum_gate)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.ctrl_sum_gate.id]
@@ -375,7 +632,8 @@ class TestgraphraphConversion:
 
     def test_controlledsumgate_param(self):
         """Test conversion of a parametrized ControlledSumGate."""
-        graph = to_graph(self.ctrl_sum_gate_param)
+        cvzx_graph = to_graph(self.ctrl_sum_gate_param)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.ctrl_sum_gate_param.id]
@@ -388,7 +646,8 @@ class TestgraphraphConversion:
 
     def test_controlledzgate(self):
         """Test conversion of a ControlledSumGate."""
-        graph = to_graph(self.ctrl_z_gate)
+        cvzx_graph = to_graph(self.ctrl_z_gate)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.ctrl_z_gate.id]
@@ -400,7 +659,8 @@ class TestgraphraphConversion:
 
     def test_controlledzgate_param(self):
         """Test conversion of a parametrized ControlledSumGate."""
-        graph = to_graph(self.ctrl_z_gate_param)
+        cvzx_graph = to_graph(self.ctrl_z_gate_param)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 1
         attrs = graph.nodes[self.ctrl_z_gate_param.id]
@@ -418,7 +678,8 @@ class TestgraphraphConversion:
     def test_composition_two_proper_diagrams(self):
         """Test conversion of CompositionDiagram with two proper diagrams."""
         comp = CompositionDiagram([self.q1, self.q2])
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
+        graph = cvzx_graph.graph
 
         # Check nodes: q1, q2, and composition container
         assert graph.number_of_nodes() == 3
@@ -453,7 +714,8 @@ class TestgraphraphConversion:
     def test_composition_three_proper_diagrams(self):
         """Test conversion of CompositionDiagram with three proper diagrams."""
         comp = CompositionDiagram([self.q1, self.q2, self.q3])
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 4  # 3 proper + 1 container
         assert graph.number_of_edges() == 2
@@ -474,7 +736,8 @@ class TestgraphraphConversion:
         """Test CompositionDiagram with non-trivial connectivity."""
         conn = {0: 1, 1: 0}
         comp = CompositionDiagram([self.q_1x2, self.q_2x1], {0: conn})
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 3
         assert graph.number_of_edges() == 1
@@ -488,7 +751,8 @@ class TestgraphraphConversion:
     def test_composition_mixed_proper_types(self):
         """Test composition of different proper diagram types."""
         comp = CompositionDiagram([self.q1, self.fourier, self.q2])
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 4
         assert graph.number_of_edges() == 2
@@ -504,7 +768,8 @@ class TestgraphraphConversion:
     def test_tensor_proper_diagrams(self):
         """Test conversion of TensorDiagram of proper diagrams."""
         tensor = TensorDiagram([self.q1, self.q2, self.q3])
-        graph = to_graph(tensor)
+        cvzx_graph = to_graph(tensor)
+        graph = cvzx_graph.graph
 
         # Nodes: 3 proper + 1 tensor container
         assert graph.number_of_nodes() == 4
@@ -532,7 +797,8 @@ class TestgraphraphConversion:
     def test_tensor_proper_diagrams_with_arity(self):
         """Test TensorDiagram with different arities."""
         tensor = TensorDiagram([self.q_1x2, self.q_2x1])
-        graph = to_graph(tensor)
+        cvzx_graph = to_graph(tensor)
+        graph = cvzx_graph.graph
 
         assert graph.number_of_nodes() == 3
         attrs = graph.nodes[tensor.id]
@@ -550,7 +816,8 @@ class TestgraphraphConversion:
         tensor1 = TensorDiagram([self.q1, self.q2])
         tensor2 = TensorDiagram([self.q3, self.q4])
         comp = CompositionDiagram([tensor1, tensor2])
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
+        graph = cvzx_graph.graph
 
         # Nodes: 4 proper + 2 tensor containers + 1 composition container
         assert graph.number_of_nodes() == 7
@@ -583,7 +850,8 @@ class TestgraphraphConversion:
         two_fouriers_tensor = self.fourier.tensor(self.fourier_inv)
         swap_conn = two_fouriers_tensor.compose(self.swap, connectivity={0: 1, 1: 0})
 
-        graph = to_graph(swap_conn)
+        cvzx_graph = to_graph(swap_conn)
+        graph = cvzx_graph.graph
 
         # Nodes: 2 Fourier proper + 1 Swap proper + 1 tensor container + 1 composition container
         # = 5 nodes total
@@ -663,7 +931,8 @@ class TestgraphraphConversion:
         tensor = TensorDiagram([comp1, comp2])
         comp1 = tensor.diagrams[0]
         comp2 = tensor.diagrams[1]
-        graph = to_graph(tensor)
+        cvzx_graph = to_graph(tensor)
+        graph = cvzx_graph.graph
 
         # Nodes: 4 proper + 2 composition containers + 1 tensor container
         assert graph.number_of_nodes() == 7
@@ -691,7 +960,8 @@ class TestgraphraphConversion:
     def test_contracted_proper_diagrams(self):
         """Test conversion of ContractedDiagram with proper diagrams."""
         contracted = ContractedDiagram(self.q_1x2, self.p_2x1, [0], [0], [0], [0])
-        graph = to_graph(contracted)
+        cvzx_graph = to_graph(contracted)
+        graph = cvzx_graph.graph
 
         # Nodes: 2 proper + 1 contracted container
         assert graph.number_of_nodes() == 3
@@ -738,7 +1008,8 @@ class TestgraphraphConversion:
         contracted1 = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         contracted2 = ContractedDiagram(self.q3, self.q4, [0], [0], [], [])
         comp = CompositionDiagram([contracted1, contracted2])
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
+        graph = cvzx_graph.graph
 
         # Nodes: 4 proper + 2 contracted containers + 1 composition container
         assert graph.number_of_nodes() == 7
@@ -771,7 +1042,8 @@ class TestgraphraphConversion:
         contracted1 = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         contracted2 = ContractedDiagram(self.q3, self.q4, [0], [0], [], [])
         tensor = TensorDiagram([contracted1, contracted2])
-        graph = to_graph(tensor)
+        cvzx_graph = to_graph(tensor)
+        graph = cvzx_graph.graph
 
         # Nodes: 4 proper + 2 contracted containers + 1 tensor container
         assert graph.number_of_nodes() == 7
@@ -793,7 +1065,8 @@ class TestgraphraphConversion:
         tensor = TensorDiagram([comp, contracted])
         comp = tensor.diagrams[0]
         contracted = tensor.diagrams[1]
-        graph = to_graph(tensor)
+        cvzx_graph = to_graph(tensor)
+        graph = cvzx_graph.graph
 
         # Nodes: 4 proper + 2 containers (comp, contracted) + 1 tensor container
         assert graph.number_of_nodes() == 7
@@ -864,13 +1137,14 @@ class TestgraphraphConversion:
         assert isinstance(final_large_conn, TensorDiagram)
         large_comp_conn = final_large_conn.diagrams[1]
 
-        graph = to_graph(final_large_conn)
+        cvzx_graph = to_graph(final_large_conn)
+        graph = cvzx_graph.graph
 
         # Count nodes:
         assert graph.number_of_nodes() == 21
 
         # Check that the root is the outer tensor
-        root = get_root_node(graph)
+        root = get_root_node(cvzx_graph)
         assert root is not None
         root_attrs = graph.nodes[root]
         assert root_attrs["type"] == "TensorDiagram"
@@ -898,7 +1172,7 @@ class TestgraphraphConversion:
         assert comp_attrs["container_id"] == root
 
         # Check composition
-        connectivity = get_connectivity(graph, comp_node)
+        connectivity = get_connectivity(cvzx_graph, comp_node)
         assert connectivity is not None
         assert isinstance(large_comp_conn, CompositionDiagram)
         assert connectivity == large_comp_conn.connectivity
@@ -937,7 +1211,7 @@ class TestgraphraphConversion:
         assert graph.nodes[contracted_node]["second_id"] == p_spider_4x4.id
 
         # Check contracted connections
-        contracted_connections = get_contracted_connections(graph, contracted_node)
+        contracted_connections = get_contracted_connections(cvzx_graph, contracted_node)
         assert contracted_connections is not None
         assert contracted_connections["I1"] == [0, 1, 4]
         assert contracted_connections["I2"] == [1, 2, 3]
@@ -1022,31 +1296,32 @@ class TestgraphraphConversion:
         """Test that the root node is correctly identified."""
         # Root is composition
         comp = CompositionDiagram([self.q1, self.q2])
-        graph = to_graph(comp)
-        assert get_root_node(graph) == comp.id
+        cvzx_graph = to_graph(comp)
+        assert get_root_node(cvzx_graph) == comp.id
 
         # Root is tensor
         tensor = TensorDiagram([self.q1, self.q2])
-        graph = to_graph(tensor)
-        assert get_root_node(graph) == tensor.id
+        cvzx_graph = to_graph(tensor)
+        assert get_root_node(cvzx_graph) == tensor.id
 
         # Root is contracted
         contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
-        graph = to_graph(contracted)
-        assert get_root_node(graph) == contracted.id
+        cvzx_graph = to_graph(contracted)
+        assert get_root_node(cvzx_graph) == contracted.id
 
         # Nested: root is composition
         comp = CompositionDiagram([TensorDiagram([self.q1, self.q2]), self.swap])
-        graph = to_graph(comp)
-        assert get_root_node(graph) == comp.id
+        cvzx_graph = to_graph(comp)
+        assert get_root_node(cvzx_graph) == comp.id
 
     def test_container_id_tracking(self):
         """Test that container_id is correctly tracked for all nodes."""
         comp = CompositionDiagram([self.swap, TensorDiagram([self.q2, self.q3])])
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
+        graph = cvzx_graph.graph
 
         # q1 is directly in comp
-        assert get_immediate_container(graph, self.swap.id) == comp.id
+        assert get_immediate_container(cvzx_graph, self.swap.id) == comp.id
 
         # q2 and q3 are in the tensor
         tensor_id = None
@@ -1055,19 +1330,20 @@ class TestgraphraphConversion:
                 tensor_id = node
                 break
         assert tensor_id is not None
-        assert get_immediate_container(graph, self.q2.id) == tensor_id
-        assert get_immediate_container(graph, self.q3.id) == tensor_id
+        assert get_immediate_container(cvzx_graph, self.q2.id) == tensor_id
+        assert get_immediate_container(cvzx_graph, self.q3.id) == tensor_id
 
         # Tensor is in comp
-        assert get_immediate_container(graph, tensor_id) == comp.id
+        assert get_immediate_container(cvzx_graph, tensor_id) == comp.id
 
         # Comp has no container
-        assert get_immediate_container(graph, comp.id) is None
+        assert get_immediate_container(cvzx_graph, comp.id) is None
 
     def test_get_nodes_by_container(self):
         """Test getting all nodes belonging to a container."""
         comp = CompositionDiagram([self.swap, TensorDiagram([self.q2, self.q3])])
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
+        graph = cvzx_graph.graph
 
         # Find tensor node
         tensor_id = None
@@ -1078,13 +1354,13 @@ class TestgraphraphConversion:
 
         # Nodes in tensor: q2, q3, and the tensor itself
         assert tensor_id is not None
-        nodes_in_tensor = get_nodes_by_container(graph, tensor_id)
+        nodes_in_tensor = get_nodes_by_container(cvzx_graph, tensor_id)
         assert self.q2.id in nodes_in_tensor
         assert self.q3.id in nodes_in_tensor
         assert self.swap.id not in nodes_in_tensor
 
         # Nodes in comp: all nodes
-        nodes_in_comp = get_nodes_by_container(graph, comp.id)
+        nodes_in_comp = get_nodes_by_container(cvzx_graph, comp.id)
         print(nodes_in_comp)
         assert self.swap.id in nodes_in_comp
         assert tensor_id in nodes_in_comp
@@ -1093,16 +1369,16 @@ class TestgraphraphConversion:
         """Test getting connectivity from composition container."""
         conn = {0: 1, 1: 0}
         comp = CompositionDiagram([self.q_1x2, self.q_2x1], {0: conn})
-        graph = to_graph(comp)
+        cvzx_graph = to_graph(comp)
 
-        retrieved_conn = get_connectivity(graph, comp.id)
+        retrieved_conn = get_connectivity(cvzx_graph, comp.id)
         assert retrieved_conn is not None
         assert retrieved_conn[0] == conn
 
         # Non-composition container returns None
         tensor = TensorDiagram([self.q1, self.q2])
-        graph = to_graph(tensor)
-        assert get_connectivity(graph, tensor.id) is None
+        cvzx_graph = to_graph(tensor)
+        assert get_connectivity(cvzx_graph, tensor.id) is None
 
 
 class TestToGraphDoesNotMutateInput:
@@ -1189,9 +1465,11 @@ class TestToGraphDoesNotMutateInput:
         """
         diagram = CompositionDiagram([QSpider(1, 1, ZxPoly({2: 2.0})), PSpider(1, 1, ZxPoly({3: 3.0}))])
 
-        first = to_graph(diagram)
-        second = to_graph(diagram)
+        cvzx_first = to_graph(diagram)
+        cvzx_second = to_graph(diagram)
+        first = cvzx_first.graph
+        second = cvzx_second.graph
 
         assert first.number_of_nodes() == second.number_of_nodes()
         assert first.number_of_edges() == second.number_of_edges()
-        assert repr(to_diagram(first)) == repr(to_diagram(second))
+        assert repr(to_diagram(cvzx_first)) == repr(to_diagram(cvzx_second))

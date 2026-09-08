@@ -86,6 +86,7 @@ from cvzx.base_gates import (
     PSpider,
     QSpider,
     TensorDiagram,
+    VoidDiagram,
 )
 from cvzx.gates import (
     ArbitraryGate,
@@ -168,14 +169,24 @@ def _as_complex(value: complex | Expr, leaf_name: str) -> complex:
 
 
 def _is_identity(elt: Diagram) -> bool:
-    """A bare 1-in-1-out zero-phase Q/P-spider: a no-op pass-through wire.
+    """A bare 1-in-1-out zero-phase Q/P-spider, or a same-shaped Void: a no-op pass-through wire.
+
+    A `VoidDiagram(1, 1)` arises whenever `_install_void_placeholder`
+    same-shape-swaps a plain (1,1) gate (see `TerminalAbsorptionRule`'s
+    and `CopyRule`'s cross-container substitutions); functionally it is
+    exactly an identity wire, since `optimize()` no longer strips these
+    out itself.
 
     Returns
     -------
     bool
         True if `elt` is such an identity leaf.
     """
-    return isinstance(elt, (QSpider, PSpider)) and elt.num_inputs == 1 and elt.num_outputs == 1 and elt.phase.is_zero
+    if isinstance(elt, VoidDiagram):
+        return elt.num_inputs == 1 and elt.num_outputs == 1
+    return bool(
+        isinstance(elt, (QSpider, PSpider)) and elt.num_inputs == 1 and elt.num_outputs == 1 and elt.phase.is_zero
+    )
 
 
 def _is_zero_phase_leaf(elt: Diagram, num_inputs: int, num_outputs: int) -> bool:
@@ -236,6 +247,13 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
 
     if _is_identity(elt):
         return True
+
+    if isinstance(elt, VoidDiagram):
+        # A (1, 0)-shaped Void: installed in place of a vanished effect
+        # (see `_install_void_placeholder`) -- there is nothing there to
+        # measure, so the mode is silently discarded rather than
+        # emitting any op.
+        return False
 
     if isinstance(elt, MeasurementGate):
         circuit.Q(mode_id) | intrinsic.Measurement(_as_real(elt.theta, "MeasurementGate"))
@@ -356,7 +374,13 @@ def _walk_row(
     mode_id = input_modes[0] if input_modes else None
 
     for elt in elements:
-        if elt.num_inputs == 0:
+        if isinstance(elt, VoidDiagram) and elt.num_inputs == 0:
+            # A (0, 1)-shaped Void: installed in place of a vanished
+            # state (see `_install_void_placeholder`) -- there is
+            # nothing there to originate a mode from, so none is opened;
+            # this row simply contributes no output.
+            mode_id = None
+        elif elt.num_inputs == 0:
             mode_id = mode_counter.fresh()
             circuit.Q(mode_id)
             circuit.set_initial_state(mode_id, _open_mode_state(elt, mode_id))

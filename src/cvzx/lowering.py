@@ -1,22 +1,39 @@
-"""Plugin registry for lowering a cvzx `Diagram` into an mqc3 `MachineryRepr`.
+"""Plugin registry for lowering a cvzx `Diagram` into an mqc3 `DependencyDAG`.
 
-A `LoweringBackend` is any strategy for that step; backends register under a
-name via the `register_backend` class decorator, and
-`graph_to_machinery_repr(diagram, n_local_macronodes=..., backend=...)`
-dispatches to whichever one is requested (`"mqc3"`, the bundled reference
-backend, by default). Adding a QPU-specific backend means writing and
-registering one more `LoweringBackend` subclass -- `get_backend`/
-`graph_to_machinery_repr` and every existing backend are untouched. See the
-docs' dev guide ("Architecture overview") for why `MachineryRepr` is the
-right handoff point, and the user guide ("Converting to and from mqc3
-circuits") for a worked example.
+Different QPUs can require different lowering strategies once a circuit
+leaves cvzx's diagrammatic representation. mqc3 already has exactly
+this kind of plugin point *downstream* of `DependencyDAG`:
+`mqc3.graph.embed.embed.GraphEmbedder` is an abstract base class with
+concrete per-strategy subclasses (`beamsearch.py`, `greedy.py`) that
+each embed a `DependencyDAG` into a concrete `GraphRepr` differently,
+and `GraphRepr` is in turn lowered toward a machinery representation
+via `mqc3.machinery`. `DependencyDAG` itself is QPU-agnostic -- it only
+encodes per-mode operation dependencies and feedforward edges, not
+anything hardware-specific -- so it is the natural, stable interface
+for cvzx to hand off to mqc3's own machinery.
 
-The bundled `"mqc3"` backend converts the diagram to an mqc3 `CircuitRepr`
-(via `cvzx.diagram_to_circuit.to_circuit_repr` -- see that module for the
-exact per-gate translation and its documented limitations, which apply
-transitively here), builds a `DependencyDAG` from it, embeds that DAG into a
-`GraphRepr` with mqc3's `GreedyEmbedder`, and converts the result to a
-`MachineryRepr` via mqc3's own `MachineryRepr.from_graph_repr`.
+This module provides the analogous plugin point for the one step still
+missing: cvzx `Diagram` -> mqc3 `DependencyDAG`. A `LoweringBackend` is
+any strategy for performing that step; backends register themselves
+under a name via the `register_backend` class decorator, and
+`graph_to_dependency_dag(diagram, backend=...)` dispatches to whichever
+one is requested (`"mqc3"`, the reference backend, by default). Adding
+support for a QPU that needs a different `Diagram -> DependencyDAG`
+lowering (for instance, one that wants to skip the `CircuitRepr`
+round-trip and build the DAG directly from the diagram's own structure)
+means writing and registering one more `LoweringBackend` subclass --
+`get_backend`/`graph_to_dependency_dag` and every existing backend are
+untouched.
+
+The bundled reference backend (registered as `"mqc3"`) is deliberately
+the simplest correct implementation: it converts the diagram to an
+mqc3 `CircuitRepr` (via `cvzx.diagram_to_circuit.to_circuit_repr` -- see that
+module for the exact per-gate translation and its documented
+limitations) and then builds the `DependencyDAG` from it using mqc3's
+own, already-tested `_DependencyBuilder.from_circuit()`. Every
+limitation of `to_circuit_repr` (no `ContractedDiagram`, no symbolic
+parameters, no `ControlledSumGate`/`CubicPhaseGate`, and so on) applies
+transitively to this backend.
 """
 
 from __future__ import annotations
@@ -27,7 +44,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from mqc3.machinery import MachineryRepr
+    from mqc3.graph.embed.dep_dag import DependencyDAG
 
     from cvzx.base_gates import Diagram
 
@@ -35,40 +52,36 @@ __all__ = [
     "LoweringBackend",
     "Mqc3ReferenceBackend",
     "get_backend",
-    "graph_to_machinery_repr",
+    "graph_to_dependency_dag",
     "list_backends",
     "register_backend",
 ]
 
 
 class LoweringBackend(ABC):
-    """A strategy for lowering a cvzx `Diagram` into an mqc3 `MachineryRepr`.
+    """A strategy for lowering a cvzx `Diagram` into an mqc3 `DependencyDAG`.
 
     Subclasses must be constructible with no arguments (`register_backend`
     instantiates them immediately at registration time).
     """
 
     @abstractmethod
-    def to_machinery_repr(self, diagram: Diagram, *, n_local_macronodes: int) -> MachineryRepr:
-        """Lower `diagram` into an mqc3 `MachineryRepr`.
+    def to_dependency_dag(self, diagram: Diagram) -> DependencyDAG:
+        """Lower `diagram` into an mqc3 `DependencyDAG`.
 
         Parameters
         ----------
         diagram : Diagram
-            The cvzx diagram to lower. Implementations are free to impose
-            their own restrictions on what `diagram` may contain
-            (documented on the implementation itself).
-        n_local_macronodes : int
-            Number of macronodes per column in the target `GraphRepr`/
-            `MachineryRepr` (mqc3's `GraphEmbedSettings.n_local_macronodes`).
-            Must be large enough to embed `diagram`'s dependency structure --
-            implementations should let mqc3's own embedder raise if it isn't,
-            rather than silently guessing a value of their own.
+            The cvzx diagram to lower. Implementations are free to
+            impose their own restrictions on what `diagram` may
+            contain (documented on the implementation itself).
 
         Returns
         -------
-        MachineryRepr
-            The resulting machinery representation.
+        DependencyDAG
+            The resulting dependency DAG, ready for mqc3's own
+            `GraphEmbedder` machinery to embed into a concrete
+            `GraphRepr`.
         """
 
 
@@ -92,7 +105,7 @@ def register_backend(name: str) -> Callable[[type[LoweringBackend]], type[Loweri
     --------
     >>> @register_backend("my_qpu")
     ... class MyQpuBackend(LoweringBackend):
-    ...     def to_machinery_repr(self, diagram, *, n_local_macronodes):
+    ...     def to_dependency_dag(self, diagram):
     ...         ...
     """
 
@@ -136,16 +149,13 @@ def list_backends() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def graph_to_machinery_repr(diagram: Diagram, *, n_local_macronodes: int, backend: str = "mqc3") -> MachineryRepr:
-    """Lower a cvzx `Diagram` into an mqc3 `MachineryRepr` via a named backend.
+def graph_to_dependency_dag(diagram: Diagram, backend: str = "mqc3") -> DependencyDAG:
+    """Lower a cvzx `Diagram` into an mqc3 `DependencyDAG` via a named backend.
 
     Parameters
     ----------
     diagram : Diagram
         The cvzx diagram to lower.
-    n_local_macronodes : int
-        Number of macronodes per column in the target representation --
-        see `LoweringBackend.to_machinery_repr`.
     backend : str
         Name of the registered `LoweringBackend` to use. Defaults to
         `"mqc3"`, the bundled reference backend (see this module's
@@ -154,44 +164,36 @@ def graph_to_machinery_repr(diagram: Diagram, *, n_local_macronodes: int, backen
 
     Returns
     -------
-    MachineryRepr
-        The resulting machinery representation.
+    DependencyDAG
+        The resulting dependency DAG.
     """
-    return get_backend(backend).to_machinery_repr(diagram, n_local_macronodes=n_local_macronodes)
+    return get_backend(backend).to_dependency_dag(diagram)
 
 
 @register_backend("mqc3")
 class Mqc3ReferenceBackend(LoweringBackend):
-    """Reference lowering backend: `Diagram` -> `CircuitRepr` -> `DependencyDAG` -> `GraphRepr` -> `MachineryRepr`.
+    """Reference lowering backend: `Diagram` -> `CircuitRepr` -> `DependencyDAG`.
 
-    Converts via `cvzx.diagram_to_circuit.to_circuit_repr`, builds a
-    `DependencyDAG` from the result, embeds it into a `GraphRepr` with
-    mqc3's `GreedyEmbedder` (the simplest embedding strategy mqc3 provides --
-    a QPU wanting a different layout strategy, e.g. `BeamSearchEmbedder`,
-    should register its own backend instead), and converts to `MachineryRepr`
-    via mqc3's own `MachineryRepr.from_graph_repr`. Every limitation of
-    `to_circuit_repr` (no `ContractedDiagram`, no symbolic parameters, no
-    `ControlledSumGate`/`CubicPhaseGate`, and so on) applies transitively to
-    this backend, plus mqc3's own embedding requirements (every mode must
-    originate at an initialization and terminate at a measurement).
+    Converts via `cvzx.diagram_to_circuit.to_circuit_repr` and then builds the
+    `DependencyDAG` using mqc3's own `_DependencyBuilder.from_circuit()`
+    (through `DependencyDAG`'s own constructor) -- no cvzx-specific
+    dependency-graph logic is reimplemented here. See
+    `cvzx.diagram_to_circuit` for the exact per-gate translation performed
+    and its documented limitations, which apply transitively to this
+    backend.
     """
 
-    def to_machinery_repr(self, diagram: Diagram, *, n_local_macronodes: int) -> MachineryRepr:
-        """Lower `diagram` via `to_circuit_repr`, `DependencyDAG`, and `GreedyEmbedder`.
+    def to_dependency_dag(self, diagram: Diagram) -> DependencyDAG:
+        """Lower `diagram` via `to_circuit_repr` then mqc3's own `DependencyDAG`.
 
         Returns
         -------
-        MachineryRepr
-            The resulting machinery representation.
+        DependencyDAG
+            The resulting dependency DAG.
         """
         from mqc3.graph.embed.dep_dag import DependencyDAG  # ruff: ignore[import-outside-top-level]
-        from mqc3.graph.embed.greedy import GreedyEmbedder, GreedyEmbedSettings  # ruff: ignore[import-outside-top-level]
-        from mqc3.machinery import MachineryRepr  # ruff: ignore[import-outside-top-level]
 
         from cvzx.diagram_to_circuit import to_circuit_repr  # ruff: ignore[import-outside-top-level]
 
         circuit = to_circuit_repr(diagram)
-        dep_dag = DependencyDAG(circuit)
-        settings = GreedyEmbedSettings(n_local_macronodes=n_local_macronodes)
-        graph_repr = GreedyEmbedder(settings).embed(dep_dag)
-        return MachineryRepr.from_graph_repr(graph_repr)
+        return DependencyDAG(circuit)

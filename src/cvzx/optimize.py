@@ -2,9 +2,8 @@
 
 Ties the individual rewrite rules in `cvzx.nx_rewrite_rules` together into a
 single `optimize()` entry point: repeatedly apply the rules to a diagram
-until a full round makes no further changes, then run the end-of-pipeline
-`remove_void_and_identity_nodes` cleanup pass exactly once. Returns BOTH the
-cleaned `nx.DiGraph` (the representation to keep computing with) and the
+until a full round makes no further changes. Returns BOTH the
+cleaned `CVZXGraph` (the representation to keep computing with) and the
 `Diagram` form captured right before that final cleanup ran -- once cleaned,
 the graph is no longer guaranteed to be losslessly representable as a nested
 `Diagram` tree, so the pre-cleanup snapshot is what `optimize()` hands back
@@ -14,11 +13,9 @@ for visualization instead of re-deriving one from the cleaned graph.
 import logging
 from typing import NamedTuple
 
-import networkx as nx
-
 from cvzx.base_gates import Diagram
 from cvzx.normalize_diagram import normalize_diagram
-from cvzx.nx_graph import GateRegister, to_diagram, to_graph
+from cvzx.nx_graph import CVZXGraph, to_diagram, to_graph
 from cvzx.nx_rewrite_rules import (
     ChainReductionRule,
     CopyRule,
@@ -28,7 +25,6 @@ from cvzx.nx_rewrite_rules import (
     RewriteRule,
     TerminalAbsorptionRule,
     expand_two_mode_gates,
-    remove_void_and_identity_nodes,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,9 +43,8 @@ class OptimizeResult(NamedTuple):
 
     Attributes
     ----------
-    graph : nx.DiGraph
-        The simplified graph, AFTER the end-of-pipeline
-        `remove_void_and_identity_nodes` cleanup pass -- ready to feed into
+    graph : CVZXGraph
+        The simplified graph ready to feed into
         more rewriting, analysis, or another `RewriteRule`.
     diagram : Diagram
         The simplified diagram, converted from the graph right BEFORE that
@@ -58,7 +53,7 @@ class OptimizeResult(NamedTuple):
         the diagram to use for visualization -- not `to_diagram(graph)`.
     """
 
-    graph: nx.DiGraph
+    graph: CVZXGraph
     diagram: Diagram
 
 
@@ -97,12 +92,12 @@ def _build_rules(*, assume_infinite_squeezing: bool) -> list[RewriteRule]:
     return rules
 
 
-def _simplify_to_fixed_point(graph: nx.DiGraph, rules: list[RewriteRule]) -> bool:
+def _simplify_to_fixed_point(graph: CVZXGraph, rules: list[RewriteRule]) -> bool:
     """Apply `rules` to `graph` in-place, repeatedly, until none of them match.
 
     Parameters
     ----------
-    graph : nx.DiGraph
+    graph : CVZXGraph
         The graph to simplify in-place.
     rules : list[RewriteRule]
         The rules to try each pass, in order.
@@ -115,30 +110,29 @@ def _simplify_to_fixed_point(graph: nx.DiGraph, rules: list[RewriteRule]) -> boo
 
     Notes
     -----
-    `GateRegister` is rebuilt from scratch only right after a rule actually
-    applies a change to `graph` -- never merely because a pass moves on to
-    the next rule. A rule whose `match()` returns nothing leaves `graph`
-    (and therefore every category the registry indexes) untouched, so the
-    registry already on hand is still exactly correct for whichever rule is
-    tried next; rebuilding in that case would be pure wasted `O(N)` work for
-    no change in behavior. This relies on nothing about how any individual
-    rule mutates the graph -- only on `RewriteRule.apply_rule`'s own
-    guarantee that "no match" means "no mutation" (see the dev guide's
+    `graph`'s registry is rebuilt from scratch only right after a rule
+    actually applies a change to `graph` -- never merely because a pass
+    moves on to the next rule. A rule whose `match()` returns nothing leaves
+    `graph` (and therefore every category the registry indexes) untouched,
+    so the registry already on hand is still exactly correct for whichever
+    rule is tried next; rebuilding in that case would be pure wasted `O(N)`
+    work for no change in behavior. This relies on nothing about how any
+    individual rule mutates the graph -- only on `RewriteRule.apply_rule`'s
+    own guarantee that "no match" means "no mutation" (see the dev guide's
     "Keeping GateRegister in sync" for why rules themselves don't maintain
     the registry incrementally).
     """
     changed = False
     n_passes = 0
-    registry = GateRegister()
-    registry.build_from_graph(graph)
+    graph.rebuild_registry()
     while True:
         n_passes += 1
         pass_changed = False
         for rule in rules:
-            if rule.match(graph, registry):
-                rule.apply_rule(graph, registry)
+            if rule.match(graph):
+                rule.apply_rule(graph)
                 pass_changed = True
-                registry.build_from_graph(graph)
+                graph.rebuild_registry()
         if not pass_changed:
             logger.debug("_simplify_to_fixed_point: reached fixed point after %d pass(es)", n_passes)
             return changed
@@ -181,7 +175,7 @@ def optimize(
     Returns
     -------
     OptimizeResult
-        A `(graph, diagram)` named tuple: the cleaned `nx.DiGraph`, and the
+        A `(graph, diagram)` named tuple: the cleaned `CVZXGraph`, and the
         `Diagram` as it stood right before the final cleanup pass.
 
     Raises
@@ -228,5 +222,4 @@ def optimize(
         )
 
     pre_cleanup_diagram = to_diagram(graph)
-    remove_void_and_identity_nodes(graph)
     return OptimizeResult(graph=graph, diagram=pre_cleanup_diagram)

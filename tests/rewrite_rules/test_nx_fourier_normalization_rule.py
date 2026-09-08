@@ -25,7 +25,7 @@ from cvzx.base_gates import (
     ZxPoly,
 )
 from cvzx.gates import BeamsplitterGate, PhaseRotationGate, SqueezingGate
-from cvzx.nx_graph import GateRegister, to_diagram, to_graph
+from cvzx.nx_graph import to_diagram, to_graph
 from cvzx.nx_rewrite_rules import FourierNormalizationRule, apply_rule_to_diagram
 
 
@@ -66,9 +66,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F next to R(theta) matches, list order [R, F]."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_type"] == "PhaseRotationGate"
         assert isclose(float(matches[0]["result_value"]), self.theta1 - pi / 2)
@@ -77,9 +75,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """R(theta) next to F also matches, list order [F, R] (they commute)."""
         comp = CompositionDiagram([Fourier(), PhaseRotationGate(self.theta1)])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert isclose(float(matches[0]["result_value"]), self.theta1 - pi / 2)
 
@@ -87,9 +83,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """Finv next to R(theta) matches, contributing +pi/2."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), FourierInv()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_type"] == "PhaseRotationGate"
         assert isclose(float(matches[0]["result_value"]), self.theta1 + pi / 2)
@@ -98,9 +92,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F2 next to R(theta) matches, contributing +pi."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier2()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_type"] == "PhaseRotationGate"
         assert isclose(float(matches[0]["result_value"]), self.theta1 + pi)
@@ -109,9 +101,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F2 next to Sq(tau) matches, negating tau."""
         comp = CompositionDiagram([SqueezingGate(2.0), Fourier2()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_type"] == "SqueezingGate"
         assert matches[0]["result_value"] == -2.0  # ruff: ignore[float-equality-comparison]
@@ -120,9 +110,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """Sq(tau) next to F2 also matches (they commute)."""
         comp = CompositionDiagram([Fourier2(), SqueezingGate(-3.0)])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["result_value"] == 3.0  # ruff: ignore[float-equality-comparison]
 
@@ -130,18 +118,14 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F next to Sq does NOT match -- only F2 merges with squeezing."""
         comp = CompositionDiagram([SqueezingGate(2.0), Fourier()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_no_finv_squeezing(self):
         """Finv next to Sq does NOT match -- only F2 merges with squeezing."""
         comp = CompositionDiagram([SqueezingGate(2.0), FourierInv()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_no_unrelated_gate(self):
@@ -151,41 +135,31 @@ class TestFourierNormalizationRule(unittest.TestCase):
         comp2 = CompositionDiagram([self.filler, Fourier()])
         for diagram in (comp, tensor, comp2):
             graph = to_graph(diagram)
-            reg = GateRegister()
-            reg.build_from_graph(graph)
-            assert len(self.rule.match(graph, reg)) == 0
+            assert len(self.rule.match(graph)) == 0
 
     def test_match_no_rotation_rotation(self):
         """Two rotations do not match this rule -- that's ChainReductionRule's job."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), PhaseRotationGate(self.theta2)])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_no_squeezing_squeezing(self):
         """Two squeezing gates do not match this rule -- that's ChainReductionRule's job."""
         comp = CompositionDiagram([SqueezingGate(2.0), SqueezingGate(3.0)])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_no_fourier_fourier(self):
         """Two Fourier gates do not match this rule -- that's ChainReductionRule's job."""
         comp = CompositionDiagram([Fourier(), Fourier()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        assert len(self.rule.match(graph, reg)) == 0
+        assert len(self.rule.match(graph)) == 0
 
     def test_match_with_extra_trailing_element(self):
         """Extra trailing content after the pattern doesn't prevent matching."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier(), self.filler])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["indices"] == [0, 1]
 
@@ -194,20 +168,16 @@ class TestFourierNormalizationRule(unittest.TestCase):
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier()])
         tensor = TensorDiagram([self.swap, comp, self.bs])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
-        assert matches[0]["container_id"] in reg.composition_nodes
+        assert matches[0]["container_id"] in graph.registry.composition_nodes
 
     def test_match_nested_in_contracted(self):
         """Match a pattern inside a composition inside a ContractedDiagram."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier()])
         contracted = ContractedDiagram(comp, self.swap, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
 
@@ -215,9 +185,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F, R, Finv: only the first (non-overlapping) pair is matched in one call."""
         comp = CompositionDiagram([Fourier(), PhaseRotationGate(self.theta1), FourierInv()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["indices"] == [0, 1]
 
@@ -229,9 +197,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F folded into R(theta) leaves a single R(theta - pi/2)."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, PhaseRotationGate)
@@ -241,9 +207,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """Finv folded into R(theta) leaves a single R(theta + pi/2)."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), FourierInv()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, PhaseRotationGate)
@@ -253,9 +217,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F2 folded into R(theta) leaves a single R(theta + pi)."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier2()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, PhaseRotationGate)
@@ -265,9 +227,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F2 folded into Sq(tau) leaves a single Sq(-tau)."""
         comp = CompositionDiagram([SqueezingGate(2.0), Fourier2()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, SqueezingGate)
@@ -277,9 +237,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """Folding leaves trailing content untouched."""
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier(), self.filler])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -294,9 +252,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier()])
         tensor = TensorDiagram([self.swap, comp, self.bs])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
@@ -311,9 +267,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         comp = CompositionDiagram([PhaseRotationGate(self.theta1), Fourier()])
         contracted = ContractedDiagram(comp, self.swap, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)
@@ -379,17 +333,13 @@ class TestFourierNormalizationRule(unittest.TestCase):
         """F, R, Finv: one apply_rule() pass folds only the first pair."""
         comp = CompositionDiagram([Fourier(), PhaseRotationGate(self.theta1), FourierInv()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         after_one_pass = to_diagram(graph)
         assert isinstance(after_one_pass, CompositionDiagram)
         assert len(after_one_pass.diagrams) == 2
 
         # Second pass: fixed point.
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         final = to_diagram(graph)
         assert isinstance(final, PhaseRotationGate)
         assert isclose(cast("float", final.theta), self.theta1)
@@ -413,9 +363,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
         theta = Symbol("theta", real=True)
         comp = CompositionDiagram([PhaseRotationGate(theta, parametric=True), Fourier()])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
 
         assert simplify(matches[0]["result_value"] - (theta - sympy_pi / 2)) == 0

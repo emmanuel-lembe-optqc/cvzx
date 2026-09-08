@@ -10,6 +10,7 @@ References
 
 import logging
 import math
+import operator
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -19,7 +20,7 @@ from sympy import Expr, cos, pi, tan
 from cvzx.base_gates import CompositionDiagram, ContractedDiagram, Diagram, TensorDiagram, ZxPoly
 from cvzx.gates import BeamsplitterGate, ControlledSumGate
 from cvzx.nx_graph import (
-    GateRegister,
+    CVZXGraph,
     to_diagram,
     to_graph,
 )
@@ -30,12 +31,13 @@ logger = logging.getLogger(__name__)
 class RewriteRule(ABC):
     """Base class for rewrite rules operating on graphs.
 
-    All rewrite rules operate on `nx.DiGraph` in-place. This avoids repeated
-    conversions between diagram and graph representations.
+    All rewrite rules operate on a `CVZXGraph` in-place (mutating its
+    underlying `.graph`). This avoids repeated conversions between diagram
+    and graph representations.
 
     The typical workflow is:
         1. Convert diagram to graph: `G = to_graph(diagram)`
-        2. Apply rules: `G = rule1.apply_rule(G); G = rule2.apply_rule(G)`
+        2. Apply rules: `rule1.apply_rule(G); rule2.apply_rule(G)`
         3. Convert back: `diagram = to_diagram(G)`
 
     Subclasses must implement:
@@ -48,25 +50,23 @@ class RewriteRule(ABC):
 
     Parameters
     ----------
-    G : nx.DiGraph
+    graph : CVZXGraph
         The graph to modify.
 
     Returns
     -------
-    nx.DiGraph
+    CVZXGraph
         The modified graph (same object, for chaining).
     """
 
     @abstractmethod
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+    def match(self, graph: CVZXGraph) -> list[dict]:
         """Find all matches of the rule pattern in the graph.
 
         Parameters
         ----------
-        graph : nx.DiGraph
-            The graph to search.
-        registry : GateRegister
-                    Registry for tracking specific gate types and nodes in a CV ZX graph.
+        graph : CVZXGraph
+            The graph to search, together with its registry.
 
         Returns
         -------
@@ -76,30 +76,28 @@ class RewriteRule(ABC):
         """
 
     @abstractmethod
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
+    def apply_single(self, graph: CVZXGraph, match: dict) -> None:
         """Apply the rule to a specific match in-place.
 
         Parameters
         ----------
-        graph : nx.DiGraph
+        graph : CVZXGraph
             The graph to modify.
         match : dict
             A single match returned by `match()`.
         """
 
-    def apply_rule(self, graph: nx.DiGraph, registry: GateRegister) -> nx.DiGraph:
+    def apply_rule(self, graph: CVZXGraph) -> CVZXGraph:
         """Apply a rule to the entire graph.
 
         Parameters
         ----------
-        graph : nx.DiGraph
-            The graph to modify.
-        registry : GateRegister
-            Registry for tracking specific gate types and nodes in a CV ZX graph.
+        graph : CVZXGraph
+            The graph to modify, together with its registry.
 
         Returns
         -------
-        nx.DiGraph
+        CVZXGraph
             The modified graph.
 
         Raises
@@ -108,7 +106,7 @@ class RewriteRule(ABC):
             If `self.match()` returns a match that is not a dict.
         """
         # Find all matches
-        matches = self.match(graph, registry)
+        matches = self.match(graph)
 
         if not matches:
             logger.debug("%s: no matches", type(self).__name__)
@@ -185,6 +183,94 @@ class RewriteRule(ABC):
                 # The Container was the root
                 graph.nodes[child_id]["container_id"] = None
                 graph.nodes[child_id]["is_root"] = True
+
+    def _replace_in_parent(self, graph: nx.DiGraph, parent_id: int, old_id: int, new_id: int) -> None:
+        """Substitute `new_id` for `old_id` in `parent_id`'s own bookkeeping.
+
+        Used whenever a node is removed or merged away and something else
+        (a survivor of a merge, or a same-shaped placeholder) needs to
+        take over its exact slot -- a `sub_diagram_ids` list entry for a
+        "composition"/"tensor" parent, or `first_id`/`second_id` for a
+        "contracted" one. Never touches port counts or any other
+        bookkeeping (`connectivity`, `I1`/`I2`/`J1`/`J2`, ...): the caller
+        is responsible for only using this when `new_id`'s own arity
+        matches whatever shape `old_id` occupied, so nothing downstream
+        needs to change.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        parent_id : int
+            The immediate parent container of `old_id`.
+        old_id : int
+            The node ID currently occupying the slot.
+        new_id : int
+            The node ID that should occupy it instead.
+        """
+        parent_attrs = graph.nodes[parent_id]
+        parent_type = parent_attrs.get("container_type")
+
+        if parent_type in {"composition", "tensor"}:
+            sub_ids = parent_attrs.get("sub_diagram_ids", [])
+            if old_id in sub_ids:
+                sub_ids[sub_ids.index(old_id)] = new_id
+        elif parent_type == "contracted":
+            if parent_attrs.get("first_id") == old_id:
+                parent_attrs["first_id"] = new_id
+            elif parent_attrs.get("second_id") == old_id:
+                parent_attrs["second_id"] = new_id
+
+        if new_id in graph.nodes:
+            graph.nodes[new_id]["container_id"] = parent_id
+
+    def _install_void_placeholder(
+        self, graph: nx.DiGraph, parent_id: int, old_id: int, num_inputs: int, num_outputs: int
+    ) -> int:
+        """Replace `old_id`'s slot in `parent_id` with a same-shaped `VoidDiagram`.
+
+        Used when a node disappears (merged into something elsewhere in
+        the graph) but its own parent's shape must stay exactly as it
+        was -- no `connectivity`/arity recompute, no propagation to
+        grandparents -- because every port count on both sides of the old
+        slot is preserved exactly. `VoidDiagram` is a transient
+        placeholdere -- the same trade-off `CopyRule`'s own
+        cross-container substitution already makes.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        parent_id : int
+            The immediate parent container `old_id` used to occupy.
+        old_id : int
+            The node ID that no longer exists (already merged away).
+        num_inputs : int
+            The placeholder's input arity (== `old_id`'s own, before it
+            disappeared).
+        num_outputs : int
+            The placeholder's output arity (== `old_id`'s own).
+
+        Returns
+        -------
+        int
+            The new placeholder's node ID.
+        """
+        void_id = max(graph.nodes) + 1 if graph.nodes else 0
+        graph.add_node(
+            void_id,
+            id=void_id,
+            type="VoidDiagram",
+            kind="proper",
+            phase=None,
+            num_inputs=num_inputs,
+            num_outputs=num_outputs,
+            container_id=parent_id,
+            external_inputs=list(range(num_inputs)),
+            external_outputs=list(range(num_outputs)),
+        )
+        self._replace_in_parent(graph, parent_id, old_id, void_id)
+        return void_id
 
     @staticmethod
     def _remap_by_identity(old_mapping: dict, new_mapping: dict) -> dict:
@@ -555,6 +641,189 @@ class RewriteRule(ABC):
 
         return old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs, input_remap, output_remap
 
+    def _remove_composition_child(self, graph: nx.DiGraph, container_id: int, removed_id: int) -> tuple:
+        """Remove one child from a flat CompositionDiagram container in place.
+
+        Only valid for a child that carries nothing any neighbor still
+        depends on -- concretely, a `VoidDiagram`, which by construction
+        (every call site in this module) always has zero inputs XOR zero
+        outputs, with its one nonzero side never wired to anything by
+        `connectivity` (see `IdentityRemovalRule`, the only caller). This
+        does not attempt to merge a live wire across the gap; it is not a
+        general "splice out any composition child" operation.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        container_id : int
+            The CompositionDiagram container node ID.
+        removed_id : int
+            The child node ID being removed.
+
+        Returns
+        -------
+        tuple
+            (old_num_inputs, new_num_inputs, old_num_outputs,
+            new_num_outputs, input_remap, output_remap) for
+            `_propagate_arity_to_parent`.
+        """
+        attrs = graph.nodes[container_id]
+        sub_ids = attrs.get("sub_diagram_ids", [])
+        pos = sub_ids.index(removed_id)
+        n = len(sub_ids)
+
+        old_connectivity = attrs.get("connectivity", {})
+        new_connectivity = {}
+        for key, targets in old_connectivity.items():
+            if key in {pos - 1, pos}:
+                continue  # either side of the removed slot -- nothing to merge, see docstring
+            new_connectivity[key - 1 if key > pos else key] = targets
+
+        sub_ids.pop(pos)
+        attrs["connectivity"] = new_connectivity
+
+        old_num_inputs = attrs.get("num_inputs", 0)
+        old_num_outputs = attrs.get("num_outputs", 0)
+        new_num_inputs = old_num_inputs
+        new_num_outputs = old_num_outputs
+        input_remap: dict = {}
+        output_remap: dict = {}
+
+        if pos == 0:
+            new_num_inputs = graph.nodes[sub_ids[0]].get("num_inputs", 0) if sub_ids else 0
+            if new_num_inputs == old_num_inputs:
+                input_remap = {p: p for p in range(old_num_inputs)}
+
+        if pos == n - 1:
+            new_num_outputs = graph.nodes[sub_ids[-1]].get("num_outputs", 0) if sub_ids else 0
+            if new_num_outputs == old_num_outputs:
+                output_remap = {p: p for p in range(old_num_outputs)}
+
+        attrs.update({
+            "num_inputs": new_num_inputs,
+            "num_outputs": new_num_outputs,
+            "external_inputs": list(range(new_num_inputs)),
+            "external_outputs": list(range(new_num_outputs)),
+        })
+
+        return old_num_inputs, new_num_inputs, old_num_outputs, new_num_outputs, input_remap, output_remap
+
+    def _remove_external_port(self, graph: nx.DiGraph, node_id: int, is_input: bool, port: int) -> bool:  # ruff: ignore[complex-structure, too-many-return-statements, too-many-locals, boolean-type-hint-positional-argument]
+        """Try to eliminate one external port of `node_id`, recursing through wrappers.
+
+        Succeeds (returns True, graph mutated) only when `port` traces
+        back through any nesting of TensorDiagram/ContractedDiagram/
+        CompositionDiagram wrappers to an existing `VoidDiagram` leaf --
+        shrinking a Void is always safe, since it carries no physical
+        content or connectivity that must be preserved. Refuses (returns
+        False, graph untouched) the instant the port traces back to a
+        real physical leaf, since removing a genuine port would silently
+        drop real connectivity.
+
+        Used by `_propagate_arity_to_parent`'s "composition" branch to
+        attempt a *consistent* shrink of an adjacent sibling before
+        falling back to today's silent `connectivity`-entry drop, which
+        otherwise leaves that sibling's own declared arity stale and
+        eventually trips `CompositionDiagram.__post_init__`'s strict
+        adjacent-size check.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        node_id : int
+            The node whose external port should be removed.
+        is_input : bool
+            True to remove one of `node_id`'s input ports, False for one
+            of its output ports.
+        port : int
+            The external port index (in the `is_input` side's own
+            numbering) to remove.
+
+        Returns
+        -------
+        bool
+            Whether the removal succeeded.
+        """
+        attrs = graph.nodes[node_id]
+        container_type = attrs.get("container_type")
+
+        if container_type is None:
+            if attrs.get("type") != "VoidDiagram":
+                return False
+            count_key = "num_inputs" if is_input else "num_outputs"
+            list_key = "external_inputs" if is_input else "external_outputs"
+            count = attrs.get(count_key, 0)
+            if port >= count:
+                return False
+            attrs[count_key] = count - 1
+            attrs[list_key] = list(range(count - 1))
+            return True
+
+        if container_type == "tensor":
+            mapping_key = "external_input_mapping" if is_input else "external_output_mapping"
+            target = attrs.get(mapping_key, {}).get(port)
+            if target is None:
+                return False
+            child_idx, child_port = target
+            child_id = attrs.get("sub_diagram_ids", [])[child_idx]
+            if not self._remove_external_port(graph, child_id, is_input, child_port):
+                return False
+            self._recompute_tensor_arity(graph, node_id)
+            return True
+
+        if container_type == "contracted":
+            mapping_key = "external_input_mapping" if is_input else "external_output_mapping"
+            target = attrs.get(mapping_key, {}).get(port)
+            if target is None:
+                return False
+            side, local_port = target
+            child_id = attrs["first_id"] if side == "first" else attrs["second_id"]
+            if not self._remove_external_port(graph, child_id, is_input, local_port):
+                return False
+            # `child_id`'s own raw port numbering above `local_port` just
+            # shifted down by one; translate whichever consumed-index
+            # list tracks this (side, is_input) combination the same way.
+            index_key = self._contracted_index_key(side, is_input)
+            shifted = [p if p < local_port else p - 1 for p in attrs.get(index_key, []) if p != local_port]
+            attrs[index_key] = shifted
+            self._recompute_contracted_arity(graph, node_id)
+            return True
+
+        if container_type == "composition":
+            sub_ids = attrs.get("sub_diagram_ids", [])
+            if not sub_ids:
+                return False
+            target_id = sub_ids[0] if is_input else sub_ids[-1]
+            if not self._remove_external_port(graph, target_id, is_input, port):
+                return False
+            count_key = "num_inputs" if is_input else "num_outputs"
+            list_key = "external_inputs" if is_input else "external_outputs"
+            count = attrs.get(count_key, 0)
+            attrs[count_key] = count - 1
+            attrs[list_key] = list(range(count - 1))
+            return True
+
+        return False
+
+    @staticmethod
+    def _contracted_index_key(side: str, is_input: bool) -> str:  # ruff: ignore[boolean-type-hint-positional-argument]
+        """Which of I1/J1/I2/J2 tracks consumed ports for (side, is_input).
+
+        Mirrors `_recompute_contracted_arity`'s own convention: J1 =
+        first's consumed inputs, I1 = first's consumed outputs, I2 =
+        second's consumed inputs, J2 = second's consumed outputs.
+
+        Returns
+        -------
+        str
+            The attribute name ("I1", "J1", "I2", or "J2") to read/write.
+        """
+        if side == "first":
+            return "J1" if is_input else "I1"
+        return "I2" if is_input else "J2"
+
     def _propagate_arity_to_parent(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-locals, too-many-statements, too-many-positional-arguments]
         self,
         graph: nx.DiGraph,
@@ -653,19 +922,50 @@ class RewriteRule(ABC):
                 if old_num_inputs != new_num_inputs and pos > 0:
                     key = pos - 1
                     old_conn = connectivity.get(key, {})
+                    prev_sibling_id = sub_ids[pos - 1]
+                    # An `in_port` (one of `container_id`'s own inputs)
+                    # that vanished needs the sibling's matching `out_port`
+                    # to vanish too, or the strict adjacent-size check in
+                    # `CompositionDiagram.__post_init__` breaks later.
+                    # Only attempted (never required) -- when it fails,
+                    # this falls back to today's pre-existing silent drop.
+                    dropped_out_ports = sorted(
+                        {out_port for in_port, out_port in old_conn.items() if in_port not in input_remap},
+                        reverse=True,
+                    )
+                    removed_out_ports = [
+                        out_port
+                        for out_port in dropped_out_ports
+                        if self._remove_external_port(graph, prev_sibling_id, is_input=False, port=out_port)
+                    ]
                     new_conn = {}
                     for in_port, out_port in old_conn.items():
                         if in_port in input_remap:
-                            new_conn[input_remap[in_port]] = out_port
+                            shift = sum(1 for removed in removed_out_ports if removed < out_port)
+                            new_conn[input_remap[in_port]] = out_port - shift
                     connectivity[key] = new_conn
 
                 if old_num_outputs != new_num_outputs and pos < len(sub_ids) - 1:
                     key = pos
                     old_conn = connectivity.get(key, {})
+                    next_sibling_id = sub_ids[pos + 1]
+                    # Symmetric case: an `out_port` (one of `container_id`'s
+                    # own outputs) that vanished needs the next sibling's
+                    # matching `in_port` to vanish too.
+                    dropped_in_ports = sorted(
+                        {in_port for in_port, out_port in old_conn.items() if out_port not in output_remap},
+                        reverse=True,
+                    )
+                    removed_in_ports = [
+                        in_port
+                        for in_port in dropped_in_ports
+                        if self._remove_external_port(graph, next_sibling_id, is_input=True, port=in_port)
+                    ]
                     new_conn = {}
                     for in_port, out_port in old_conn.items():
                         if out_port in output_remap:
-                            new_conn[in_port] = output_remap[out_port]
+                            shift = sum(1 for removed in removed_in_ports if removed < in_port)
+                            new_conn[in_port - shift] = output_remap[out_port]
                     connectivity[key] = new_conn
 
                 parent_attrs["connectivity"] = connectivity
@@ -717,115 +1017,169 @@ class IdentityRule(RewriteRule):
     A q-spider with no phase and 1 input/1 output is the identity.
     A p-spider with no phase and 1 input/1 output is also the identity.
 
-    The rule applies to identity spiders anywhere in the graph.
-    After removal, containers with a single element are flattened.
+    The rule only applies when the identity's own immediate parent is a
+    flat CompositionDiagram it shares with the neighbor it would be
+    spliced into. In that case the identity's slot is removed from
+    `sub_diagram_ids`/`connectivity` entirely and its neighbors are
+    re-linked directly, with no leftover placeholder.
+
+    An identity spider that instead sits in a Tensor lane (or as one of a
+    ContractedDiagram's two halves) is NOT touched by this rule: removing
+    it there would require shrinking that parent's own port count and
+    cascading the change upward through the diagram (including into any
+    non-adjacent sibling in an enclosing flat composition), which is not
+    a shape-preserving operation and would corrupt connectivity. A stray
+    identity spider is valid, harmless diagram content -- unlike a
+    `VoidDiagram`, it carries no "must never survive" invariant -- so
+    simply leaving it in place is safe.
     """
 
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
-        """Find all identity spiders in the graph.
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
+        """Find all identity spiders in the graph with a splice-able neighbor.
 
         Parameters
         ----------
-        graph : nx.DiGraph
-            The graph to search.
-
-        registry : GateRegister
-            Registry for tracking specific gate types and nodes in a CV ZX graph.
+        cvzx_graph : CVZXGraph
+            The graph to search, together with its registry.
 
         Returns
         -------
         list[dict]
             List of matches, each containing:
             - 'node_id': the node ID of the identity spider
-            - 'container_id': the node ID of its immediate container
+            - 'container_id': its immediate container (grouping key for
+              `RewriteRule.apply_rule`)
+            - 'survivor_id': the neighbor node ID the identity is
+              contracted into
         """
+        graph = cvzx_graph.graph
+        registry = cvzx_graph.registry
         matches = []
 
         # Sort for deterministic match order (set iteration order is not stable).
         for node in sorted(registry.identity_spiders):
             attrs = graph.nodes[node]
+            if attrs.get("kind") != "proper" or not is_wiring_node_from_attrs(attrs):
+                continue
+
+            preds = [
+                u
+                for u, _, edge_attrs in graph.in_edges(node, data=True)
+                if edge_attrs.get("edge_type") == "composition"
+            ]
+            succs = [
+                v
+                for _, v, edge_attrs in graph.out_edges(node, data=True)
+                if edge_attrs.get("edge_type") == "composition"
+            ]
+            # A root identity spider (no composition edge on either side
+            # -- the whole diagram simplified down to a single wire) has
+            # nothing to splice into; there's nothing left for this rule
+            # to do.
+            if not preds and not succs:
+                continue
+
             container_id = attrs.get("container_id")
-            # A root identity spider (container_id is None -- the whole
-            # diagram simplified down to a single wire) has no composition
-            # to be removed from; there's nothing left for this rule to do.
-            if (
-                attrs.get("kind") == "proper"
-                and is_wiring_node_from_attrs(attrs)
-                and container_id is not None
-                and graph.nodes[container_id]["container_type"] == "composition"
-            ):
-                matches.append({
-                    "node_id": node,
-                    "container_id": container_id,
-                })
+            if container_id is None or graph.nodes[container_id].get("container_type") != "composition":
+                continue
+
+            # Only a neighbor sharing this identity's own immediate
+            # composition parent is a safe splice target -- see class
+            # docstring for why a cross-container neighbor is not.
+            survivor_id = None
+            if succs and graph.nodes[succs[0]].get("container_id") == container_id:
+                survivor_id = succs[0]
+            elif preds and graph.nodes[preds[0]].get("container_id") == container_id:
+                survivor_id = preds[0]
+            if survivor_id is None:
+                continue
+
+            matches.append({
+                "node_id": node,
+                "container_id": container_id,
+                "survivor_id": survivor_id,
+            })
 
         return matches
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
+    def apply_single(  # ruff: ignore[complex-structure, too-many-branches]
+        self, cvzx_graph: CVZXGraph, match: dict
+    ) -> None:
         """Remove an identity spider from the graph in-place.
 
         Parameters
         ----------
-        graph : nx.DiGraph
+        cvzx_graph : CVZXGraph
             The graph to modify.
         match : dict
-            Match containing 'node_id' and 'container_id'.
+            Match containing 'node_id' and 'survivor_id'.
         """
+        graph = cvzx_graph.graph
         node_id = match["node_id"]
-        container_id = match["container_id"]
 
-        # Matches are computed once up front and then grouped/applied by
-        # `RewriteRule.apply_rule` (reverse position order *within* one
-        # container's own group of matches, so an earlier removal there
-        # can't shift a later index) -- but nothing stops a match in one
-        # group from being invalidated by a *different* group's removal
-        # applied first (e.g. `_flatten_container`, triggered while
-        # collapsing a neighboring container, can delete this match's
-        # own `container_id` node entirely). Re-check both node ids are
-        # still actually in the graph before touching their attrs: a
-        # missing one means an earlier match in this same batch already
-        # resolved this node one way or another, so there's nothing left
-        # for this stale match to do.
-        if node_id not in graph or container_id not in graph:
+        # Matches are computed once up front; nothing stops a match in
+        # one group from being invalidated by a different one applied
+        # first in the same batch (e.g. two identities back-to-back,
+        # where removing the first changes what's actually adjacent to
+        # the second). So `match["survivor_id"]` is NOT trusted here --
+        # the identity's current neighbor(s) are re-derived fresh from
+        # the graph, exactly as `match()` itself does, which self-heals
+        # against exactly that kind of staleness.
+        if node_id not in graph:
             return
         attrs = graph.nodes[node_id]
-
-        # Check that the node is an identity spider which can be reduced
-        if not (
-            attrs.get("kind") == "proper"
-            and is_wiring_node_from_attrs(attrs)
-            and container_id is not None
-            and graph.nodes[container_id]["container_type"] == "composition"
-        ):
+        if not (attrs.get("kind") == "proper" and is_wiring_node_from_attrs(attrs)):
             return
-        # Remove the identity node from the graph
-        attrs = graph.nodes[container_id]
-        sub_ids = attrs.get("sub_diagram_ids", [])
-        if len(sub_ids) > 1:
-            idx = sub_ids.index(node_id)
-            connectivity = graph.nodes[container_id]["connectivity"]
-            if idx < len(sub_ids) - 1:
-                graph = nx.contracted_nodes(graph, u=sub_ids[idx + 1], v=node_id, self_loops=False, copy=False)
-                del graph.nodes[sub_ids[idx + 1]]["contraction"]
-                new_connectivity = {}
-                idx_to_del = idx - 1 if idx > 0 else idx
-                del connectivity[idx_to_del]
-                # Update the keys after deleting the obsolete key
-                for key in connectivity:
-                    if key > idx_to_del:
-                        new_connectivity[key - 1] = connectivity[key]
-                    else:
-                        new_connectivity[key] = connectivity[key]
-                graph.nodes[container_id]["connectivity"] = new_connectivity
+
+        container_id = attrs.get("container_id")
+        if container_id is None or graph.nodes[container_id].get("container_type") != "composition":
+            return
+
+        preds = [
+            u
+            for u, _, edge_attrs in graph.in_edges(node_id, data=True)
+            if edge_attrs.get("edge_type") == "composition"
+        ]
+        succs = [
+            v
+            for _, v, edge_attrs in graph.out_edges(node_id, data=True)
+            if edge_attrs.get("edge_type") == "composition"
+        ]
+        survivor_id = None
+        if succs and graph.nodes[succs[0]].get("container_id") == container_id:
+            survivor_id = succs[0]
+        elif preds and graph.nodes[preds[0]].get("container_id") == container_id:
+            survivor_id = preds[0]
+        if survivor_id is None:
+            return
+
+        # Same flat CompositionDiagram as its survivor: splice the
+        # identity's slot out of `sub_diagram_ids`/`connectivity`
+        # entirely and re-link its neighbors directly.
+        container_attrs = graph.nodes[container_id]
+        sub_ids = container_attrs.get("sub_diagram_ids", [])
+        if node_id not in sub_ids or survivor_id not in sub_ids:
+            return
+        idx = sub_ids.index(node_id)
+        connectivity = container_attrs.get("connectivity", {})
+
+        nx.contracted_nodes(graph, survivor_id, node_id, self_loops=False, copy=False)
+        if "contraction" in graph.nodes[survivor_id]:
+            del graph.nodes[survivor_id]["contraction"]
+
+        new_connectivity = {}
+        idx_to_del = idx - 1 if idx > 0 else idx
+        if idx_to_del in connectivity:
+            del connectivity[idx_to_del]
+        for key, targets in connectivity.items():
+            if key > idx_to_del:
+                new_connectivity[key - 1] = targets
             else:
-                graph = nx.contracted_nodes(graph, u=sub_ids[idx - 1], v=node_id, self_loops=False, copy=False)
-                del graph.nodes[sub_ids[idx - 1]]["contraction"]
-                # We must update the connectivity
-                del connectivity[idx - 1]
-            # We must update sub_diagram_ids
-            graph.nodes[container_id]["sub_diagram_ids"].pop(idx)
-            if len(sub_ids) == 1:
-                self._flatten_container(graph, container_id)
+                new_connectivity[key] = targets
+        container_attrs["connectivity"] = new_connectivity
+        sub_ids.pop(idx)
+        if len(sub_ids) == 1:
+            self._flatten_container(graph, container_id)
 
 
 class FusionRule(RewriteRule):
@@ -848,16 +1202,13 @@ class FusionRule(RewriteRule):
     After fusion, containers with a single element are flattened.
     """
 
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:  # ruff: ignore[too-many-locals]
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:  # ruff: ignore[too-many-locals]
         """Find all ContractedDiagram containers containing fusible spiders.
 
         Parameters
         ----------
-        graph : nx.DiGraph
-            The graph to search.
-
-        registry : GateRegister
-            Registry for tracking specific gate types and nodes in a CV ZX graph.
+        cvzx_graph : CVZXGraph
+            The graph to search, together with its registry.
 
         Returns
         -------
@@ -875,6 +1226,8 @@ class FusionRule(RewriteRule):
             - 'J2': connections from first spider inputs to second spider outputs
             - 'I2': connections from second spider inputs to first spider outputs
         """
+        graph = cvzx_graph.graph
+        registry = cvzx_graph.registry
         matches = []
 
         # Sort for deterministic match order (set iteration order is not stable).
@@ -938,16 +1291,17 @@ class FusionRule(RewriteRule):
 
         return matches
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # ruff: ignore[too-many-locals]
+    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:  # ruff: ignore[too-many-locals]
         """Fuse two same-type spiders in a ContractedDiagram in-place.
 
         Parameters
         ----------
-        graph : nx.DiGraph
+        cvzx_graph : CVZXGraph
             The graph to modify.
         match : dict
             Match containing the ContractedDiagram and spider information.
         """
+        graph = cvzx_graph.graph
         contracted_id = match["contracted_id"]
         first_id = match["first_id"]
         second_id = match["second_id"]
@@ -1049,15 +1403,13 @@ class ChainReductionRule(RewriteRule):
     - ControlledSumGate(i,j,g1) ∘ ControlledSumGate(i,j,g2) → ControlledSumGate(i,j,g1+g2)
     """
 
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
         """Find all chains of reducible gates in CompositionDiagram containers.
 
         Parameters
         ----------
-        graph : nx.DiGraph
-            The graph to search.
-        registry : GateRegister
-            Registry for tracking specific gate types and nodes.
+        cvzx_graph : CVZXGraph
+            The graph to search, together with its registry.
 
         Returns
         -------
@@ -1068,6 +1420,8 @@ class ChainReductionRule(RewriteRule):
             - 'values': list of values for each gate in the chain
             - 'node_ids': list of node IDs in the chain (in order)
         """
+        graph = cvzx_graph.graph
+        registry = cvzx_graph.registry
         matches: list[dict] = []
 
         # Sort for deterministic match order (set iteration order is not stable).
@@ -1094,12 +1448,12 @@ class ChainReductionRule(RewriteRule):
 
         return matches
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
+    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:
         """Apply chain reduction to a specific match in-place.
 
         Parameters
         ----------
-        graph : nx.DiGraph
+        cvzx_graph : CVZXGraph
             The graph to modify.
         match : dict
             Match containing chain information.
@@ -1110,6 +1464,7 @@ class ChainReductionRule(RewriteRule):
             If `match["gate_type"]` is not a type `reduce_chain` recognizes
             (should not occur for a match produced by `match()`).
         """
+        graph = cvzx_graph.graph
         container_id = match["container_id"]
         gate_type = match["gate_type"]
         values = match["values"]
@@ -1606,15 +1961,13 @@ class FourierNormalizationRule(RewriteRule):
         "Fourier2": pi,
     }
 
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
         """Find all Fourier-type/rotation or F2/squeezing pairs.
 
         Parameters
         ----------
-        graph : nx.DiGraph
-            The graph to search.
-        registry : GateRegister
-            Registry for tracking specific gate types and nodes.
+        cvzx_graph : CVZXGraph
+            The graph to search, together with its registry.
 
         Returns
         -------
@@ -1625,6 +1978,8 @@ class FourierNormalizationRule(RewriteRule):
             - 'result_type': 'PhaseRotationGate' or 'SqueezingGate'
             - 'result_value': the combined angle or squeezing parameter
         """
+        graph = cvzx_graph.graph
+        registry = cvzx_graph.registry
         matches = []
 
         # Sort for deterministic match order (set iteration order is not stable).
@@ -1712,16 +2067,17 @@ class FourierNormalizationRule(RewriteRule):
             "result_value": -tau,
         }
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
+    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:
         """Apply a Fourier-normalization fold to a specific match in-place.
 
         Parameters
         ----------
-        graph : nx.DiGraph
+        cvzx_graph : CVZXGraph
             The graph to modify.
         match : dict
             Match containing fold information.
         """
+        graph = cvzx_graph.graph
         container_id = match["container_id"]
         keep_id, absorb_id = match["node_ids"]
         i, _ = match["indices"]
@@ -1800,6 +2156,10 @@ class TerminalAbsorptionRule(RewriteRule):
     (default False) gates whether those two sub-cases are allowed to
     match at all; when False, only rotation absorption runs.
 
+    Neither the terminal nor the gate may be directly one of a
+    ContractedDiagram's own two halves (its `first_id`/`second_id`) --
+    `match()` excludes any such pair outright.
+
     References
     ----------
     [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (239a)-(239e).
@@ -1817,52 +2177,89 @@ class TerminalAbsorptionRule(RewriteRule):
         """
         self.assume_infinite_squeezing = assume_infinite_squeezing
 
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
         """Find all gate/terminal pairs that can be absorbed.
+
+        Candidate pairs are found by scanning the graph's own
+        "composition" edges directly (mirroring `CopyRule`), rather than
+        only checking adjacent `sub_diagram_ids` entries of one
+        CompositionDiagram. Every composition edge already connects
+        fully-resolved leaf nodes regardless of how deeply either
+        endpoint sits inside a TensorDiagram/ContractedDiagram wrapper,
+        so this also finds pairs that cross a container boundary -- e.g.
+        a gate sitting in one Tensor lane feeding a measurement terminal
+        that lives in a completely different Tensor two containers away.
+        `_check_pair` itself is unchanged.
+
+        A pair is skipped outright, before `_check_pair` even runs, when
+        either endpoint's own immediate parent is a ContractedDiagram --
+        see the class docstring for why this rule leaves that case to
+        `CopyRule` entirely.
 
         Parameters
         ----------
-        graph : nx.DiGraph
-            The graph to search.
-        registry : GateRegister
-            Registry for tracking specific gate types and nodes.
+        cvzx_graph : CVZXGraph
+            The graph to search, together with its registry.
 
         Returns
         -------
         list[dict]
             List of matches, each containing:
-            - 'container_id': the node ID of the CompositionDiagram
+            - 'container_id': grouping key for `RewriteRule.apply_rule`
+              (the pair's shared immediate parent when they have one,
+              else a synthetic per-match key)
             - 'node_ids': [keep_id, absorb_id] in list order (keep_id survives)
             - 'result_type': 'QSpider' or 'PSpider'
             - 'result_num_inputs' / 'result_num_outputs': the terminal's own arity
             - 'result_phase': the folded phase
         """
+        graph = cvzx_graph.graph
         matches = []
+        used_nodes: set[int] = set()
 
-        # Sort for deterministic match order (set iteration order is not stable).
-        for container_id in sorted(registry.composition_nodes):
-            attrs = graph.nodes[container_id]
-            sub_ids = attrs.get("sub_diagram_ids", [])
+        # Sort for deterministic match order (dict/edge iteration order
+        # isn't guaranteed to reflect any particular scan order).
+        composition_edges = sorted(
+            (u, v) for u, v, edge_attrs in graph.edges(data=True) if edge_attrs.get("edge_type") == "composition"
+        )
 
-            if len(sub_ids) < 2:  # ruff: ignore[magic-value-comparison]
+        for first_id, second_id in composition_edges:
+            # Avoid reusing a node a prior match in this same batch
+            # already consumed (same reasoning as the old index-stepping
+            # loop this replaces).
+            if first_id in used_nodes or second_id in used_nodes:
                 continue
 
-            # Skip past a matched pair (i += 2), same reasoning as
-            # FourierNormalizationRule: avoids reusing a stale
-            # precomputed result on a node a prior match already consumed.
-            i = 0
-            while i < len(sub_ids) - 1:
-                first_id = sub_ids[i]
-                second_id = sub_ids[i + 1]
+            # Neither endpoint may be directly one of a ContractedDiagram's
+            # own two halves (its `first_id`/`second_id`).
+            first_container_id = graph.nodes[first_id].get("container_id")
+            second_container_id = graph.nodes[second_id].get("container_id")
+            if (
+                first_container_id is not None
+                and graph.nodes[first_container_id].get("container_type") == "contracted"
+            ) or (
+                second_container_id is not None
+                and graph.nodes[second_container_id].get("container_type") == "contracted"
+            ):
+                continue
 
-                match = self._check_pair(graph, first_id, second_id)
-                if match:
-                    match["container_id"] = container_id
-                    match["indices"] = [i, i + 1]
-                    matches.append(match)
-                    i += 2
-                else:
-                    i += 1
+            match = self._check_pair(graph, first_id, second_id)
+            if match is None:
+                continue
+
+            first_parent = graph.nodes[first_id].get("container_id")
+            second_parent = graph.nodes[second_id].get("container_id")
+            if first_parent == second_parent and first_parent is not None:
+                match["container_id"] = first_parent
+                sub_ids = graph.nodes[first_parent].get("sub_diagram_ids", [])
+                if first_id in sub_ids and second_id in sub_ids:
+                    match["indices"] = sorted([sub_ids.index(first_id), sub_ids.index(second_id)])
+            else:
+                match["container_id"] = ("cross", first_id, second_id)
+
+            matches.append(match)
+            used_nodes.add(first_id)
+            used_nodes.add(second_id)
 
         return matches
 
@@ -2015,55 +2412,81 @@ class TerminalAbsorptionRule(RewriteRule):
             return False  # Symbolic theta: can't determine, assume safe.
         return math.isclose(abs(theta_val) % math.pi, math.pi / 2)
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
+    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:  # ruff: ignore[complex-structure]
         """Apply a terminal absorption to a specific match in-place.
 
         Parameters
         ----------
-        graph : nx.DiGraph
+        cvzx_graph : CVZXGraph
             The graph to modify.
         match : dict
             Match containing fold information.
         """
-        container_id = match["container_id"]
+        graph = cvzx_graph.graph
         keep_id, absorb_id = match["node_ids"]
-        i, _ = match["indices"]
+        if keep_id not in graph or absorb_id not in graph:
+            return
+
+        # Capture the absorbed gate's own parent before the contraction
+        # below removes `absorb_id` from the graph entirely.
+        absorb_parent_id = graph.nodes[absorb_id].get("container_id")
+        keep_parent_id = graph.nodes[keep_id].get("container_id")
+
+        # Same flat CompositionDiagram: splice the absorbed gate's slot
+        # out of `sub_diagram_ids`/`connectivity` entirely, exactly as
+        # before this rule could also look past a single container -- the
+        # common case, and it keeps producing a fully collapsed result
+        # (no leftover placeholder) for it.
+        same_parent = (
+            absorb_parent_id is not None
+            and absorb_parent_id == keep_parent_id
+            and graph.nodes[absorb_parent_id].get("container_type") == "composition"
+        )
+        container_attrs = graph.nodes[absorb_parent_id] if same_parent else None
+        sub_ids = container_attrs.get("sub_diagram_ids", []) if container_attrs is not None else []
+        same_parent = same_parent and keep_id in sub_ids and absorb_id in sub_ids
 
         nx.contracted_nodes(graph, keep_id, absorb_id, self_loops=False, copy=False)
         if "contraction" in graph.nodes[keep_id]:
             del graph.nodes[keep_id]["contraction"]
 
+        # `keep_id` doesn't move -- only its own type/phase/arity change;
+        # its own immediate parent is untouched.
         graph.nodes[keep_id].update({
             "type": match["result_type"],
             "phase": match["result_phase"],
             "num_inputs": match["result_num_inputs"],
             "num_outputs": match["result_num_outputs"],
-            "container_id": container_id,
         })
 
-        container_attrs = graph.nodes[container_id]
-        sub_ids = container_attrs.get("sub_diagram_ids", [])
-        new_sub_ids = [sub_id for sub_id in sub_ids if sub_id != absorb_id]
-        container_attrs["sub_diagram_ids"] = new_sub_ids
+        if same_parent:
+            assert container_attrs is not None  # ruff: ignore[assert] -- see same_parent's definition above
+            i = min(sub_ids.index(keep_id), sub_ids.index(absorb_id))
+            new_sub_ids = [sub_id for sub_id in sub_ids if sub_id != absorb_id]
+            container_attrs["sub_diagram_ids"] = new_sub_ids
 
-        # Drop the now-internal link at i, move i+1's outgoing link to i,
-        # and shift every index past i+1 down by one.
-        if "connectivity" in container_attrs:
-            connectivity = container_attrs["connectivity"]
-            new_connectivity = {}
-            for old_idx, targets in connectivity.items():
-                if old_idx == i:
-                    continue
-                if old_idx == i + 1:
-                    new_connectivity[i] = targets
-                elif old_idx < i:
-                    new_connectivity[old_idx] = targets
-                else:  # old_idx > i + 1
-                    new_connectivity[old_idx - 1] = targets
-            container_attrs["connectivity"] = new_connectivity
+            # Drop the now-internal link at i, move i+1's outgoing link
+            # to i, and shift every index past i+1 down by one.
+            if "connectivity" in container_attrs:
+                connectivity = container_attrs["connectivity"]
+                new_connectivity = {}
+                for old_idx, targets in connectivity.items():
+                    if old_idx == i:
+                        continue
+                    if old_idx == i + 1:
+                        new_connectivity[i] = targets
+                    elif old_idx < i:
+                        new_connectivity[old_idx] = targets
+                    else:  # old_idx > i + 1
+                        new_connectivity[old_idx - 1] = targets
+                container_attrs["connectivity"] = new_connectivity
 
-        if len(new_sub_ids) == 1:
-            self._flatten_container(graph, container_id)
+            if len(new_sub_ids) == 1:
+                self._flatten_container(graph, absorb_parent_id)
+            return
+
+        if absorb_parent_id is not None and absorb_parent_id in graph.nodes:
+            self._install_void_placeholder(graph, absorb_parent_id, absorb_id, num_inputs=1, num_outputs=1)
 
 
 class CopyRule(RewriteRule):
@@ -2089,9 +2512,20 @@ class CopyRule(RewriteRule):
     "composition" edges, which already connect fully-resolved leaf nodes
     regardless of how deeply either sits inside a TensorDiagram or
     ContractedDiagram.
+
+    `match()` also transparently sees through any run of identity
+    spiders (zero-phase, raw arity (1,1)) sitting directly in the
+    composition path between the copy spider and its target hub: an
+    identity there is a pure pass-through with no bearing on the copy
+    law, and must not block a match that is otherwise exactly this
+    pattern. Every identity crossed this way is recorded in the match
+    and, in `apply_single`, converted into a same-shape, in-place
+    `VoidDiagram` -- a bare type/phase relabeling at its own exact
+    existing position, touching no container's shape or bookkeeping, so
+    it trivially preserves connectivity.
     """
 
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
         """Find all composition-adjacent copy-able patterns in the graph.
 
         Copy-able pairs are found by scanning the graph's own "composition"
@@ -2120,10 +2554,8 @@ class CopyRule(RewriteRule):
 
         Parameters
         ----------
-        graph : nx.DiGraph
-            The graph to search.
-        registry : GateRegister
-            Registry for tracking specific gate types and nodes.
+        cvzx_graph : CVZXGraph
+            The graph to search, together with its registry.
 
         Returns
         -------
@@ -2138,31 +2570,126 @@ class CopyRule(RewriteRule):
             - 'container_id': grouping key for `RewriteRule.apply_rule()`
             - additional container bookkeeping fields used by `apply_single`
         """
-        del registry
-        matches = []
+        graph = cvzx_graph.graph
+        registry = cvzx_graph.registry
+        ordered_matches: list[tuple[int, int, dict]] = []
 
-        # Sort for deterministic match order (dict/edge iteration order
-        # isn't guaranteed to reflect any particular scan order).
-        composition_edges = sorted(
-            (u, v) for u, v, edge_attrs in graph.edges(data=True) if edge_attrs.get("edge_type") == "composition"
+        # Every real match's copy_spider is a bare state (0,1) or effect
+        # (1,0) leaf -- never the "n"-sided hub -- so scanning candidates
+        # by this shape, rather than raw composition edges directly,
+        # finds exactly the same adjacent pairs the old edge-driven scan
+        # did, while ALSO transparently chasing through any run of
+        # identity spiders sitting directly in the path (see
+        # `_chase_identity_chain`).
+        candidates = sorted(
+            node
+            for node in registry.input_states | registry.measurement_nodes
+            if node in graph.nodes and graph.nodes[node].get("type") in {"QSpider", "PSpider"}
         )
 
-        for first_id, second_id in composition_edges:
+        for copy_id in candidates:
+            forward = graph.nodes[copy_id].get("num_outputs") == 1
+            neighbor_id, identity_chain = self._chase_identity_chain(graph, copy_id, forward=forward)
+            if neighbor_id is None:
+                continue
+
+            first_id, second_id = (copy_id, neighbor_id) if forward else (neighbor_id, copy_id)
             base_match = self._check_pair(graph, first_id, second_id)
             if base_match is None:
                 continue
 
-            resolved = self._resolve_containers(graph, base_match)
+            resolved = self._resolve_containers(graph, base_match, identity_chain)
             if resolved is None:
                 continue
 
             base_match.update(resolved)
-            matches.append(base_match)
+            base_match["identity_chain"] = identity_chain
+            ordered_matches.append((first_id, second_id, base_match))
 
-        return matches
+        # Sort for deterministic match order (dict/node iteration order
+        # isn't guaranteed to reflect any particular scan order) -- by
+        # the same (predecessor, successor) key the old edge-driven scan
+        # produced, so match order is unaffected for every pair that
+        # doesn't cross an identity chain.
+        ordered_matches.sort(key=operator.itemgetter(0, 1))
+        return [entry[2] for entry in ordered_matches]
 
-    def _resolve_containers(self, graph: nx.DiGraph, base_match: dict) -> dict | None:
+    def _chase_identity_chain(
+        self, graph: nx.DiGraph, start_id: int, *, forward: bool
+    ) -> tuple[int | None, list[int]]:
+        """Follow composition edges from `start_id`, stepping over identities.
+
+        Walks from `start_id` in the given direction, one composition
+        edge at a time, continuing past every node that is itself an
+        identity spider (zero-phase, raw arity (1,1)) -- a pure
+        pass-through with no bearing on the copy law -- until it reaches
+        the first node that isn't. That node is the real neighbor to
+        check as a copy-law hub; the identities skipped along the way
+        are returned too, so `apply_single` can convert each into an
+        in-place `VoidDiagram` once the match fires.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+        start_id : int
+            The node to start from -- a copy_spider candidate.
+        forward : bool
+            True to follow outgoing composition edges (`start_id` is a
+            state, arity (0,1)); False to follow incoming ones
+            (`start_id` is an effect, arity (1,0)).
+
+        Returns
+        -------
+        tuple[int | None, list[int]]
+            `(neighbor_id, identity_ids_crossed)` -- the identity ids in
+            traversal order, nearest `start_id` first -- or `(None, [])`
+            if there is no composition edge at all in that direction.
+        """
+        crossed: list[int] = []
+        current = start_id
+        while True:
+            if forward:
+                neighbors = [
+                    v
+                    for _, v, edge_attrs in graph.out_edges(current, data=True)
+                    if edge_attrs.get("edge_type") == "composition"
+                ]
+            else:
+                neighbors = [
+                    u
+                    for u, _, edge_attrs in graph.in_edges(current, data=True)
+                    if edge_attrs.get("edge_type") == "composition"
+                ]
+            if not neighbors:
+                return None, crossed
+            nxt = neighbors[0]
+            nxt_attrs = graph.nodes[nxt]
+            if nxt_attrs.get("kind") == "proper" and is_wiring_node_from_attrs(nxt_attrs):
+                crossed.append(nxt)
+                current = nxt
+                continue
+            return nxt, crossed
+
+    def _resolve_containers(
+        self, graph: nx.DiGraph, base_match: dict, identity_chain: list[int] | None = None
+    ) -> dict | None:
         """Work out how to restructure the containers around a candidate match.
+
+        Parameters
+        ----------
+        identity_chain : list[int] | None
+            The identity spiders (if any) crossed by `_chase_identity_chain`
+            to find this pair. When non-empty, the "same flat
+            CompositionDiagram" splice below is never used -- it assumes
+            `copy_id` and `disappear_id` are directly, contiguously
+            adjacent entries of one container, which isn't true once
+            something (even just one identity) sits between them -- so
+            resolution always falls through to the general
+            cross-container substitution instead, which only touches
+            `copy_id`'s and `disappear_id`'s own individual slots (each
+            with a same-shape swap) and never needs to know what sits
+            between them.
 
         Returns
         -------
@@ -2179,7 +2706,7 @@ class CopyRule(RewriteRule):
             graph.nodes[disappear_parent_id].get("container_type") if disappear_parent_id is not None else None
         )
 
-        if copy_parent_id == disappear_parent_id:
+        if not identity_chain and copy_parent_id == disappear_parent_id:
             # Classic case
             if copy_parent_type != "composition":
                 return None
@@ -2222,10 +2749,19 @@ class CopyRule(RewriteRule):
         first_type = first_attrs.get("type")
         second_type = second_attrs.get("type")
 
-        first_num_inputs = first_attrs.get("num_inputs")
-        first_num_outputs = first_attrs.get("num_outputs")
-        second_num_inputs = second_attrs.get("num_inputs")
-        second_num_outputs = second_attrs.get("num_outputs")
+        # A node's RAW declared num_inputs/num_outputs is its true
+        # external arity UNLESS it's one of a ContractedDiagram's two
+        # halves, in which case some of those ports are already wired
+        # internally to its sibling and only the "kept" remainder is
+        # ever reachable via a composition edge -- see `_external_arity`.
+        # `is_wiring_node_from_attrs` below deliberately still reads the
+        # RAW attrs dicts (`first_attrs`/`second_attrs`), not this: a
+        # node that only *looks* like a trivial (1,1) zero-phase
+        # identity from the outside -- because its other port is hidden
+        # inside such an internal contraction -- is not a real no-op
+        # wire, and must not be excluded as one.
+        first_num_inputs, first_num_outputs = _external_arity(graph, first_id)
+        second_num_inputs, second_num_outputs = _external_arity(graph, second_id)
 
         # Pattern: P(φ, 1, n) ∘ Q(g, 0, 1)
         # `not is_wiring_node_from_attrs(second_attrs)` excludes the
@@ -2355,17 +2891,18 @@ class CopyRule(RewriteRule):
             return False
         return bool(phase.degree() <= 1)
 
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:  # ruff: ignore[too-many-branches, too-many-locals, too-many-statements, complex-structure]
+    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:  # ruff: ignore[too-many-branches, too-many-locals, too-many-statements, complex-structure]
         """Apply the copy rule to a specific match in-place.
 
         Parameters
         ----------
-        graph : nx.DiGraph
+        cvzx_graph : CVZXGraph
             The graph to modify.
         match : dict
             Match containing the copy/disappearing spider information plus
             whatever container bookkeeping `match()` resolved for this pair.
         """
+        graph = cvzx_graph.graph
         copy_spider_id = match["copy_spider_id"]
         disappearing_spider_id = match["disappearing_spider_id"]
         n_copies = match["n_copies"]
@@ -2374,6 +2911,17 @@ class CopyRule(RewriteRule):
         copy_num_inputs = match["copy_spider_num_inputs"]
         copy_num_outputs = match["copy_spider_num_outputs"]
         same_parent = match.get("same_parent", True)
+
+        # Any identity spider crossed by `match()` while finding this
+        # pair is a pure pass-through with no bearing on the copy law
+        # itself: convert each into a same-shape, in-place VoidDiagram --
+        # a bare type/phase relabeling at its own exact existing
+        # position, touching no container's shape or bookkeeping at all,
+        # so it trivially preserves connectivity.
+        for identity_id in match.get("identity_chain", []):
+            identity_attrs = graph.nodes[identity_id]
+            identity_attrs["type"] = "VoidDiagram"
+            identity_attrs["phase"] = None
 
         if same_parent:
             container_id = match["container_id"]
@@ -2470,22 +3018,41 @@ class CopyRule(RewriteRule):
         disappear_container_type = match["disappear_container_type"]
         copy_container_id = match["copy_container_id"]
 
+        # If the disappearing spider is one of a ContractedDiagram's two
+        # halves, some of its OWN raw ports may already be wired
+        # internally to its sibling (an `edge_type="contracted_internal"`
+        # edge, tracked by that ContractedDiagram's own `I1`/`I2`/`J1`/
+        # `J2`) -- ports that are neither the one fed by `copy_spider`
+        # (padded below) nor among the ones becoming the `n` copies
+        # (`_check_pair`'s pattern only ever counts the *external*, kept
+        # ports for those two roles -- see `_external_arity`). Capture
+        # which raw indices those are now, before `nx.contracted_nodes`
+        # below removes `disappearing_spider_id`'s own attrs for good.
+        disappear_parent_attrs = (
+            graph.nodes[disappear_container_id] if disappear_container_type == "contracted" else None
+        )
+        disappearing_is_first = (
+            disappear_parent_attrs is not None and disappear_parent_attrs.get("first_id") == disappearing_spider_id
+        )
+        consumed_output_indices: list[int] = []
+        consumed_input_indices: list[int] = []
+        if disappear_parent_attrs is not None:
+            if disappearing_is_first:
+                consumed_output_indices = list(disappear_parent_attrs.get("I1", []))
+                consumed_input_indices = list(disappear_parent_attrs.get("J1", []))
+            else:
+                consumed_input_indices = list(disappear_parent_attrs.get("I2", []))
+                consumed_output_indices = list(disappear_parent_attrs.get("J2", []))
+
         # 1. Install the transformed copy spider at the disappearing
         #    spider's old slot, padded with a VoidDiagram sized to
-        #    exactly the port(s) the contraction consumed: the single
-        #    wire that used to connect copy_spider to disappearing_spider
-        #    fed one of disappearing_spider's ports directly, and that
+        #    exactly the port the contraction consumed: the single wire
+        #    that used to connect copy_spider to disappearing_spider fed
+        #    one of disappearing_spider's ports directly, and that
         #    port's count is exactly (copy_num_outputs, copy_num_inputs)
         #    -- an input if copy_spider was a state (0,1) feeding
         #    disappearing_spider's input, an output if copy_spider was an
-        #    effect (1,0) fed by disappearing_spider's output. Padding
-        #    with a same-shaped VoidDiagram makes the installed
-        #    replacement's TOTAL arity come out identical to
-        #    disappearing_spider's own ORIGINAL arity (the n copies
-        #    supply exactly its other, unconsumed ports), so
-        #    disappear_container_id's own shape never changes either --
-        #    no recompute or `_propagate_arity_to_parent` needed on this
-        #    side at all, only a straight substitution of node IDs.
+        #    effect (1,0) fed by disappearing_spider's output.
         pad_id = max(graph.nodes) + 1
         graph.add_node(
             pad_id,
@@ -2500,20 +3067,90 @@ class CopyRule(RewriteRule):
             external_outputs=list(range(copy_num_inputs)),
         )
         graph.nodes[copy_spider_id]["sub_diagram_ids"].append(pad_id)
+
+        # 1b. Any port ALSO internally consumed by a ContractedDiagram
+        #     contraction (not accounted for by the pad above, nor by the
+        #     `n` copies) is still a leg of the disappearing spider that
+        #     the copy law applies to -- it needs its OWN fresh copy of
+        #     `copy_spider`, exactly like every one of the `n_copies`
+        #     instances, not a placeholder standing in for nothing (a
+        #     `VoidDiagram` there is silently dropping a real copied
+        #     state/effect, and the end-of-pipeline cleanup pass sweeps
+        #     `VoidDiagram`s away regardless of whether their slot is
+        #     still load-bearing -- corrupting `I1`/`I2`/`J1`/`J2`'s
+        #     pairing once it does).
+        consumed_output_placeholders = []
+        for _ in consumed_output_indices:
+            ph_id = max(graph.nodes) + 1
+            graph.add_node(
+                ph_id,
+                id=ph_id,
+                type=f"{copy_spider_type}Spider",
+                kind="proper",
+                phase=copy_spider_phase,
+                num_inputs=0,
+                num_outputs=1,
+                container_id=copy_spider_id,
+                external_inputs=[],
+                external_outputs=[0],
+            )
+            graph.nodes[copy_spider_id]["sub_diagram_ids"].append(ph_id)
+            consumed_output_placeholders.append(ph_id)
+        consumed_input_placeholders = []
+        for _ in consumed_input_indices:
+            ph_id = max(graph.nodes) + 1
+            graph.add_node(
+                ph_id,
+                id=ph_id,
+                type=f"{copy_spider_type}Spider",
+                kind="proper",
+                phase=copy_spider_phase,
+                num_inputs=1,
+                num_outputs=0,
+                container_id=copy_spider_id,
+                external_inputs=[0],
+                external_outputs=[],
+            )
+            graph.nodes[copy_spider_id]["sub_diagram_ids"].append(ph_id)
+            consumed_input_placeholders.append(ph_id)
+
         # Rebuild copy_spider_id's own port bookkeeping fresh from its
-        # (now n_copies + 1) children -- `_recompute_tensor_arity` is
-        # generic over the full child list, not just a substitution, so
-        # this correctly folds the pad in. The returned remap is unused:
-        # by construction the new total matches disappearing_spider's
-        # old arity exactly, so nothing above `copy_spider_id` needs it.
+        # full child list -- `_recompute_tensor_arity` is generic over
+        # the full child list, not just a substitution, so this folds in
+        # every pad/placeholder added above.
         self._recompute_tensor_arity(graph, copy_spider_id)
 
         if disappear_container_type == "contracted":
-            disappear_parent_attrs = graph.nodes[disappear_container_id]
-            if disappear_parent_attrs.get("first_id") == disappearing_spider_id:
+            assert disappear_parent_attrs is not None  # ruff: ignore[assert] -- see its definition above
+            sub_ids = graph.nodes[copy_spider_id]["sub_diagram_ids"]
+            output_mapping = graph.nodes[copy_spider_id]["external_output_mapping"]
+            input_mapping = graph.nodes[copy_spider_id]["external_input_mapping"]
+            reverse_output = {tuple(target): port for port, target in output_mapping.items()}
+            reverse_input = {tuple(target): port for port, target in input_mapping.items()}
+
+            new_i1_or_i2 = [reverse_input[sub_ids.index(ph_id), 0] for ph_id in consumed_input_placeholders]
+            new_j1_or_j2 = [reverse_output[sub_ids.index(ph_id), 0] for ph_id in consumed_output_placeholders]
+
+            if disappearing_is_first:
+                disappear_parent_attrs["J1"] = new_i1_or_i2  # first's inputs consumed by second's outputs
+                disappear_parent_attrs["I1"] = new_j1_or_j2  # first's outputs consumed by second's inputs
                 disappear_parent_attrs["first_id"] = copy_spider_id
             else:
+                disappear_parent_attrs["I2"] = new_i1_or_i2  # second's inputs consumed by first's outputs
+                disappear_parent_attrs["J2"] = new_j1_or_j2  # second's outputs consumed by first's inputs
                 disappear_parent_attrs["second_id"] = copy_spider_id
+
+            # `kept_first/second_inputs/outputs` and this ContractedDiagram's
+            # own external_input_mapping/external_output_mapping were
+            # computed from the OLD child's raw port layout and are now
+            # stale (the new child's ports are laid out in a different
+            # order: copies, then the copy-facing pad, then these
+            # placeholders) -- recompute them fresh from the just-updated
+            # first_id/second_id and I1/I2/J1/J2, mirroring
+            # `_add_contracted_node`'s own bookkeeping, and propagate
+            # upward like any other in-place arity change.
+            arity_change = self._recompute_contracted_arity(graph, disappear_container_id)
+            self._propagate_arity_to_parent(graph, disappear_container_id, *arity_change)
         else:  # "tensor"
             disappear_sub_ids = graph.nodes[disappear_container_id]["sub_diagram_ids"]
             disappear_sub_ids[disappear_sub_ids.index(disappearing_spider_id)] = copy_spider_id
@@ -2521,16 +3158,8 @@ class CopyRule(RewriteRule):
 
         # 2. The copy spider's own original slot has nothing left to put
         #    there -- its content now lives as the n copies installed in
-        #    step 1. Rather than deleting the slot (which would shrink
-        #    copy_container_id's arity and force `_propagate_arity_to_parent`
-        #    to cascade the change through every parent container above
-        #    it), install a `VoidDiagram` of the exact same arity in its
-        #    place. copy_container_id is always a TensorDiagram here (see
-        #    `_resolve_containers`), so this is a same-index list swap:
-        #    the container's own shape never changes -- no propagation,
-        #    no flattening, nothing upstream needs to be touched at all.
-        #    `VoidDiagram` is meant to be transient: the end-of-pipeline
-        #    cleanup pass removes it for good once optimization is done.
+        #    step 1. Rather than deleting the slot install a `VoidDiagram`
+        #    of the exact same arity in its place.
         void_id = max(graph.nodes) + 1 if graph.nodes else 0
         graph.add_node(
             void_id,
@@ -2548,98 +3177,44 @@ class CopyRule(RewriteRule):
         copy_sub_ids[copy_sub_ids.index(copy_spider_id)] = void_id
 
 
-class VoidRemovalRule(RewriteRule):
-    """End-of-pipeline cleanup: strip transient `VoidDiagram` placeholders.
+def _external_arity(graph: nx.DiGraph, node_id: int) -> tuple:
+    """A leaf's true externally-reachable (input, output) port counts.
 
-    Unlike every other rule in this module, this is NOT meant to run
-    inside `optimize()`'s per-round rewrite loop -- see
-    `remove_void_and_identity_nodes`, which runs it exactly ONCE, after
-    that loop has already reached a fixed point, right before lowering to
-    a machine representation.
+    Ordinarily this is just the node's own declared `num_inputs`/
+    `num_outputs`. But a node that is one of a `ContractedDiagram`'s two
+    halves (`first_id`/`second_id`) may have some of those ports already
+    wired to its sibling by an internal `"contracted_internal"` edge --
+    those ports are never reachable via a `"composition"` edge from
+    outside, so a rule matching against composition-edge neighbors must
+    not count them. The `ContractedDiagram` container already computes
+    exactly which ports survive externally (`kept_first_inputs`/
+    `kept_second_inputs`/`kept_first_outputs`/`kept_second_outputs`,
+    built by `_add_contracted_node`); this reads those instead of the
+    leaf's own raw declared arity whenever they apply.
 
-    A `VoidDiagram` is a bookkeeping artifact `CopyRule` leaves behind so
-    it never has to shrink a container's arity mid-optimization (see
-    `VoidDiagram`'s docstring in `base_gates.py`): it reserves the exact
-    layout space the vanished leg used to occupy, but represents no real
-    wire or state any more. This rule performs the REAL removal that
-    `CopyRule` deferred: for each `VoidDiagram`, shrink its TensorDiagram
-    parent's arity by exactly the Void's own arity (the leg it stood in
-    for really is gone for good) and ripple that change upward, exactly
-    like removing any other TensorDiagram child.
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        The graph to read from.
+    node_id : int
+        The leaf node to compute the external arity of.
 
-    `VoidDiagram` is only ever installed as a TensorDiagram child (see
-    both `CopyRule.apply_single` call sites); a Void found anywhere else
-    is left untouched rather than guessed at.
+    Returns
+    -------
+    tuple
+        (external_num_inputs, external_num_outputs).
     """
+    attrs = graph.nodes[node_id]
+    parent_id = attrs.get("container_id")
+    parent_attrs = graph.nodes.get(parent_id) if parent_id is not None else None
 
-    def match(self, graph: nx.DiGraph, registry: GateRegister) -> list[dict]:
-        """Find every remaining `VoidDiagram` node in the graph.
+    if parent_attrs is not None and parent_attrs.get("container_type") == "contracted":
+        if parent_attrs.get("first_id") == node_id:
+            return len(parent_attrs.get("kept_first_inputs", [])), len(parent_attrs.get("kept_first_outputs", []))
+        if parent_attrs.get("second_id") == node_id:
+            return len(parent_attrs.get("kept_second_inputs", [])), len(parent_attrs.get("kept_second_outputs", []))
 
-        Parameters
-        ----------
-        graph : nx.DiGraph
-            The graph to search.
-        registry : GateRegister
-            Registry for tracking specific gate types and nodes in a CV ZX graph.
-
-        Returns
-        -------
-        list[dict]
-            List of matches, each containing:
-            - 'node_id': the node ID of the VoidDiagram
-            - 'container_id': the node ID of its immediate container
-        """
-        return [
-            {"node_id": node, "container_id": graph.nodes[node].get("container_id")}
-            for node in sorted(registry.void_nodes)
-            if node in graph.nodes
-        ]
-
-    def apply_single(self, graph: nx.DiGraph, match: dict) -> None:
-        """Remove one VoidDiagram from the graph in-place, shrinking its parent.
-
-        Parameters
-        ----------
-        graph : nx.DiGraph
-            The graph to modify.
-        match : dict
-            Match containing 'node_id' (the container is re-resolved fresh
-            here rather than trusted from `match`, since an earlier
-            `apply_single` call in the same pass -- e.g. removing a
-            sibling Void down to a single remaining child -- can have
-            flattened this Void's container away in the meantime).
-        """
-        node_id = match["node_id"]
-        if node_id not in graph.nodes:
-            return
-        attrs = graph.nodes[node_id]
-        if attrs.get("type") != "VoidDiagram":
-            return
-
-        container_id = attrs.get("container_id")
-        if container_id is None or container_id not in graph.nodes:
-            # A root-level Void (the whole diagram reduced to a vanished
-            # leg) has no container to shrink into -- just drop it.
-            graph.remove_node(node_id)
-            return
-
-        container_attrs = graph.nodes[container_id]
-        if container_attrs.get("container_type") != "tensor":
-            # CopyRule only ever installs a VoidDiagram as a TensorDiagram
-            # child; anything else is unexpected, so leave it alone rather
-            # than guess at how to shrink an unfamiliar container type.
-            return
-
-        arity_change = self._remove_tensor_child(
-            graph,
-            container_id,
-            node_id,
-            attrs.get("num_inputs", 0),
-            attrs.get("num_outputs", 0),
-        )
-        graph.remove_node(node_id)
-        self._propagate_arity_to_parent(graph, container_id, *arity_change)
-        self._flatten_container(graph, container_id)
+    return attrs.get("num_inputs"), attrs.get("num_outputs")
 
 
 def is_wiring_node_from_attrs(attrs: dict) -> bool:
@@ -2676,55 +3251,6 @@ def is_wiring_node_from_attrs(attrs: dict) -> bool:
     return bool(phase.is_zero)
 
 
-def remove_void_and_identity_nodes(graph: nx.DiGraph) -> nx.DiGraph:
-    """End-of-pipeline cleanup: strip `VoidDiagram` placeholders and stray identities.
-
-    Meant to run exactly ONCE, after `optimize()`'s round loop has already
-    reached a fixed point -- never as one of the per-round rules -- since
-    removing a `VoidDiagram` genuinely shrinks its parent's arity (no rule
-    that runs mid-optimization does that; `CopyRule` deliberately avoids
-    it, padding with a `VoidDiagram` instead precisely so container shapes
-    stay stable while more rules may still need to match against them).
-
-    Two passes, in order:
-
-    1. `VoidRemovalRule` removes every remaining `VoidDiagram`,
-       shrinking its TensorDiagram parent's arity by the Void's own arity
-       and rippling that change upward -- the real removal `CopyRule`
-       deferred.
-    2. `IdentityRule` is then run to a fresh fixed point: flattening a
-       container down to a single child (step 1's `_flatten_container`
-       calls, triggered when removing a Void leaves only one sibling
-       behind) can expose an identity spider that was previously nested
-       too deep for `IdentityRule` to reach on its own -- it only matches
-       an identity whose OWN immediate parent is a flat "composition"
-       container.
-
-    Parameters
-    ----------
-    graph : nx.DiGraph
-        The graph to clean up in-place (already at a rewrite fixed point).
-
-    Returns
-    -------
-    nx.DiGraph
-        The same graph object, for chaining.
-    """
-    void_registry = GateRegister()
-    void_registry.build_from_graph(graph)
-    VoidRemovalRule().apply_rule(graph, void_registry)
-
-    identity_rule = IdentityRule()
-    while True:
-        registry = GateRegister()
-        registry.build_from_graph(graph)
-        if not identity_rule.match(graph, registry):
-            break
-        identity_rule.apply_rule(graph, registry)
-
-    return graph
-
-
 def apply_rule_to_diagram(rule: RewriteRule, diagram: Diagram) -> Diagram:
     """Apply a rewrite rule to a diagram, converting to graph and back.
 
@@ -2741,9 +3267,7 @@ def apply_rule_to_diagram(rule: RewriteRule, diagram: Diagram) -> Diagram:
         The modified diagram.
     """
     graph = to_graph(diagram)
-    register = GateRegister()
-    register.build_from_graph(graph)
-    rule.apply_rule(graph, register)
+    rule.apply_rule(graph)
     return to_diagram(graph)
 
 

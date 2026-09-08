@@ -701,8 +701,9 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
         msg = f"normalize_diagram() expects a Diagram, got {type(diagram).__name__}."
         raise TypeError(msg)
 
-    graph = to_graph(diagram)
-    root_id = get_root_node(graph)
+    cvzx_graph = to_graph(diagram)
+    graph = cvzx_graph.graph
+    root_id = get_root_node(cvzx_graph)
     if root_id is None:
         logger.debug("normalize_diagram: empty diagram, nothing to do")
         return diagram

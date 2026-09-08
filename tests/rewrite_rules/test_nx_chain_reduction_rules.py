@@ -33,7 +33,7 @@ from cvzx.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
-from cvzx.nx_graph import GateRegister, to_diagram, to_graph
+from cvzx.nx_graph import to_diagram, to_graph
 from cvzx.nx_rewrite_rules import ChainReductionRule
 
 
@@ -244,7 +244,7 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_q_spider_monomial(self):
         """Q-spider with monomial phase returns ('Q', (phase, degree, num_inputs, num_outputs))."""
         graph = to_graph(self.q_x2_2)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph, self.q_x2_2.id)
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.q_x2_2.id)
         assert gate_info is not None
         assert gate_type == "Q"
         assert value == self.phase_x2
@@ -252,7 +252,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert gate_info["num_outputs"] == 1
 
         graph = to_graph(self.q_x2_3_n23)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph, self.q_x2_3_n23.id)
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.q_x2_3_n23.id)
         assert gate_info is not None
         assert gate_type == "Q"
         assert value == self.phase_x2_3
@@ -262,7 +262,7 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_q_spider_mixed(self):
         """Q-spider with mixed phase returns ('Q', (phase, None))."""
         graph = to_graph(self.q_mixed)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph, self.q_mixed.id)
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.q_mixed.id)
         assert gate_info is not None
         assert gate_type == "Q"
         assert value == self.phase_mixed
@@ -272,7 +272,7 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_p_spider_monomial(self):
         """P-spider with monomial phase returns ('P', (phase, degree, num_inputs, num_outputs))."""
         graph = to_graph(self.p_x2_2)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph, self.p_x2_2.id)
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.p_x2_2.id)
         assert gate_info is not None
         assert gate_type == "P"
         assert value == self.phase_x2
@@ -282,7 +282,7 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_p_spider_mixed(self):
         """P-spider with mixed phase returns ('P', (phase, None))."""
         graph = to_graph(self.p_mixed)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph, self.p_mixed.id)
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.p_mixed.id)
         assert gate_info is not None
         assert gate_type == "P"
         assert value == self.phase_mixed
@@ -292,63 +292,63 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_phase_rotation(self):
         """PhaseRotationGate returns ('R', theta)."""
         graph = to_graph(self.ph_rot1)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.ph_rot1.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.ph_rot1.id)
         assert gate_type == "R"
         assert isclose(value, pi / 4)
 
     def test_get_gate_info_beamsplitter(self):
         """BeamsplitterGate returns ('BS', theta)."""
         graph = to_graph(self.bs1)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.bs1.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.bs1.id)
         assert gate_type == "BS"
         assert isclose(value, pi / 4)
 
     def test_get_gate_info_squeezing(self):
         """SqueezingGate returns ('Sq', tau)."""
         graph = to_graph(self.sq1)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.sq1.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.sq1.id)
         assert gate_type == "Sq"
         assert isclose(value, 2.0)
 
     def test_get_gate_info_displacement(self):
         """DisplacementGate returns ('D', alpha)."""
         graph = to_graph(self.disp1)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.disp1.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.disp1.id)
         assert gate_type == "D"
         assert value == 1.0 + 0.5j  # ruff: ignore[float-equality-comparison]
 
     def test_get_gate_info_fourier(self):
         """Fourier returns ('F', 'F')."""
         graph = to_graph(self.fourier)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.fourier.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.fourier.id)
         assert gate_type == "F"
         assert value == "F"
 
     def test_get_gate_info_fourier_inv(self):
         """FourierInv returns ('F', 'Finv')."""
         graph = to_graph(self.fourier_inv)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.fourier_inv.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.fourier_inv.id)
         assert gate_type == "F"
         assert value == "Finv"
 
     def test_get_gate_info_fourier2(self):
         """Fourier2 returns ('F2', None)."""
         graph = to_graph(self.fourier2)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.fourier2.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.fourier2.id)
         assert gate_type == "F2"
         assert value == "F2"
 
     def test_get_gate_info_swap_returns_none(self):
         """Swap returns None (not reducible)."""
         graph = to_graph(self.swap)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.swap.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.swap.id)
         assert gate_type is None
         assert value is None
 
     def test_get_gate_info_csum(self):
         """CSum gate."""
         graph = to_graph(self.cs)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph, self.cs.id)
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.cs.id)
         assert gate_info is not None
         assert gate_type == "CSUM"
         assert value == self.cs.gain
@@ -358,7 +358,7 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_cz(self):
         """CZ gate."""
         graph = to_graph(self.cz1)
-        gate_type, value, _ = self.rule.get_gate_info(graph, self.cz1.id)
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.cz1.id)
         assert gate_type == "CZ"
         assert value == self.cz1.gain
 
@@ -370,9 +370,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Q-spiders with same degree chain together."""
         comp = CompositionDiagram([self.q_x2_2, self.q_x2_3])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "Q"
@@ -385,9 +383,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Q-spiders with different degrees."""
         comp = CompositionDiagram([self.q_x2_2, self.q_x3_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "Q"
@@ -400,9 +396,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Q-spiders with same degree and different compatible arities chain together."""
         comp = CompositionDiagram([TensorDiagram([self.bs1, self.fourier]), self.q_x2_2_n32, self.q_x2_3_n23])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "Q"
@@ -415,9 +409,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Q-spider with mixed polynomial does NOT chain."""
         comp = CompositionDiagram([self.q_x2_2, self.q_mixed])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "Q"
@@ -430,9 +422,7 @@ class TestChainReductionRule(unittest.TestCase):
         """P-spiders with same degree chain together."""
         comp = CompositionDiagram([self.p_x2_2, self.p_x2_3])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "P"
@@ -445,9 +435,7 @@ class TestChainReductionRule(unittest.TestCase):
         """P-spiders with different degrees."""
         comp = CompositionDiagram([self.p_x2_2, self.p_x3_2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "P"
@@ -460,9 +448,7 @@ class TestChainReductionRule(unittest.TestCase):
         """P-spiders with same degree and different compatible arities chain together."""
         comp = CompositionDiagram([TensorDiagram([self.bs1, self.fourier]), self.p_x2_2_n32, self.p_x2_3_n23])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "P"
@@ -475,9 +461,7 @@ class TestChainReductionRule(unittest.TestCase):
         """P-spider with mixed polynomial does NOT chain."""
         comp = CompositionDiagram([self.p_x2_2, self.p_mixed])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "P"
@@ -490,9 +474,7 @@ class TestChainReductionRule(unittest.TestCase):
         """PhaseRotation gates chain together."""
         comp = CompositionDiagram([self.ph_rot1, self.ph_rot2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "R"
@@ -504,9 +486,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Beamsplitter gates chain together."""
         comp = CompositionDiagram([self.bs1, self.bs2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "BS"
@@ -518,9 +498,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Squeezing gates chain together."""
         comp = CompositionDiagram([self.sq1, self.sq2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "Sq"
@@ -532,9 +510,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Displacement gates chain together."""
         comp = CompositionDiagram([self.disp1, self.disp2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "D"
@@ -547,9 +523,7 @@ class TestChainReductionRule(unittest.TestCase):
         fourier = Fourier()
         comp = CompositionDiagram([self.fourier, fourier])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "F"
@@ -562,9 +536,7 @@ class TestChainReductionRule(unittest.TestCase):
         fourier_inv = FourierInv()
         comp = CompositionDiagram([self.fourier_inv, fourier_inv])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "F"
@@ -576,9 +548,7 @@ class TestChainReductionRule(unittest.TestCase):
         """F ∘ Finv pairs are detected."""
         comp = CompositionDiagram([self.fourier, self.fourier_inv])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "F_pair"
@@ -590,9 +560,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Finv ∘ F pairs are detected."""
         comp = CompositionDiagram([self.fourier_inv, self.fourier])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "F_pair"
@@ -605,9 +573,7 @@ class TestChainReductionRule(unittest.TestCase):
         fourier2 = Fourier2()
         comp = CompositionDiagram([self.fourier2, fourier2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "F2"
@@ -620,9 +586,7 @@ class TestChainReductionRule(unittest.TestCase):
         cs = ControlledSumGate(gain=5, control=1, target=2)
         comp = CompositionDiagram([self.cs, cs])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "CSUM"
@@ -633,9 +597,7 @@ class TestChainReductionRule(unittest.TestCase):
         cs_bar = ControlledSumGate(gain=5)
         comp = CompositionDiagram([self.cs_bar, cs_bar])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "CSUM"
@@ -646,25 +608,19 @@ class TestChainReductionRule(unittest.TestCase):
         # ControlSumGates with different control and/or target do not chain
         comp = CompositionDiagram([self.cs, self.cs_bar])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
         comp = CompositionDiagram([self.cs_bar, self.cs])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_cz_chain(self):
         """ControlZ gates chain together."""
         comp = CompositionDiagram([self.cz1, self.cz2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "CZ"
@@ -677,9 +633,7 @@ class TestChainReductionRule(unittest.TestCase):
         inner = CompositionDiagram([self.q_x2_2, self.q_x2_3])
         outer = CompositionDiagram([self.ph_rot1, inner, self.ph_rot2])
         graph = to_graph(outer)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["gate_type"] == "Q"
         assert matches[0]["values"] == [self.q_x2_2.phase, self.q_x2_3.phase]
@@ -691,9 +645,7 @@ class TestChainReductionRule(unittest.TestCase):
         """TensorDiagram does not create chains at its level."""
         tensor = TensorDiagram([self.q_x2_2, self.q_x2_3])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_tensor2(self):
@@ -701,17 +653,13 @@ class TestChainReductionRule(unittest.TestCase):
         comp = CompositionDiagram([self.p_x2_3_n23, TensorDiagram([self.bs1, self.p_x2_2])])
         tensor = TensorDiagram([self.q_x2_2, comp, self.q_x2_3_n34])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert matches == []
 
     def test_match_compos_in_tensor(self):  # ruff: ignore[complex-structure, too-many-branches]
         """Identity inside a Composition inside a Tensor should be matched."""
         graph = to_graph(self.tensor1)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches1 = self.rule.match(graph, reg)
+        matches1 = self.rule.match(graph)
         assert len(matches1) == 2
         for match in matches1:
             if match["gate_type"] == "Sq":
@@ -720,9 +668,7 @@ class TestChainReductionRule(unittest.TestCase):
                 assert match == self.match2
 
         graph = to_graph(self.tensor2)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches2 = self.rule.match(graph, reg)
+        matches2 = self.rule.match(graph)
         # We need to update the container id which is modified each time a
         # tensor is created
         match1 = self.match1.copy()
@@ -741,9 +687,7 @@ class TestChainReductionRule(unittest.TestCase):
                 assert match == self.match4
 
         graph = to_graph(self.tensor3)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches3 = self.rule.match(graph, reg)
+        matches3 = self.rule.match(graph)
         # We need to update the container id which is modified each time a
         # tensor is created
         match3 = self.match3.copy()
@@ -771,9 +715,7 @@ class TestChainReductionRule(unittest.TestCase):
         """ContractedDiagram does not create chains at its level."""
         contracted = ContractedDiagram(self.q_x2_2, self.q_x2_3, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_contracted_with_composition1(self):
@@ -781,9 +723,7 @@ class TestChainReductionRule(unittest.TestCase):
         comp = CompositionDiagram([self.fourier, self.p_x2_2, self.p_x2_3])
         contracted = ContractedDiagram(comp, self.swap, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "P"
@@ -797,9 +737,7 @@ class TestChainReductionRule(unittest.TestCase):
         comp = CompositionDiagram([self.fourier, self.p_x2_2, self.p_x2_3])
         contracted = ContractedDiagram(self.swap, comp, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["gate_type"] == "P"
@@ -813,9 +751,7 @@ class TestChainReductionRule(unittest.TestCase):
         contracted1 = ContractedDiagram(self.tensor2, q_spider, [1, 2, 3], [4, 5, 6], [0, 1, 2, 5], [1, 3, 5, 7])
         contracted2 = ContractedDiagram(q_spider, self.tensor3, [1, 2, 3], [4, 5, 6], [0, 1, 2, 6], [1, 3, 5, 7])
         graph1 = to_graph(contracted1)
-        reg1 = GateRegister()
-        reg1.build_from_graph(graph1)
-        matches1 = self.rule.match(graph1, reg1)
+        matches1 = self.rule.match(graph1)
 
         match1 = self.match1.copy()
         match2 = self.match2.copy()
@@ -833,9 +769,7 @@ class TestChainReductionRule(unittest.TestCase):
                 assert match == self.match4
 
         graph2 = to_graph(contracted2)
-        reg2 = GateRegister()
-        reg2.build_from_graph(graph2)
-        matches2 = self.rule.match(graph2, reg2)
+        matches2 = self.rule.match(graph2)
         match3 = self.match3.copy()
         match4 = self.match4.copy()
         match1["container_id"] = self.tensor3.diagrams[1].id
@@ -1018,8 +952,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": {"num_inputs": 1, "num_outputs": 1},
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1038,8 +970,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": {"num_inputs": 1, "num_outputs": 1},
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -1062,8 +992,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": {"num_inputs": 2, "num_outputs": 2},
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1084,8 +1012,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": {"num_inputs": 1, "num_outputs": 1},
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1106,8 +1032,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1125,8 +1049,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1145,8 +1067,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1164,8 +1084,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1182,8 +1100,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -1202,8 +1118,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1221,8 +1135,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1239,8 +1151,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -1263,8 +1173,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -1283,8 +1191,6 @@ class TestChainReductionRule(unittest.TestCase):
             "gate_info": None,
         }
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, match)
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -1295,8 +1201,6 @@ class TestChainReductionRule(unittest.TestCase):
     def test_apply_single_nested(self):
         """Apply single to nested composition and tensor."""
         graph = to_graph(self.tensor1)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
         self.rule.apply_single(graph, self.match2)
         result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
@@ -1327,9 +1231,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Full rule application on simple Q chain."""
         comp = CompositionDiagram([self.q_x2_2, self.q_x2_3])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == self.phase_x2_sum
@@ -1345,9 +1247,7 @@ class TestChainReductionRule(unittest.TestCase):
             self.sq2,
         ])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 3
@@ -1363,9 +1263,7 @@ class TestChainReductionRule(unittest.TestCase):
         q_neg = QSpider(1, 1, phase_neg)
         comp = CompositionDiagram([q_pos, q_neg, self.ph_rot1])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
@@ -1377,9 +1275,7 @@ class TestChainReductionRule(unittest.TestCase):
         fourier = Fourier()
         comp = CompositionDiagram([self.fourier, fourier])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert isinstance(result, Fourier2)
 
@@ -1387,9 +1283,7 @@ class TestChainReductionRule(unittest.TestCase):
         """Apply rule on F ∘ Finv pair."""
         comp = CompositionDiagram([self.fourier, self.fourier_inv])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert result == QSpider(1, 1, ZxPoly({}))
 
@@ -1398,9 +1292,7 @@ class TestChainReductionRule(unittest.TestCase):
         fourier2 = Fourier2()
         comp = CompositionDiagram([self.fourier2, fourier2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert result == QSpider(1, 1, ZxPoly({}))
 
@@ -1411,18 +1303,14 @@ class TestChainReductionRule(unittest.TestCase):
         r3 = PhaseRotationGate(pi / 3)
         comp = CompositionDiagram([r1, r2, r3])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert result == PhaseRotationGate(3 * pi / 4)
 
     def test_apply_rule_compos_in_tensor(self):
         """Apply rule on nested composition/tensor with chains at multiple levels."""
         graph = to_graph(self.tensor3)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        self.rule.apply_rule(graph, reg)
+        self.rule.apply_rule(graph)
         result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
         assert result.diagrams[0] == self.q_x4_1
@@ -1454,14 +1342,10 @@ class TestChainReductionRule(unittest.TestCase):
         contracted1 = ContractedDiagram(self.tensor1, q_spider, [1], [0], [0], [1])
         contracted2 = ContractedDiagram(q_spider, self.tensor2, [4, 5, 6], [1, 2, 3], [1, 3, 5, 7], [0, 1, 2, 5])
         graph1 = to_graph(contracted1)
-        reg1 = GateRegister()
-        reg1.build_from_graph(graph1)
-        self.rule.apply_rule(graph1, reg1)
+        self.rule.apply_rule(graph1)
         result1 = to_diagram(graph1)
         graph2 = to_graph(contracted2)
-        reg2 = GateRegister()
-        reg2.build_from_graph(graph2)
-        self.rule.apply_rule(graph2, reg2)
+        self.rule.apply_rule(graph2)
         result2 = to_diagram(graph2)
         tensor1_red = TensorDiagram([self.q_x4_1, self.comp1_red])
         assert result1 == ContractedDiagram(tensor1_red, q_spider, [1], [0], [0], [1])
@@ -1479,7 +1363,7 @@ if __name__ == "__main__":
     # Create output directory for visualizations
 
     from cvzx.base_gates import Diagram
-    from cvzx.nx_graph import GateRegister, to_diagram, to_graph
+    from cvzx.nx_graph import to_diagram, to_graph
     from cvzx.visualize_base_gates import visualize_before_after
 
     # Create rule instance and test objects
@@ -1531,9 +1415,7 @@ if __name__ == "__main__":
     def apply_and_visualize(diagram: Diagram, test_name: str, title_prefix: str = "") -> Diagram:
         """Apply chain reduction rule using graph-based approach."""
         graph = to_graph(diagram)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        rule.apply_rule(graph, reg)
+        rule.apply_rule(graph)
         result = to_diagram(graph)
         visualize_before_after(diagram, result, f"{title_prefix}{test_name}", rule_name)
         return result

@@ -8,10 +8,11 @@ extra reductions `assume_infinite_squeezing=True` additionally unlocks
 by `CopyRule`) -- contrasting the same diagrams under both settings wherever
 that contrast is the point.
 
-Most tests below inspect the CLEANED result (`optimize(...).graph`, converted
-back with `to_diagram()`) rather than `.diagram`, since `.diagram` is
-deliberately the PRE-cleanup snapshot (see `TestOptimizeReturnType`) and can
-still carry `VoidDiagram`/leftover-identity residue that would break the
+Most tests below inspect the result via `optimize(...).graph` (converted
+back with `to_diagram()`) rather than `.diagram` out of habit -- the two are
+equivalent (see `TestOptimizeReturnType`) -- and use `assume_infinite_squeezing=False`
+inputs or otherwise avoid `CopyRule`/`TerminalAbsorptionRule` cross-container
+substitutions where a leftover `VoidDiagram` residue would break the
 `isinstance`/structural assertions these tests make.
 """
 
@@ -19,7 +20,6 @@ import math
 import unittest
 from typing import cast
 
-import networkx as nx
 from sympy import pi, simplify
 
 from cvzx.base_gates import (
@@ -34,7 +34,7 @@ from cvzx.base_gates import (
     ZxPoly,
 )
 from cvzx.gates import BeamsplitterGate, ControlledSumGate, PhaseRotationGate, SqueezingGate
-from cvzx.nx_graph import GateRegister, to_diagram
+from cvzx.nx_graph import CVZXGraph, to_diagram
 from cvzx.nx_rewrite_rules import (
     ChainReductionRule,
     CopyRule,
@@ -61,14 +61,13 @@ def _no_matches_left(graph, *, assume_infinite_squeezing):  # ruff: ignore[missi
     ]
     if assume_infinite_squeezing:
         rules.append(CopyRule())
-    registry = GateRegister()
-    registry.build_from_graph(graph)
-    return all(len(rule.match(graph, registry)) == 0 for rule in rules)
+    graph.rebuild_registry()
+    return all(len(rule.match(graph)) == 0 for rule in rules)
 
 
 def _count_node_type(graph, type_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Count graph nodes whose `type` attribute equals `type_name`."""
-    return sum(1 for _, attrs in graph.nodes(data=True) if attrs.get("type") == type_name)
+    return sum(1 for _, attrs in graph.graph.nodes(data=True) if attrs.get("type") == type_name)
 
 
 def _build_four_mode_circuit():  # ruff: ignore[missing-return-type-private-function]
@@ -132,7 +131,7 @@ class TestOptimizeReturnType(unittest.TestCase):
     def test_returns_graph_and_diagram(self):
         """optimize() always returns both the cleaned graph and a Diagram."""
         graph, diagram = optimize(self.comp)
-        assert isinstance(graph, nx.DiGraph)
+        assert isinstance(graph, CVZXGraph)
         assert isinstance(diagram, Diagram)
         # Also reachable by attribute, not just tuple unpacking.
         result = optimize(self.comp)
@@ -149,13 +148,13 @@ class TestOptimizeReturnType(unittest.TestCase):
         graph, diagram = optimize(self.comp)
         assert diagram == to_diagram(graph)
 
-    def test_diagram_is_pre_cleanup_when_void_nodes_are_present(self):
-        """`.diagram` legitimately differs from `to_diagram(.graph)` once cleanup does something.
+    def test_diagram_agrees_with_graph_when_void_nodes_are_present(self):
+        """`.diagram` always agrees with `to_diagram(.graph)`, Void residue included.
 
         A control state tensor-composed with CSUM drives CopyRule, which
-        leaves `VoidDiagram` placeholders behind mid-optimization; the
-        final cleanup pass removes them from the graph, but `.diagram` was
-        already captured before that happened, so it still carries them.
+        leaves `VoidDiagram` placeholders behind (see `_install_void_placeholder`);
+        `optimize()` no longer cleans these up, so `.diagram` is simply
+        `to_diagram(.graph)` -- both still carry the same Void residue.
         """
         control_state = PSpider(0, 1, ZxPoly({1: 2}))
         target_state = QSpider(0, 1, ZxPoly({1: 3}))
@@ -165,7 +164,7 @@ class TestOptimizeReturnType(unittest.TestCase):
         graph, diagram = optimize(comp, assume_infinite_squeezing=True)
         cleaned = to_diagram(graph)
 
-        assert diagram != cleaned
+        assert diagram == cleaned
         assert diagram.num_inputs == cleaned.num_inputs == 0
         assert diagram.num_outputs == cleaned.num_outputs == 2
 
@@ -354,7 +353,7 @@ class TestOptimizeInfiniteSqueezing(unittest.TestCase):
 
         assert result.num_inputs == 0
         assert result.num_outputs == 2
-        types_present = {attrs.get("type") for _, attrs in graph.nodes(data=True)}
+        types_present = {attrs.get("type") for _, attrs in graph.graph.nodes(data=True)}
         assert "ControlledSumGate" not in types_present
         assert _no_matches_left(graph, assume_infinite_squeezing=True)
 
@@ -376,7 +375,7 @@ class TestOptimizeInfiniteSqueezing(unittest.TestCase):
 
         assert result.num_inputs == 0
         assert result.num_outputs == 2
-        types_present = {attrs.get("type") for _, attrs in graph.nodes(data=True)}
+        types_present = {attrs.get("type") for _, attrs in graph.graph.nodes(data=True)}
         assert "BeamsplitterGate" not in types_present
         assert "ControlledSumGate" not in types_present
         assert _no_matches_left(graph, assume_infinite_squeezing=True)

@@ -1057,7 +1057,7 @@ class TensorDiagram(Diagram):
         flattened: list = []
         for sub_diagram in self.diagrams:
             # Recursively flatten the sub-diagram first
-            flattened_sub = self._flatten_tensor(sub_diagram)
+            flattened_sub = flatten_tensor(sub_diagram)
             if isinstance(flattened_sub, TensorDiagram):
                 flattened.extend(flattened_sub.diagrams)
             else:
@@ -1079,52 +1079,6 @@ class TensorDiagram(Diagram):
         self.diagrams = flattened
         self._num_inputs = sum(d.num_inputs for d in self.diagrams)
         self._num_outputs = sum(d.num_outputs for d in self.diagrams)
-
-    def _flatten_tensor(self, diagram: Diagram) -> Diagram:
-        """Recursively flatten a diagram, specifically flattening TensorDiagrams.
-
-        This only flattens TensorDiagrams, not CompositionDiagrams.
-
-        Parameters
-        ----------
-        diagram : Diagram
-            The diagram to modify.
-
-        Returns
-        -------
-        Diagram
-        """
-        if isinstance(diagram, TensorDiagram):
-            flattened: list[Diagram] = []
-            for sub in diagram.diagrams:
-                flattened_sub = self._flatten_tensor(sub)
-                if isinstance(flattened_sub, TensorDiagram):
-                    flattened.extend(flattened_sub.diagrams)
-                else:
-                    flattened.append(flattened_sub)
-            if len(flattened) == 1:
-                return flattened[0]
-            return TensorDiagram(flattened)
-
-        if isinstance(diagram, CompositionDiagram):
-            # Don't flatten compositions, but recursively flatten tensors inside
-            flattened_diagrams = [self._flatten_tensor(sub) for sub in diagram.diagrams]
-            return CompositionDiagram(flattened_diagrams, diagram.connectivity)
-
-        if isinstance(diagram, ContractedDiagram):
-            first = self._flatten_tensor(diagram.first)
-            second = self._flatten_tensor(diagram.second)
-            if first is not diagram.first or second is not diagram.second:
-                return ContractedDiagram(
-                    first=first,
-                    second=second,
-                    I1=diagram.I1,
-                    I2=diagram.I2,
-                    J1=diagram.J1,
-                    J2=diagram.J2,
-                )
-
-        return diagram
 
     def __repr__(self) -> str:
         """Return string representation of the tensor diagram.
@@ -1741,6 +1695,53 @@ def flatten_composition(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-st
         first = flatten_composition(diagram.first)
         second = flatten_composition(diagram.second)
         # If either changed, create a new ContractedDiagram
+        if first is not diagram.first or second is not diagram.second:
+            return ContractedDiagram(
+                first=first,
+                second=second,
+                I1=diagram.I1,
+                I2=diagram.I2,
+                J1=diagram.J1,
+                J2=diagram.J2,
+            )
+
+    return diagram
+
+
+def flatten_tensor(diagram: Diagram) -> Diagram:
+    """Recursively flatten a diagram, specifically flattening TensorDiagrams.
+
+    This only flattens TensorDiagrams, not CompositionDiagrams.
+
+    Parameters
+    ----------
+    diagram : Diagram
+        The diagram to modify.
+
+    Returns
+    -------
+    Diagram
+    """
+    if isinstance(diagram, TensorDiagram):
+        flattened: list[Diagram] = []
+        for sub in diagram.diagrams:
+            flattened_sub = flatten_tensor(sub)
+            if isinstance(flattened_sub, TensorDiagram):
+                flattened.extend(flattened_sub.diagrams)
+            else:
+                flattened.append(flattened_sub)
+        if len(flattened) == 1:
+            return flattened[0]
+        return TensorDiagram(flattened)
+
+    if isinstance(diagram, CompositionDiagram):
+        # Don't flatten compositions, but recursively flatten tensors inside
+        flattened_diagrams = [flatten_tensor(sub) for sub in diagram.diagrams]
+        return CompositionDiagram(flattened_diagrams, diagram.connectivity)
+
+    if isinstance(diagram, ContractedDiagram):
+        first = flatten_tensor(diagram.first)
+        second = flatten_tensor(diagram.second)
         if first is not diagram.first or second is not diagram.second:
             return ContractedDiagram(
                 first=first,

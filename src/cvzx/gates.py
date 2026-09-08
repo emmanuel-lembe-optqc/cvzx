@@ -1723,7 +1723,7 @@ class BeamsplitterGate(CompactDiagram):
                 SqueezingGate(tau=inv_sqrt2, parametric=self.parametric),
             ])
 
-            return CompositionDiagram([expand_all(csum12), tensor, expand_all(csum21)])
+            return CompositionDiagram([csum12.expand(), tensor, csum21.expand()])
 
         # General beamsplitter - simplified representation
         # Full decomposition from [3] Appendix A.1.f
@@ -1746,7 +1746,7 @@ class BeamsplitterGate(CompactDiagram):
         csum12 = ControlledSumGate(gain=1, control=1, target=2)
         csum21 = ControlledSumGate(gain=1, control=2, target=1)
 
-        return CompositionDiagram([tensor1, expand_all(csum12), tensor2, expand_all(csum21), tensor1])
+        return CompositionDiagram([tensor1, csum12.expand(), tensor2, csum21.expand(), tensor1])
 
     def substitute_parameters(self, mapping: dict[Symbol | str, Any]) -> CompactDiagram:
         """Substitute symbolic parameters in the beamsplitter gate.

@@ -293,8 +293,200 @@ class GateRegister:
         return attrs.get("num_inputs") == 1 and attrs.get("num_outputs") == 0
 
 
-def to_graph(diagram: Diagram) -> nx.DiGraph:
-    """Convert a CV ZX diagram to a directed graph representation.
+class CVZXGraph:
+    """A CV ZX diagram represented as a directed graph, paired with its registry.
+
+    ``CVZXGraph`` bundles the ``networkx.DiGraph`` produced by :func:`to_graph`
+    together with the :class:`GateRegister` that indexes it, so that code
+    working on a diagram's graph representation does not have to thread the
+    graph and registry through separately. It is a thin, mutable wrapper:
+    it does not change how the graph or registry are built, read, or kept
+    in sync, it only gives them a single home.
+
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        The graph representation of a CV ZX diagram, as produced by
+        :func:`to_graph`.
+    registry : GateRegister | None, optional
+        A registry already built from ``graph``. If ``None`` (the default),
+        a new registry is built from ``graph`` via
+        :meth:`GateRegister.build_from_graph`.
+
+    Attributes
+    ----------
+    graph : nx.DiGraph
+        The underlying graph.
+    registry : GateRegister
+        The registry indexing ``graph``.
+    """
+
+    def __init__(self, graph: nx.DiGraph, registry: "GateRegister | None" = None) -> None:
+        self.graph = graph
+        if registry is None:
+            registry = GateRegister()
+            registry.build_from_graph(graph)
+        self.registry = registry
+
+    @classmethod
+    def from_diagram(cls, diagram: Diagram) -> "CVZXGraph":
+        """Build a ``CVZXGraph`` from a CV ZX diagram.
+
+        Parameters
+        ----------
+        diagram : Diagram
+            The diagram to convert.
+
+        Returns
+        -------
+        CVZXGraph
+            The graph representation of ``diagram``, with a freshly built
+            registry.
+        """
+        return to_graph(diagram)
+
+    def to_diagram(self) -> Diagram:
+        """Reconstruct the CV ZX diagram from the current graph.
+
+        See :func:`to_diagram`; this raises ``ValueError`` under the same
+        condition, since it delegates to that function.
+
+        Returns
+        -------
+        Diagram
+            The reconstructed diagram.
+        """
+        return to_diagram(self)
+
+    def rebuild_registry(self) -> None:
+        """Rebuild ``self.registry`` from the current state of ``self.graph``.
+
+        This performs a full O(N) rescan of the graph, discarding whatever
+        the registry previously held. Call this after mutating ``self.graph``
+        directly (for example, after applying a rewrite rule) if the
+        registry has not already been kept in sync incrementally.
+        """
+        self.registry.build_from_graph(self.graph)
+
+    def copy(self) -> "CVZXGraph":
+        """Return an independent copy of this ``CVZXGraph``.
+
+        The graph is copied via ``networkx.DiGraph.copy()`` (a new graph
+        with its own node/edge attribute dicts) and the registry via
+        :meth:`GateRegister.copy`, so mutating the copy's graph or registry
+        does not affect this one.
+
+        Returns
+        -------
+        CVZXGraph
+            An independent copy of this graph and its registry.
+        """
+        return CVZXGraph(self.graph.copy(), self.registry.copy())
+
+    def _root_attrs(self) -> dict:
+        """Return the attribute dict of the graph's root node.
+
+        Returns
+        -------
+        dict
+            The root node's attributes.
+
+        Raises
+        ------
+        ValueError
+            If the graph has no root node.
+        """
+        root = get_root_node(self)
+        if root is None:
+            msg = "No root node found in the graph."
+            raise ValueError(msg)
+        return cast("dict", self.graph.nodes[root])
+
+    @property
+    def root_id(self) -> int | None:
+        """The node ID of the root container, or ``None`` if there is none.
+
+        Returns
+        -------
+        int | None
+        """
+        return get_root_node(self)
+
+    @property
+    def num_inputs(self) -> int:
+        """The number of external inputs of the diagram.
+
+        See :meth:`_root_attrs`; this raises ``ValueError`` under the same
+        condition, since it delegates to that method.
+
+        Returns
+        -------
+        int
+        """
+        return cast("int", self._root_attrs()["num_inputs"])
+
+    @property
+    def num_outputs(self) -> int:
+        """The number of external outputs of the diagram.
+
+        See :meth:`_root_attrs`; this raises ``ValueError`` under the same
+        condition, since it delegates to that method.
+
+        Returns
+        -------
+        int
+        """
+        return cast("int", self._root_attrs()["num_outputs"])
+
+    def __len__(self) -> int:
+        """Return the number of nodes in the graph.
+
+        Returns
+        -------
+        int
+        """
+        return cast("int", self.graph.number_of_nodes())
+
+    def __repr__(self) -> str:
+        """Return a debug representation of this ``CVZXGraph``.
+
+        Returns
+        -------
+        str
+        """
+        return f"CVZXGraph(nodes={self.graph.number_of_nodes()}, edges={self.graph.number_of_edges()})"
+
+    def __eq__(self, other: object) -> bool:
+        """Check equality by comparing the reconstructed diagrams.
+
+        Two ``CVZXGraph`` instances are equal if the diagrams they
+        reconstruct via :meth:`to_diagram` are equal. A graph that fails to
+        reconstruct (for example, because it has no root node) is never
+        equal to anything.
+
+        Parameters
+        ----------
+        other : object
+            The object to compare against.
+
+        Returns
+        -------
+        bool
+        """
+        if not isinstance(other, CVZXGraph):
+            return NotImplemented
+        try:
+            self_diagram = self.to_diagram()
+            other_diagram = other.to_diagram()
+        except ValueError:
+            return False
+        return bool(self_diagram == other_diagram)
+
+    __hash__ = None  # type: ignore[assignment]
+
+
+def to_graph(diagram: Diagram) -> CVZXGraph:
+    """Convert a CV ZX diagram to a graph representation.
 
     The graph preserves the full hierarchy of the original diagram:
         - Container nodes (CompositionDiagram, TensorDiagram, ContractedDiagram)
@@ -311,8 +503,9 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
 
     Returns
     -------
-    nx.DiGraph
-        Directed graph representation of the diagram with all nodes and edges.
+    CVZXGraph
+        Graph representation of the diagram, with all nodes and edges, and
+        a freshly built registry.
     """
     graph = nx.DiGraph()
     root_id = _convert_diagram_to_graph(diagram, graph, container_id=None, is_root=True)
@@ -326,19 +519,19 @@ def to_graph(diagram: Diagram) -> nx.DiGraph:
         if "diagram" in attrs:
             del attrs["diagram"]
 
-    return graph
+    return CVZXGraph(graph)
 
 
-def to_diagram(G: nx.DiGraph) -> Diagram:  # ruff: ignore[invalid-argument-name]
-    """Reconstruct a CV ZX diagram from a directed graph representation.
+def to_diagram(cvzx_graph: CVZXGraph) -> Diagram:
+    """Reconstruct a CV ZX diagram from a graph representation.
 
     This function reconstructs the original diagram from the graph, preserving
     the full hierarchy, container nodes, and all connections.
 
     Parameters
     ----------
-    G : nx.DiGraph
-        The directed graph representation of the diagram.
+    cvzx_graph : CVZXGraph
+        The graph representation of the diagram.
 
     Returns
     -------
@@ -350,14 +543,16 @@ def to_diagram(G: nx.DiGraph) -> Diagram:  # ruff: ignore[invalid-argument-name]
     ValueError
         If the graph is malformed or missing required attributes.
     """
+    graph = cvzx_graph.graph
+
     # Find the root node
-    root = get_root_node(G)
+    root = get_root_node(cvzx_graph)
     if root is None:
         msg = "No root node found in the graph."
         raise ValueError(msg)
 
     # Reconstruct the diagram from the root
-    return _reconstruct_from_node(G, root)
+    return _reconstruct_from_node(graph, root)
 
 
 # =========================================================================
@@ -477,7 +672,7 @@ def find_node_by_external_input(
     return find_node_by_external_input(sub_diagram, internal_port, G)
 
 
-def get_proper_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-argument-name]
+def get_proper_nodes(cvzx_graph: CVZXGraph) -> list[int]:
     """Get all proper nodes (leaf operations) from the graph.
 
     Proper nodes represent actual operations (spiders, gates, etc.)
@@ -485,7 +680,7 @@ def get_proper_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-argume
 
     Parameters
     ----------
-    G : nx.DiGraph
+    cvzx_graph : CVZXGraph
         The graph to search for proper nodes.
 
     Returns
@@ -493,10 +688,11 @@ def get_proper_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-argume
     list[int]
         List of node IDs for all proper nodes in the graph.
     """
-    return [n for n, attrs in G.nodes(data=True) if attrs.get("kind") == "proper"]
+    graph = cvzx_graph.graph
+    return [n for n, attrs in graph.nodes(data=True) if attrs.get("kind") == "proper"]
 
 
-def get_container_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-argument-name]
+def get_container_nodes(cvzx_graph: CVZXGraph) -> list[int]:
     """Get all container nodes from the graph.
 
     Container nodes represent structural elements (CompositionDiagram,
@@ -504,7 +700,7 @@ def get_container_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-arg
 
     Parameters
     ----------
-    G : nx.DiGraph
+    cvzx_graph : CVZXGraph
         The graph to search for container nodes.
 
     Returns
@@ -512,17 +708,18 @@ def get_container_nodes(G: nx.DiGraph) -> list[int]:  # ruff: ignore[invalid-arg
     list[int]
         List of node IDs for all container nodes in the graph.
     """
-    return [n for n, attrs in G.nodes(data=True) if attrs.get("kind") == "container"]
+    graph = cvzx_graph.graph
+    return [n for n, attrs in graph.nodes(data=True) if attrs.get("kind") == "container"]
 
 
-def get_root_node(G: nx.DiGraph) -> int | None:  # ruff: ignore[invalid-argument-name]
+def get_root_node(cvzx_graph: CVZXGraph) -> int | None:
     """Get the root node (the outermost diagram) from the graph.
 
     The root node is the container node with is_root=True.
 
     Parameters
     ----------
-    G : nx.DiGraph
+    cvzx_graph : CVZXGraph
         The graph to search for the root node.
 
     Returns
@@ -530,18 +727,19 @@ def get_root_node(G: nx.DiGraph) -> int | None:  # ruff: ignore[invalid-argument
     int | None
         The node ID of the root container, or None if no root is found.
     """
-    for node, attrs in G.nodes(data=True):
+    graph = cvzx_graph.graph
+    for node, attrs in graph.nodes(data=True):
         if attrs.get("is_root", False):
             return cast("int", node)
     return None
 
 
-def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:  # ruff: ignore[invalid-argument-name]
+def get_immediate_container(cvzx_graph: CVZXGraph, node_id: int) -> int | None:
     """Get the immediate container of a node.
 
     Parameters
     ----------
-    G : nx.DiGraph
+    cvzx_graph : CVZXGraph
         The graph containing the node.
     node_id : int
         The node ID to find the container for.
@@ -551,16 +749,17 @@ def get_immediate_container(G: nx.DiGraph, node_id: int) -> int | None:  # ruff:
     int | None
         The node ID of the immediate container, or None if the node is the root.
     """
-    attrs = G.nodes[node_id]
+    graph = cvzx_graph.graph
+    attrs = graph.nodes[node_id]
     return cast("int | None", attrs.get("container_id"))
 
 
-def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:  # ruff: ignore[invalid-argument-name]
+def get_sub_diagrams(cvzx_graph: CVZXGraph, container_node: int) -> list[int]:
     """Get the sub-diagram node IDs of a container node.
 
     Parameters
     ----------
-    G : nx.DiGraph
+    cvzx_graph : CVZXGraph
         The graph containing the container node.
     container_node : int
         The node ID of the container node.
@@ -571,18 +770,19 @@ def get_sub_diagrams(G: nx.DiGraph, container_node: int) -> list[int]:  # ruff: 
         List of sub-diagram node IDs, or an empty list if the node is not
         a container or has no sub-diagrams.
     """
-    attrs = G.nodes[container_node]
+    graph = cvzx_graph.graph
+    attrs = graph.nodes[container_node]
     if attrs.get("kind") != "container":
         return []
     return cast("list[int]", attrs.get("sub_diagram_ids", []))
 
 
-def get_connectivity(G: nx.DiGraph, container_node: int) -> dict[int, dict[int, int]] | None:  # ruff: ignore[invalid-argument-name]
+def get_connectivity(cvzx_graph: CVZXGraph, container_node: int) -> dict[int, dict[int, int]] | None:
     """Get the connectivity dictionary of a CompositionDiagram container node.
 
     Parameters
     ----------
-    G : nx.DiGraph
+    cvzx_graph : CVZXGraph
         The graph containing the container node.
     container_node : int
         The node ID of the composition container node.
@@ -593,18 +793,19 @@ def get_connectivity(G: nx.DiGraph, container_node: int) -> dict[int, dict[int, 
         The connectivity dictionary if the node is a CompositionDiagram,
         otherwise None.
     """
-    attrs = G.nodes[container_node]
+    graph = cvzx_graph.graph
+    attrs = graph.nodes[container_node]
     if attrs.get("container_type") != "composition":
         return None
     return cast("dict[int, dict[int, int]] | None", attrs.get("connectivity"))
 
 
-def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | None:  # ruff: ignore[invalid-argument-name]
+def get_contracted_connections(cvzx_graph: CVZXGraph, container_node: int) -> dict | None:
     """Get the contracted connections of a ContractedDiagram container node.
 
     Parameters
     ----------
-    G : nx.DiGraph
+    cvzx_graph : CVZXGraph
         The graph containing the container node.
     container_node : int
         The node ID of the contracted container node.
@@ -615,7 +816,8 @@ def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | Non
         A dictionary with keys 'I1', 'I2', 'J1', 'J2' if the node is a
         ContractedDiagram, otherwise None.
     """
-    attrs = G.nodes[container_node]
+    graph = cvzx_graph.graph
+    attrs = graph.nodes[container_node]
     if attrs.get("container_type") != "contracted":
         return None
     return {
@@ -626,14 +828,14 @@ def get_contracted_connections(G: nx.DiGraph, container_node: int) -> dict | Non
     }
 
 
-def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:  # ruff: ignore[invalid-argument-name]
+def get_nodes_by_container(cvzx_graph: CVZXGraph, container_node: int) -> list[int]:
     """Get all nodes that belong to a specific container.
 
     This includes both proper nodes and nested container nodes.
 
     Parameters
     ----------
-    G : nx.DiGraph
+    cvzx_graph : CVZXGraph
         The graph containing the nodes.
     container_node : int
         The node ID of the container.
@@ -643,7 +845,8 @@ def get_nodes_by_container(G: nx.DiGraph, container_node: int) -> list[int]:  # 
     list[int]
         List of node IDs belonging to the container.
     """
-    return [n for n, attrs in G.nodes(data=True) if attrs.get("container_id") == container_node]
+    graph = cvzx_graph.graph
+    return [n for n, attrs in graph.nodes(data=True) if attrs.get("container_id") == container_node]
 
 
 def _convert_diagram_to_graph(

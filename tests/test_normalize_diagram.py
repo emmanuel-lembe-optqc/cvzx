@@ -82,7 +82,7 @@ def _leaf_signatures(diagram):  # ruff: ignore[missing-type-function-argument, m
     """
     graph = to_graph(diagram)
     sigs = []
-    for _, attrs in graph.nodes(data=True):
+    for _, attrs in graph.graph.nodes(data=True):
         if attrs.get("kind") not in {"proper", "compact"}:
             continue
         if _is_identity_attrs(attrs):
@@ -611,4 +611,3 @@ def _visualize_normalize_diagram_examples() -> None:
 
 if __name__ == "__main__":
     _visualize_normalize_diagram_examples()
-    unittest.main()

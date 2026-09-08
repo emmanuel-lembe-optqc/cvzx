@@ -27,7 +27,7 @@ from cvzx.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
-from cvzx.nx_graph import GateRegister, to_diagram, to_graph
+from cvzx.nx_graph import to_diagram, to_graph
 from cvzx.nx_rewrite_rules import FusionRule, apply_rule_to_diagram
 
 
@@ -90,9 +90,7 @@ class TestFusionRule(unittest.TestCase):
         """Match two Q-spiders connected in a ContractedDiagram."""
         contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["contracted_id"] == contracted.id
         assert matches[0]["first_id"] == self.q1.id
@@ -103,9 +101,7 @@ class TestFusionRule(unittest.TestCase):
         """Match two P-spiders connected in a ContractedDiagram."""
         contracted = ContractedDiagram(self.p1, self.p2, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["contracted_id"] == contracted.id
         assert matches[0]["first_id"] == self.p1.id
@@ -116,9 +112,7 @@ class TestFusionRule(unittest.TestCase):
         """Match spiders connected in both directions."""
         contracted = ContractedDiagram(self.q_2x2, self.q_2x2, [0], [0], [0], [0])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["contracted_id"] == contracted.id
 
@@ -126,18 +120,14 @@ class TestFusionRule(unittest.TestCase):
         """No match when spiders are different types."""
         contracted = ContractedDiagram(self.q1, self.p2, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_non_spider_diagrams(self):
         """No match when diagrams are not spiders."""
         contracted = ContractedDiagram(self.fourier, self.swap, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 0
 
     def test_match_nested_in_composition(self):
@@ -145,9 +135,7 @@ class TestFusionRule(unittest.TestCase):
         contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         comp = CompositionDiagram([self.fourier, contracted, self.sq_gate])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["contracted_id"] == contracted.id
 
@@ -156,9 +144,7 @@ class TestFusionRule(unittest.TestCase):
         contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         tensor = TensorDiagram([self.fourier, self.ph_rot, contracted])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["contracted_id"] == contracted.id
 
@@ -167,9 +153,7 @@ class TestFusionRule(unittest.TestCase):
         inner_contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         outer_contracted = ContractedDiagram(inner_contracted, self.swap, [0], [0], [], [])
         graph = to_graph(outer_contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["contracted_id"] == inner_contracted.id
 
@@ -179,9 +163,7 @@ class TestFusionRule(unittest.TestCase):
         contracted2 = ContractedDiagram(self.p1, self.p2, [0], [0], [], [])
         comp = CompositionDiagram([contracted1, contracted2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 2
         contracted_ids = [m["contracted_id"] for m in matches]
         assert contracted1.id in contracted_ids
@@ -191,9 +173,7 @@ class TestFusionRule(unittest.TestCase):
         """Match when connection from second to first (J1/J2)."""
         contracted = ContractedDiagram(self.q1, self.q2, [], [], [0], [0])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["contracted_id"] == contracted.id
 
@@ -204,9 +184,7 @@ class TestFusionRule(unittest.TestCase):
         comp = CompositionDiagram([tensor, self.swap])
         tensor2 = TensorDiagram([comp, self.ph_rot])
         graph = to_graph(tensor2)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         assert len(matches) == 1
         assert matches[0]["contracted_id"] == contracted.id
 
@@ -218,9 +196,7 @@ class TestFusionRule(unittest.TestCase):
         """Fuse two Q-spiders connected in a ContractedDiagram."""
         contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -232,9 +208,7 @@ class TestFusionRule(unittest.TestCase):
         """Fuse two P-spiders connected in a ContractedDiagram."""
         contracted = ContractedDiagram(self.p1, self.p2, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, PSpider)
@@ -248,9 +222,7 @@ class TestFusionRule(unittest.TestCase):
         q2 = QSpider(1, 2, self.phase_poly2)
         contracted = ContractedDiagram(q1, q2, [0], [0], [], [])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -264,9 +236,7 @@ class TestFusionRule(unittest.TestCase):
         q2 = QSpider(2, 2, self.phase_poly2)
         contracted = ContractedDiagram(q1, q2, [0], [0], [0], [0])
         graph = to_graph(contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
@@ -279,9 +249,7 @@ class TestFusionRule(unittest.TestCase):
         contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         comp = CompositionDiagram([self.fourier, contracted, self.sq_gate])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
@@ -296,9 +264,7 @@ class TestFusionRule(unittest.TestCase):
         contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         tensor = TensorDiagram([self.fourier, self.ph_rot, contracted])
         graph = to_graph(tensor)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
@@ -313,9 +279,7 @@ class TestFusionRule(unittest.TestCase):
         inner_contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         outer_contracted = ContractedDiagram(inner_contracted, self.swap, [0], [0], [], [])
         graph = to_graph(outer_contracted)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)
@@ -329,9 +293,7 @@ class TestFusionRule(unittest.TestCase):
         contracted2 = ContractedDiagram(self.p1, self.p2, [0], [0], [], [])
         comp = CompositionDiagram([contracted1, contracted2])
         graph = to_graph(comp)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         # Apply second fusion first (index 1)
         self.rule.apply_single(graph, matches[1])
         result = to_diagram(graph)
@@ -348,9 +310,7 @@ class TestFusionRule(unittest.TestCase):
         comp = CompositionDiagram([tensor, self.swap])
         tensor2 = TensorDiagram([comp, self.ph_rot])
         graph = to_graph(tensor2)
-        reg = GateRegister()
-        reg.build_from_graph(graph)
-        matches = self.rule.match(graph, reg)
+        matches = self.rule.match(graph)
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
