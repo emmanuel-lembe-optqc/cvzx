@@ -23,6 +23,7 @@ from cvzx.base_gates import (
     QSpider,
     Swap,
     TensorDiagram,
+    VoidDiagram,
     ZxPoly,
 )
 from cvzx.gates import (
@@ -185,6 +186,8 @@ class TestChainReductionRule(unittest.TestCase):
             "values": [2.0, 3.0],
             "node_ids": [self.sq1.id, self.sq2.id],
             "gate_info": None,
+            "identity_chain": [],
+            "same_parent": True,
         }
         self.match2 = {
             "container_id": self.tensor1.diagrams[1].id,
@@ -192,6 +195,8 @@ class TestChainReductionRule(unittest.TestCase):
             "values": [self.phase_x2, self.phase_x2_3],
             "node_ids": [self.q_x2_2.id, self.q_x2_3.id],
             "gate_info": {"num_inputs": 1, "num_outputs": 1},
+            "identity_chain": [],
+            "same_parent": True,
         }
         self.match3 = {
             "container_id": _sub(_sub(_sub(self.tensor2, 3), 1), 1).id,
@@ -199,6 +204,8 @@ class TestChainReductionRule(unittest.TestCase):
             "values": [self.ph_rot1.theta, self.ph_rot2.theta],
             "node_ids": [self.ph_rot1.id, self.ph_rot2.id],
             "gate_info": None,
+            "identity_chain": [],
+            "same_parent": True,
         }
         self.match4 = {
             "container_id": _sub(_sub(_sub(self.tensor2, 3), 1), 1).id,
@@ -206,6 +213,8 @@ class TestChainReductionRule(unittest.TestCase):
             "values": ["F", "Finv"],
             "node_ids": [self.fourier.id, self.fourier_inv.id],
             "gate_info": None,
+            "identity_chain": [],
+            "same_parent": True,
         }
         self.match5 = {
             "container_id": _sub(_sub(_sub(self.tensor3, 5), 2), 0).id,
@@ -213,6 +222,8 @@ class TestChainReductionRule(unittest.TestCase):
             "values": [self.bs3.theta, self.bs2.theta],
             "node_ids": [self.bs3.id, self.bs2.id],
             "gate_info": None,
+            "identity_chain": [],
+            "same_parent": True,
         }
         self.match6 = {
             "container_id": _sub(_sub(_sub(self.tensor3, 5), 2), 1).id,
@@ -220,6 +231,8 @@ class TestChainReductionRule(unittest.TestCase):
             "values": [self.disp3.alpha, self.disp1.alpha, self.disp2.alpha],
             "node_ids": [self.disp3.id, self.disp1.id, self.disp2.id],
             "gate_info": None,
+            "identity_chain": [],
+            "same_parent": True,
         }
         # Others
         self.id_q_dict = {
@@ -1358,6 +1371,262 @@ class TestChainReductionRule(unittest.TestCase):
             [0, 1, 2, 5],
         )
 
+    # -------------------------------------------------------------------------
+    # 5. Chain-chasing through identity spiders AND `Swap`, and genuine
+    #    cross-container matching: `_find_full_neighbor` (built on the
+    #    shared `_chase_identity_chain`, see `RewriteRule`'s docstring)
+    #    lets a chain form across a TensorDiagram/CompositionDiagram
+    #    boundary, and see past any run of identity spiders or a
+    #    wire-crossing `Swap` sitting directly in the path.
+    # -------------------------------------------------------------------------
+
+    def test_match_through_identity_same_container(self):
+        """Two chainable rotations separated by one identity still chain.
+
+        List-adjacency alone would never find this (the identity sits
+        between them), so `same_parent` is forced False and the pair is
+        resolved via the general cross-container path instead -- see
+        `ChainReductionRule.match`'s docstring on why a crossed identity
+        always disables the flat-splice fast path.
+        """
+        r1 = PhaseRotationGate(pi / 6)
+        r2 = PhaseRotationGate(pi / 4)
+        id1 = QSpider(1, 1, ZxPoly({}))
+        comp = CompositionDiagram([r1, id1, r2])
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["gate_type"] == "R"
+        assert matches[0]["node_ids"] == [r1.id, r2.id]
+        assert matches[0]["identity_chain"] == [id1.id]
+        assert matches[0]["same_parent"] is False
+
+    def test_apply_rule_through_identity_same_container(self):
+        """Applying the rule folds both rotations.
+
+        The identity between them becomes a same-shape `VoidDiagram`
+        rather than blocking the match.
+        """
+        r1 = PhaseRotationGate(pi / 6)
+        r2 = PhaseRotationGate(pi / 4)
+        id1 = QSpider(1, 1, ZxPoly({}))
+        comp = CompositionDiagram([r1, id1, r2])
+        graph = to_graph(comp)
+        self.rule.apply_rule(graph)
+        result = to_diagram(graph)
+        assert isinstance(result, CompositionDiagram)
+        rotations = [d for d in result.diagrams if isinstance(d, PhaseRotationGate)]
+        assert len(rotations) == 1
+        assert isclose(cast("float", rotations[0].theta), pi / 6 + pi / 4)
+        graph2 = to_graph(result)
+        assert len(self.rule.match(graph2)) == 0
+
+    def test_match_cross_container_chain(self):
+        """Two chainable rotations in DIFFERENT immediate containers.
+
+        One is the tail of an inner composition nested in a tensor
+        lane, the other sits alone in a second, sibling tensor lane --
+        yet they still chain, found purely via the graph's own
+        composition edges.
+        """
+        r1 = PhaseRotationGate(pi / 6)
+        r2 = PhaseRotationGate(pi / 4)
+        filler1 = Fourier()
+        filler3 = QSpider(1, 1, ZxPoly({2: 5.0}))  # different type: won't chain with r2's sibling
+
+        inner_comp = CompositionDiagram([filler1, r1])
+        lane1 = TensorDiagram([inner_comp, Fourier()])
+        lane2 = TensorDiagram([r2, filler3])
+        comp = CompositionDiagram([lane1, lane2])
+
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["gate_type"] == "R"
+        assert matches[0]["node_ids"] == [r1.id, r2.id]
+        assert matches[0]["identity_chain"] == []
+        assert matches[0]["same_parent"] is False
+        assert matches[0]["container_id"] == ("cross", r1.id, r2.id)
+
+    def test_apply_rule_cross_container_chain(self):
+        """Applying the cross-container chain folds it in place.
+
+        `r1`'s own slot (inside its original inner composition) keeps
+        the reduced gate, `r2`'s original slot becomes a `VoidDiagram`,
+        and nothing else in the diagram is disturbed.
+        """
+        r1 = PhaseRotationGate(pi / 6)
+        r2 = PhaseRotationGate(pi / 4)
+        filler1 = Fourier()
+        filler3 = QSpider(1, 1, ZxPoly({2: 5.0}))
+
+        inner_comp = CompositionDiagram([filler1, r1])
+        lane1 = TensorDiagram([inner_comp, Fourier()])
+        lane2 = TensorDiagram([r2, filler3])
+        comp = CompositionDiagram([lane1, lane2])
+
+        graph = to_graph(comp)
+        self.rule.apply_rule(graph)
+        result = to_diagram(graph)
+        graph2 = to_graph(result)
+        assert len(self.rule.match(graph2)) == 0
+
+        rotations = [d for d in result.diagrams[0].diagrams[0].diagrams if isinstance(d, PhaseRotationGate)]  # type: ignore[attr-defined]
+        assert len(rotations) == 1
+        assert isclose(cast("float", rotations[0].theta), pi / 6 + pi / 4)
+        assert result.diagrams[1].diagrams[1] == filler3  # type: ignore[attr-defined]
+
+    def test_match_cross_container_chain_with_swap_and_identities(self):  # ruff: ignore[too-many-locals]
+        """The same cross-container chain, with identities and a Swap.
+
+        The path between `r1` and `r2` now also crosses one identity
+        spider directly after `r1` (still inside `r1`'s own inner
+        composition), a `Swap` (with an unrelated independent wire on
+        its other two ports, proving the chase is genuinely
+        port-aware), and one more identity spider after the `Swap`.
+        """
+        r1 = PhaseRotationGate(pi / 6)
+        r2 = PhaseRotationGate(pi / 4)
+        filler1 = Fourier()
+        id_after_r1 = QSpider(1, 1, ZxPoly({}))
+        filler_state = Fourier()
+        id_a = PSpider(1, 1, ZxPoly({}))
+        id_b = QSpider(1, 1, ZxPoly({}))
+        filler_final = Fourier()
+
+        inner_comp = CompositionDiagram([filler1, r1, id_after_r1])
+        lane1 = TensorDiagram([inner_comp, filler_state])
+        swap = Swap()
+        mid = TensorDiagram([id_a, id_b])
+        lane2 = TensorDiagram([filler_final, r2])
+        comp = CompositionDiagram([lane1, swap, mid, lane2])
+
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["gate_type"] == "R"
+        assert matches[0]["node_ids"] == [r1.id, r2.id]
+        assert set(matches[0]["identity_chain"]) == {id_after_r1.id, swap.id, id_b.id}
+        # The unrelated lane's own identity is never crossed by this chase.
+        assert id_a.id not in matches[0]["identity_chain"]
+        assert matches[0]["same_parent"] is False
+
+    def test_apply_rule_cross_container_chain_with_swap_and_identities(self):  # ruff: ignore[too-many-locals]
+        """A single `apply_rule` call folds both chains crossing the `Swap`.
+
+        The R-chain (`r1`/`r2`) and the F-chain (`filler_state`/
+        `filler_final`, with `id_a` sitting between them) both need to
+        chase through the same `swap` node, and `match()`'s `used_nodes`
+        bookkeeping only lets the first one found -- by ascending node
+        id, so the R-chain -- claim it in a single `match()` scan. Once
+        `_is_chase_passthrough` also treats a same-arity `VoidDiagram` as
+        transparent, the now-voided `swap` stops being a permanent wall,
+        so `apply_rule`'s own internal round-to-round loop (see its
+        docstring) finds and folds the F-chain on its next round, all
+        within this one `apply_rule` call. That proves `id_a` was never
+        truly "unrelated": it is the identity in the middle of that
+        second chain, and ends up voided along with everything else the
+        chase claims.
+        """
+        r1 = PhaseRotationGate(pi / 6)
+        r2 = PhaseRotationGate(pi / 4)
+        filler1 = Fourier()
+        id_after_r1 = QSpider(1, 1, ZxPoly({}))
+        filler_state = Fourier()
+        id_a = PSpider(1, 1, ZxPoly({}))
+        id_b = QSpider(1, 1, ZxPoly({}))
+        filler_final = Fourier()
+
+        inner_comp = CompositionDiagram([filler1, r1, id_after_r1])
+        lane1 = TensorDiagram([inner_comp, filler_state])
+        swap = Swap()
+        mid = TensorDiagram([id_a, id_b])
+        lane2 = TensorDiagram([filler_final, r2])
+        comp = CompositionDiagram([lane1, swap, mid, lane2])
+
+        graph = to_graph(comp)
+        self.rule.apply_rule(graph)
+        result = to_diagram(graph)
+        assert len(self.rule.match(to_graph(result))) == 0
+
+        # The R-chain fuses into a single rotation, `id_after_r1` voided.
+        lane1_result = result.diagrams[0]  # type: ignore[attr-defined]
+        inner_result = lane1_result.diagrams[0]
+        rotations = [d for d in inner_result.diagrams if isinstance(d, PhaseRotationGate)]
+        assert len(rotations) == 1
+        assert isclose(cast("float", rotations[0].theta), pi / 6 + pi / 4)
+
+        # The F-chain fuses into a single `Fourier2`, `id_a` included.
+        assert isinstance(lane1_result.diagrams[1], Fourier2)
+
+        # The shared `Swap`, `id_a`/`id_b`, and `r2`'s original slot are
+        # all voided -- nothing "unrelated" survives untouched.
+        assert isinstance(result.diagrams[1], VoidDiagram)  # type: ignore[attr-defined]
+        assert result.diagrams[1].num_inputs == 2  # type: ignore[attr-defined]
+        assert result.diagrams[1].num_outputs == 2  # type: ignore[attr-defined]
+        mid_result = result.diagrams[2]  # type: ignore[attr-defined]
+        assert all(isinstance(d, VoidDiagram) for d in mid_result.diagrams)
+        lane2_result = result.diagrams[3]  # type: ignore[attr-defined]
+        assert all(isinstance(d, VoidDiagram) for d in lane2_result.diagrams)
+
+    def test_apply_rule_chain_through_swap_nested_in_tensor_lane(self):  # ruff: ignore[too-many-locals]
+        """The chase compensates correctly when the `Swap` sits inside a `TensorDiagram`.
+
+        Unlike the cross-container test above (where the `Swap` is a
+        direct `CompositionDiagram` child, occupying its boundary
+        alone), this `Swap` shares a `TensorDiagram` stage with an
+        unrelated sibling lane, at a *non-trivial* lane index (second,
+        not first) -- so compensating for its crossing must translate
+        through that `TensorDiagram`'s own `external_output_mapping`
+        rather than just flipping the whole boundary (see
+        `_uncross_voided_swap_edges`). A second, independent chain of
+        `PhaseRotationGate`s rides along the sibling lane the entire
+        time, on every stage the `Swap`'s own stage touches; it must
+        fuse to the exact sum of its own phases, proving the
+        translation didn't leak the wrong port into (or out of) it.
+        """
+        r1 = PhaseRotationGate(pi / 6)
+        r2 = PhaseRotationGate(pi / 4)
+        id_after_r1 = QSpider(1, 1, ZxPoly({}))
+        id_a = PSpider(1, 1, ZxPoly({}))
+        id_b = QSpider(1, 1, ZxPoly({}))
+
+        # An unrelated chain sharing every stage with the Swap lane, on
+        # lane index 0 (the Swap itself sits at lane index 1 throughout).
+        pad1 = PhaseRotationGate(0.111)
+        pad2 = PhaseRotationGate(0.222)
+        pad3 = PhaseRotationGate(0.333)
+        pad4 = PhaseRotationGate(0.444)
+
+        inner_comp = CompositionDiagram([Fourier(), r1, id_after_r1])
+        lane1 = TensorDiagram([pad1, inner_comp, Fourier()])
+        swap_stage = TensorDiagram([pad2, Swap()])  # Swap is lane index 1, not 0
+        mid = TensorDiagram([pad3, id_a, id_b])
+        lane2 = TensorDiagram([pad4, Fourier(), r2])
+        comp = CompositionDiagram([lane1, swap_stage, mid, lane2])
+
+        graph = to_graph(comp)
+        self.rule.apply_rule(graph)
+        result = to_diagram(graph)
+        assert len(self.rule.match(to_graph(result))) == 0
+
+        # The pad chain (lane index 0 throughout, never touching the
+        # Swap) fuses independently to the exact sum of its own phases.
+        pad_lane = result.diagrams[0].diagrams[0]  # type: ignore[attr-defined]
+        assert isinstance(pad_lane, PhaseRotationGate)
+        assert isclose(cast("float", pad_lane.theta), 0.111 + 0.222 + 0.333 + 0.444)
+
+        # The R-chain (lane index 1, crossing the Swap) still fuses to
+        # the correct sum, unaffected by the pad lane sharing its stages.
+        inner_result = result.diagrams[0].diagrams[1]  # type: ignore[attr-defined]
+        rotations = [d for d in inner_result.diagrams if isinstance(d, PhaseRotationGate)]
+        assert len(rotations) == 1
+        assert isclose(cast("float", rotations[0].theta), pi / 6 + pi / 4)
+
+        # The F-chain (lane index 2) fuses into a single Fourier2, with
+        # id_a correctly voided, exactly as in the un-nested case.
+        assert isinstance(result.diagrams[0].diagrams[2], Fourier2)  # type: ignore[attr-defined]
+
 
 if __name__ == "__main__":
     # Create output directory for visualizations
@@ -1487,3 +1756,77 @@ if __name__ == "__main__":
     # Test 16: Chain with different arities (compatible)
     comp15 = CompositionDiagram([q_3x2, q_2x3])
     apply_and_visualize(comp15, "Different Arities (Compatible)")
+
+    # Test 17: Two rotations separated by one identity spider still chain
+    id_between = QSpider(1, 1, zero_phase)
+    comp16 = CompositionDiagram([ph_rot1, id_between, ph_rot2])
+    apply_and_visualize(comp16, "Through Identity Spider")
+
+    # Test 18: Chain across a TensorDiagram/CompositionDiagram boundary --
+    # r1 is the tail of an inner composition nested in one tensor lane,
+    # r2 sits alone in a second, sibling tensor lane.
+    r1_cross = PhaseRotationGate(pi / 6)
+    r2_cross = PhaseRotationGate(pi / 12)
+    inner_comp_cross = CompositionDiagram([Fourier(), r1_cross])
+    lane1_cross = TensorDiagram([inner_comp_cross, Fourier()])
+    lane2_cross = TensorDiagram([r2_cross, QSpider(1, 1, phase_x3)])
+    comp17 = CompositionDiagram([lane1_cross, lane2_cross])
+    apply_and_visualize(comp17, "Cross-Container Chain")
+
+    # Test 19: The same cross-container chain, but the path also crosses
+    # one identity spider, a Swap (with an unrelated wire on its other
+    # two ports), and one more identity spider.
+    r1_swap = PhaseRotationGate(pi / 6)
+    r2_swap = PhaseRotationGate(pi / 12)
+    id_after_r1 = QSpider(1, 1, zero_phase)
+    id_a = PSpider(1, 1, zero_phase)
+    id_b = QSpider(1, 1, zero_phase)
+    inner_comp_swap = CompositionDiagram([Fourier(), r1_swap, id_after_r1])
+    lane1_swap = TensorDiagram([inner_comp_swap, Fourier()])
+    swap_cross = Swap()
+    mid_swap = TensorDiagram([id_a, id_b])
+    lane2_swap = TensorDiagram([Fourier(), r2_swap])
+    comp18 = CompositionDiagram([lane1_swap, swap_cross, mid_swap, lane2_swap])
+    apply_and_visualize(comp18, "Cross-Container Chain Through Swap And Identities")
+
+    # Test 20: Complex Swap network
+    bloc1 = TensorDiagram([
+        CompositionDiagram([DisplacementGate(2), QSpider(1, 1, zero_phase), QSpider(1, 1, zero_phase)]),
+        CompositionDiagram([QSpider(0, 1, zero_phase), SqueezingGate(2.5), PSpider(1, 1, zero_phase)]),
+        CompositionDiagram([PhaseRotationGate(4), PhaseRotationGate(8)]),
+    ])
+    bloc2 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
+    bloc3 = TensorDiagram([SqueezingGate(2.5), DisplacementGate(-1), QSpider(1, 1, zero_phase)])
+    bloc4 = TensorDiagram([QSpider(1, 1, zero_phase), Swap()])
+    bloc5 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
+    bloc6 = TensorDiagram([
+        PhaseRotationGate(10),
+        SqueezingGate(2.5),
+        CompositionDiagram([DisplacementGate(-1), QSpider(1, 0, zero_phase)]),
+    ])
+    comp19 = CompositionDiagram([bloc1, bloc2, bloc3, bloc4, bloc5, bloc6])
+    apply_and_visualize(comp19, "Complex Cross-Container Chain Through Swap And Identities")
+
+    # Test 21: Complex Swap network 2
+    zero_phase = ZxPoly({})
+    bloc1 = TensorDiagram([
+        CompositionDiagram([
+            QSpider(0, 1, zero_phase),
+            DisplacementGate(2),
+            QSpider(1, 1, zero_phase),
+            QSpider(1, 1, zero_phase),
+        ]),
+        CompositionDiagram([QSpider(0, 1, zero_phase), SqueezingGate(2.5), PSpider(1, 1, zero_phase)]),
+        CompositionDiagram([PhaseRotationGate(4), PhaseRotationGate(8)]),
+    ])
+    bloc2 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
+    bloc3 = TensorDiagram([SqueezingGate(2.5), DisplacementGate(-1), QSpider(1, 1, zero_phase)])
+    bloc4 = TensorDiagram([QSpider(1, 1, zero_phase), Swap()])
+    bloc5 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
+    bloc6 = TensorDiagram([
+        PhaseRotationGate(10),
+        SqueezingGate(2.5),
+        CompositionDiagram([DisplacementGate(-1), QSpider(1, 0, ZxPoly({1: 1}))]),
+    ])
+    comp20 = CompositionDiagram([bloc1, bloc2, bloc3, bloc4, bloc5, bloc6])
+    apply_and_visualize(comp20, "Complex Cross-Container Chain Through Swap And Identities 2")

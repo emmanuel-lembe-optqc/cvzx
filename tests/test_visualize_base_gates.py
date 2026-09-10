@@ -21,10 +21,12 @@ from cvzx.base_gates import (
     QSpider,
     Swap,
     TensorDiagram,
+    VoidDiagram,
     ZxPoly,
     flatten_composition,
 )
-from cvzx.visualize_base_gates import visualize
+from cvzx.gates import PhaseRotationGate, SqueezingGate
+from cvzx.visualize_base_gates import _elide_voids, visualize  # ruff: ignore[import-private-name]
 
 # Create output directory using Path
 OUTPUT_DIR = Path("test_images")
@@ -89,6 +91,75 @@ def test_base_gates_exceptions():
 
     with pytest.raises(ValueError, match="The values of the connectivity dictionary do not correspond"):
         tensor.compose(fourier, connectivity={0: 0, 1: 0, 2: 1})  # fourier has 1 output, values must be 0
+
+
+def test_elide_voids_orders_chains_by_true_output_destination():
+    """`_elide_voids` must order surviving rows by where they physically land, not by construction-order node id.
+
+    This reproduces, in miniature, the bug reported against a larger
+    diagram (a `CompositionDiagram` of several `TensorDiagram` "blocs"
+    with `Swap`s nested inside some of them): after a rewrite rule
+    absorbs a chain of gates into a single survivor, the survivor keeps
+    its own (early, low-id) slot -- see `ChainReductionRule.apply_single`
+    -- while a `VoidDiagram` placeholder of the same shape is left behind
+    at the absorbed nodes' original slots. When a `Swap` sits between the
+    survivor and the diagram's real external outputs, the rewrite rules
+    pre-compensate the crossing it used to perform directly into the
+    surrounding `CompositionDiagram.connectivity` before voiding it (see
+    `_uncross_voided_swap_edges` in `nx_rewrite_rules`) rather than
+    leaving a `Swap` node behind -- so by the time `_elide_voids` runs,
+    a voided `Swap` is just another same-arity `VoidDiagram` a real
+    leaf's signal passes through on its way to a (possibly different)
+    output port than its construction order would suggest.
+
+    Here `real_x` (built first, so it gets the lower node id) is wired
+    -- straight through a voided ex-`Swap` -- to the diagram's output
+    port 1, while `real_y` (built second, higher id) lands on output
+    port 0. The old `chains.sort(key=min)` would have shown `real_x`
+    first (lower id) and `real_y` second, i.e. exactly backwards from
+    where each one's wire actually goes.
+    """
+    real_x = PhaseRotationGate(7)
+    real_y = SqueezingGate(3)
+    stage1 = TensorDiagram([real_x, real_y])
+
+    # Stands in for a `Swap` the rewrite rules have already voided: a
+    # same-arity (2-in/2-out) `VoidDiagram`, transparent per-port, with
+    # its crossing pre-baked into the surrounding connectivity below
+    # (exactly what `_uncross_voided_swap_edges` does before voiding a
+    # real `Swap` node in place).
+    voided_swap = VoidDiagram(2, 2)
+
+    # These two placeholders are what's left at the diagram's own output
+    # boundary -- e.g. absorbed-away neighbors of `real_x`/`real_y` in
+    # some downstream block, voided in place by `ChainReductionRule`.
+    void_out_0 = VoidDiagram(1, 1)
+    void_out_1 = VoidDiagram(1, 1)
+    stage3 = TensorDiagram([void_out_0, void_out_1])
+
+    comp = CompositionDiagram(
+        [stage1, voided_swap, stage3],
+        connectivity={
+            # stage1 -> voided_swap: straight through.
+            0: {0: 0, 1: 1},
+            # voided_swap -> stage3: crossed, exactly as a real `Swap`
+            # would have wired it (out0=in1, out1=in0).
+            1: {0: 1, 1: 0},
+        },
+    )
+
+    elided = _elide_voids(comp)
+
+    assert isinstance(elided, TensorDiagram)
+    assert len(elided.diagrams) == 2
+    lane0, lane1 = elided.diagrams
+    # Output port 0 must show real_y (routed there through the crossing),
+    # output port 1 must show real_x -- regardless of real_x having the
+    # lower (earlier-constructed) node id.
+    assert isinstance(lane0, SqueezingGate)
+    assert lane0.id == real_y.id
+    assert isinstance(lane1, PhaseRotationGate)
+    assert lane1.id == real_x.id
 
 
 def run_graphical_tests():  # ruff: ignore[too-many-locals, too-many-statements]

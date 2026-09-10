@@ -27,6 +27,19 @@ from cvzx.nx_graph import (
 
 logger = logging.getLogger(__name__)
 
+# Cap on how many internal match/apply rounds `RewriteRule.apply_rule` runs
+# per call before returning control to its caller. Kept small -- rather than
+# looping until this rule reaches its own full local fixed point -- because
+# `optimize()`'s own outer `_simplify_to_fixed_point` loop already re-invokes
+# every rule's `apply_rule` again on the very next pass whenever that pass
+# changed anything, and keeps doing so until a whole pass changes nothing.
+# So whatever this call doesn't finish is picked up there at no extra total
+# cost, while a rule whose own match can chase through an arbitrarily long
+# run of passthrough structure (a permutation of `Swap`s, say) never has to
+# pay for verifying/resolving all of it inside one `apply_rule` call. See
+# `RewriteRule.apply_rule` for why more than one round is ever useful.
+_APPLY_RULE_MAX_ROUNDS = 100
+
 
 class RewriteRule(ABC):
     """Base class for rewrite rules operating on graphs.
@@ -88,7 +101,45 @@ class RewriteRule(ABC):
         """
 
     def apply_rule(self, graph: CVZXGraph) -> CVZXGraph:
-        """Apply a rule to the entire graph.
+        """Apply a rule to the graph for up to `_APPLY_RULE_MAX_ROUNDS` rounds.
+
+        A single round is: find every match, group by container, and apply
+        each group's matches in reverse position order (so an earlier
+        removal can't shift a later match's index), then rebuild
+        `graph.registry` (see `CVZXGraph.rebuild_registry`) so the next
+        round's `match()` sees the graph as it now stands rather than a
+        stale index. After a round that applied at least one match,
+        `match()` is run again on the now-mutated graph, and another round
+        runs if it finds anything -- up to `_APPLY_RULE_MAX_ROUNDS` rounds,
+        after which this returns regardless of whether more matches remain.
+
+        More than one round is sometimes useful because applying a match
+        can turn a node that was blocking another, still-unapplied match
+        into a pass-through: for instance, two independent chains that
+        both need to chase through the same shared node (a `Swap`, say)
+        can only have ONE of them claim that node per `match()` call --
+        `match()`'s own bookkeeping treats a node consumed by one match as
+        unavailable to any other match found in that same call, even when
+        the pattern would allow both, one after the other, once the first
+        is voided. A single round would see only the first chain folded,
+        with the second left sitting there unreduced, even though nothing
+        about the graph actually prevents folding it too -- only the
+        single-call scan does.
+
+        `_APPLY_RULE_MAX_ROUNDS` is deliberately small rather than large
+        enough to always reach this rule's own full local fixed point in
+        one call: `optimize()`'s own outer `_simplify_to_fixed_point` loop
+        already re-invokes every rule's `apply_rule` again on the very
+        next pass whenever the current pass changed anything, and keeps
+        doing so until a whole pass changes nothing anywhere -- so any
+        matches this call leaves unresolved are picked up there, at the
+        same cost that finishing them here would have been. Keeping the
+        cap small instead bounds how much internal work one `apply_rule`
+        call can do chasing through a single pathological match -- e.g. a
+        `ChainReductionRule` closure that would otherwise try to
+        verify/resolve its way through an arbitrarily long run of chained
+        `Swap`s in one round (see `_trace_closure_leftovers`, which caps
+        that at one `Swap`-like bundle per match for the same reason).
 
         Parameters
         ----------
@@ -105,35 +156,56 @@ class RewriteRule(ABC):
         TypeError
             If `self.match()` returns a match that is not a dict.
         """
-        # Find all matches
-        matches = self.match(graph)
+        for round_index in range(_APPLY_RULE_MAX_ROUNDS):
+            matches = self.match(graph)
 
-        if not matches:
-            logger.debug("%s: no matches", type(self).__name__)
-            return graph
+            if not matches:
+                logger.debug("%s: no matches, done after %d round(s)", type(self).__name__, round_index)
+                return graph
 
-        # Group by container and apply each group's matches in reverse
-        # position order, so an earlier removal can't shift a later match's index.
-        groups: dict[object, list] = {}
-        group_order: list[object] = []
-        for match in matches:
-            if not isinstance(match, dict):
-                msg = (
-                    f"{type(self).__name__}.match() returned a non-dict match "
-                    f"({match!r}, type {type(match).__name__}); every match must be a dict."
-                )
-                raise TypeError(msg)
-            key = match.get("container_id")
-            if key not in groups:
-                groups[key] = []
-                group_order.append(key)
-            groups[key].append(match)
+            # Group by container and apply each group's matches in reverse
+            # position order, so an earlier removal can't shift a later match's index.
+            groups: dict[object, list] = {}
+            group_order: list[object] = []
+            for match in matches:
+                if not isinstance(match, dict):
+                    msg = (
+                        f"{type(self).__name__}.match() returned a non-dict match "
+                        f"({match!r}, type {type(match).__name__}); every match must be a dict."
+                    )
+                    raise TypeError(msg)
+                key = match.get("container_id")
+                if key not in groups:
+                    groups[key] = []
+                    group_order.append(key)
+                groups[key].append(match)
 
-        logger.debug("%s: %d match(es), applying", type(self).__name__, len(matches))
-        for key in group_order:
-            for match in reversed(groups[key]):
-                self.apply_single(graph, match)
+            logger.debug("%s: round %d, %d match(es), applying", type(self).__name__, round_index, len(matches))
+            for key in group_order:
+                for match in reversed(groups[key]):
+                    self.apply_single(graph, match)
 
+            # `match()` implementations read `graph.registry` rather than
+            # rescanning `graph.graph` from scratch, and nothing here keeps
+            # that registry in sync incrementally as `apply_single` mutates
+            # the graph -- so it must be rebuilt before the next round's
+            # `match()` call, exactly as `_simplify_to_fixed_point` already
+            # does between rules. Skipping this is not just stale data: a
+            # match naming a node `apply_single` removed makes the next
+            # `match()` call crash outright.
+            graph.rebuild_registry()
+
+        # Reaching the cap is routine, not exceptional: `optimize()`'s own
+        # outer loop (see the docstring above) will call `apply_rule` again
+        # on its next pass if anything here still needs resolving, so this
+        # is logged at debug level, not warned as if this call needed to
+        # finish everything itself.
+        logger.debug(
+            "%s.apply_rule: reached _APPLY_RULE_MAX_ROUNDS=%d rounds this call -- "
+            "any remaining matches will be picked up by optimize()'s next pass",
+            type(self).__name__,
+            _APPLY_RULE_MAX_ROUNDS,
+        )
         return graph
 
     def _flatten_container(self, graph: nx.DiGraph, container_id: int) -> None:
@@ -271,6 +343,153 @@ class RewriteRule(ABC):
         )
         self._replace_in_parent(graph, parent_id, old_id, void_id)
         return void_id
+
+    def _refresh_composition_external_mappings(self, graph: nx.DiGraph, container_id: int) -> None:
+        """Recompute a `CompositionDiagram` container's own external port mappings.
+
+        A composition's external inputs are exactly its first
+        sub-diagram's inputs, and its external outputs exactly its last
+        sub-diagram's outputs (see `to_graph`'s own construction of
+        `external_input_mapping`/`external_output_mapping` for a
+        `CompositionDiagram`) -- so both go stale the moment
+        `sub_diagram_ids` is spliced (an element removed, shrinking the
+        list) without recomputing them. In particular,
+        `external_output_mapping`'s `{j: (last_idx, j)}` keeps pointing
+        at whatever `last_idx` used to be: once the list is shorter, that
+        index either points at the wrong sub-diagram or is out of range
+        entirely -- silently corrupting anything that later resolves a
+        port through it (`find_node_by_external_output`/`_input`, used
+        by several rules' own `match()` to chase a chain of identities/
+        `Swap`s across container boundaries), even though `to_diagram`
+        itself never notices, since reconstruction only reads
+        `sub_diagram_ids`/`connectivity`, not this mapping.
+
+        Call this right after any such splice, whenever more than one
+        sub-diagram remains (a single-element container is flattened
+        away entirely instead, via `_flatten_container`, making its own
+        mapping moot).
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to modify.
+        container_id : int
+            The composition container whose `sub_diagram_ids` was just
+            spliced.
+        """
+        attrs = graph.nodes[container_id]
+        if attrs.get("container_type") != "composition":
+            return
+        sub_ids = attrs.get("sub_diagram_ids", [])
+        if not sub_ids:
+            return
+        first_attrs = graph.nodes[sub_ids[0]]
+        last_attrs = graph.nodes[sub_ids[-1]]
+        attrs["external_input_mapping"] = {j: (0, j) for j in range(first_attrs.get("num_inputs", 0))}
+        last_idx = len(sub_ids) - 1
+        attrs["external_output_mapping"] = {j: (last_idx, j) for j in range(last_attrs.get("num_outputs", 0))}
+
+    @staticmethod
+    def _composition_step(
+        graph: nx.DiGraph, node_id: int, port: int, *, forward: bool
+    ) -> tuple[int | None, int | None]:
+        """Follow the single composition edge carrying one specific port onward.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+        node_id : int
+            The node to step from.
+        port : int
+            The port on `node_id` to follow -- an OUTPUT port if
+            `forward` (we are walking downstream), an INPUT port
+            otherwise (we are walking upstream).
+        forward : bool
+            True to follow `node_id`'s out-edges, False its in-edges.
+
+        Returns
+        -------
+        tuple[int | None, int | None]
+            `(neighbor_id, neighbor_port)` -- `neighbor_port` is an INPUT
+            port of `neighbor_id` if `forward`, an OUTPUT port
+            otherwise -- or `(None, None)` if no composition edge on
+            `node_id` carries that port.
+        """
+        if forward:
+            for _, v, edge_attrs in graph.out_edges(node_id, data=True):
+                if edge_attrs.get("edge_type") != "composition":
+                    continue
+                source_ports = edge_attrs.get("source_ports", [])
+                if port in source_ports:
+                    return v, edge_attrs["target_ports"][source_ports.index(port)]
+        else:
+            for u, _, edge_attrs in graph.in_edges(node_id, data=True):
+                if edge_attrs.get("edge_type") != "composition":
+                    continue
+                target_ports = edge_attrs.get("target_ports", [])
+                if port in target_ports:
+                    return u, edge_attrs["source_ports"][target_ports.index(port)]
+        return None, None
+
+    def _chase_identity_chain(
+        self, graph: nx.DiGraph, start_id: int, *, forward: bool, start_port: int = 0
+    ) -> tuple[int | None, int | None, list[int]]:
+        """Follow one wire from `start_id`, stepping over identity/`Swap` passthroughs.
+
+        Walks the graph's own "composition" edges one hop at a time,
+        starting from a specific port of `start_id`, continuing past
+        every node that is itself a pure passthrough -- an identity
+        spider (zero-phase, raw arity (1,1)) or a `Swap` -- until it
+        reaches the first node that isn't. Both kinds of passthrough have
+        no bearing on whatever pattern is being matched around them: an
+        identity is a bare wire, and a `Swap` only re-labels which port
+        the wire arrives/leaves on, tracked here via `port`. That node is
+        the real neighbor to check; every passthrough skipped along the
+        way is returned too, so `apply_single` can convert each into an
+        in-place `VoidDiagram` once the match fires.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+        start_id : int
+            The node to start from.
+        forward : bool
+            True to follow outgoing composition edges (`start_port` is
+            one of `start_id`'s OUTPUT ports); False to follow incoming
+            ones (`start_port` is one of `start_id`'s INPUT ports).
+        start_port : int
+            The port of `start_id` to chase from. Defaults to 0, the
+            only possible value for a single-wire state/effect endpoint
+            (`CopyRule`/`TerminalAbsorptionRule`'s use case);
+            `ChainReductionRule` chases every port of a wider gate
+            separately and passes each one explicitly.
+
+        Returns
+        -------
+        tuple[int | None, int | None, list[int]]
+            `(neighbor_id, neighbor_port, passthrough_ids_crossed)` --
+            `neighbor_port` is an INPUT port of `neighbor_id` if
+            `forward`, an OUTPUT port otherwise; the crossed ids are in
+            traversal order, nearest `start_id` first -- or
+            `(None, None, crossed_so_far)` if the chase runs off the end
+            of the graph (no composition edge at all in that direction)
+            before reaching a non-passthrough node.
+        """
+        crossed: list[int] = []
+        current, port = start_id, start_port
+        while True:
+            next_id, next_port = self._composition_step(graph, current, port, forward=forward)
+            if next_id is None or next_port is None:
+                return None, None, crossed
+            next_attrs = graph.nodes[next_id]
+            if next_attrs.get("kind") == "proper" and _is_chase_passthrough(next_attrs):
+                crossed.append(next_id)
+                current = next_id
+                port = _passthrough_exit_port(next_attrs, next_port)
+                continue
+            return next_id, next_port, crossed
 
     @staticmethod
     def _remap_by_identity(old_mapping: dict, new_mapping: dict) -> dict:
@@ -1010,6 +1229,231 @@ class RewriteRule(ABC):
             ) = arity_change
             container_id = parent_id
 
+    def _structural_step(  # ruff: ignore[complex-structure, too-many-branches, too-many-return-statements, too-many-statements, too-many-locals]
+        self, graph: nx.DiGraph, node_id: int, port: int, *, forward: bool
+    ) -> tuple[int | None, int | None]:
+        """Advance one true wire-hop from `(node_id, port)`, using diagram STRUCTURE only.
+
+        `forward=True`: `port` is one of `node_id`'s own OUTPUT ports,
+        walking downstream to whoever's input port it truly feeds.
+        `forward=False`: the mirror image, walking upstream from one of
+        `node_id`'s own INPUT ports.
+
+        Unlike `_chase_identity_chain`/`_composition_step`, this never
+        consults graph EDGES -- only `sub_diagram_ids`/`connectivity`
+        (composition parents) and `external_input_mapping`/
+        `external_output_mapping` (tensor parents), climbing out through
+        however many container boundaries `node_id` itself sits at the
+        edge of, then descending back down through whatever container
+        the landed sibling itself is, until reaching an actual leaf (no
+        `container_type` of its own). That makes it accurate even when
+        an earlier round of some rule's own `apply_single` has already
+        rewired a node's graph edge to skip past structure that is,
+        physically, still there -- exactly the situation
+        `ChainReductionRule` finds itself in one round after its own
+        cross-container fix bypasses whatever it just voided.
+
+        A `ContractedDiagram` parent, or any other structure this can't
+        resolve, ends the walk with `(None, None)` -- treated by every
+        caller as "not safely traceable", never as "safe to assume
+        nothing's there".
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to read (never mutated).
+        node_id : int
+            The node to step from.
+        port : int
+            The port on `node_id` to follow.
+        forward : bool
+            Direction to walk.
+
+        Returns
+        -------
+        tuple[int | None, int | None]
+            `(next_node_id, next_port)` -- `next_port` is an INPUT port
+            of `next_node_id` if `forward`, an OUTPUT port otherwise --
+            or `(None, None)` if the wire runs off the whole diagram (a
+            genuine external boundary) or through unsupported structure
+            before reaching a leaf.
+        """
+        # Phase 1: climb out from (node_id, port) until landing on a
+        # genuine sibling (still possibly itself a container) or running
+        # off the root.
+        while True:  # ruff: ignore[too-many-nested-blocks]
+            parent_id = graph.nodes[node_id].get("container_id")
+            if parent_id is None or parent_id not in graph.nodes:
+                return None, None
+            parent_attrs = graph.nodes[parent_id]
+            parent_type = parent_attrs.get("container_type")
+            sub_ids = parent_attrs.get("sub_diagram_ids", [])
+
+            if parent_type == "composition" and node_id in sub_ids:
+                pos = sub_ids.index(node_id)
+                connectivity = parent_attrs.get("connectivity", {})
+                if forward:
+                    if pos < len(sub_ids) - 1:
+                        landed = None
+                        for in_port, out_port in connectivity.get(pos, {}).items():
+                            if out_port == port:
+                                landed = (sub_ids[pos + 1], in_port)
+                                break
+                        if landed is None:
+                            return None, None
+                        node_id, port = landed
+                        break
+                    node_id = parent_id
+                    continue
+                if pos > 0:
+                    conn = connectivity.get(pos - 1, {})
+                    if port not in conn:
+                        return None, None
+                    node_id, port = sub_ids[pos - 1], conn[port]
+                    break
+                node_id = parent_id
+                continue
+
+            if parent_type == "tensor" and node_id in sub_ids:
+                child_idx = sub_ids.index(node_id)
+                mapping_key = "external_output_mapping" if forward else "external_input_mapping"
+                mapping = parent_attrs.get(mapping_key, {})
+                external_port = next((ext for ext, tgt in mapping.items() if tgt == (child_idx, port)), None)
+                if external_port is None:
+                    return None, None
+                node_id, port = parent_id, external_port
+                continue
+
+            return None, None
+
+        # Phase 2: descend into whatever container the landed sibling
+        # itself is, until reaching an actual leaf.
+        while True:
+            attrs = graph.nodes[node_id]
+            container_type = attrs.get("container_type")
+            if container_type is None:
+                return node_id, port
+            sub_ids = attrs.get("sub_diagram_ids", [])
+            if container_type == "composition":
+                if not sub_ids:
+                    return None, None
+                node_id = sub_ids[0 if forward else len(sub_ids) - 1]
+                continue
+            if container_type == "tensor":
+                mapping_key = "external_input_mapping" if forward else "external_output_mapping"
+                target = attrs.get(mapping_key, {}).get(port)
+                if target is None:
+                    return None, None
+                child_idx, child_port = target
+                node_id, port = sub_ids[child_idx], child_port
+                continue
+            return None, None
+
+    def _trace_closure_leftovers(
+        self, graph: nx.DiGraph, first_id: int, last_id: int, port: int, known_absorbed: set[int]
+    ) -> list[tuple[int, int]] | None:
+        """Walk one vanishing output port of `first_id` to `last_id`, purely structurally.
+
+        Used to decide (and, once decided safe, to actually locate) which
+        nodes lie on the physical wire a `ChainReductionRule` closure is
+        about to erase -- both this match's own `node_ids`/`identity_chain`
+        members (already known, passed in via `known_absorbed`, skipped
+        without inspection since some may already be gone from `graph` by
+        the time this is called for the second, mutating pass) and any
+        OTHER node still structurally in the way: an earlier round's own
+        leftover `VoidDiagram` (safe -- add it to the result and keep
+        going) or anything else (a real, un-absorbed gate -- e.g. a
+        `Swap` whose other port carries unrelated live content -- unsafe,
+        since cutting this one wire out of it would need shrinking a
+        REAL gate, which nothing here does).
+
+        A leftover `VoidDiagram` isn't necessarily single-wire: an
+        earlier round may have voided a whole `Swap` in place (its own
+        crossing pre-compensated onto the surrounding edges, per
+        `_uncross_voided_swap_edges`), leaving a same-shape `(2, 2)`
+        bundle whose OTHER port pair carries an entirely unrelated, still
+        -live wire -- so the port actually walked through is reported
+        alongside each leftover, letting the caller remove exactly that
+        one port pair rather than the whole node.
+
+        By design, this crosses at most ONE such multi-port (`num_inputs
+        > 1`) leftover -- one Swap-like bundle -- per call. A second one
+        refuses the whole trace (`None`), exactly like hitting a real,
+        un-absorbed gate, rather than being crossed too: a *succession*
+        of `Swap`s chained together (a small permutation network) would
+        otherwise make both this walk and the caller's own bookkeeping
+        scale with however many are chained, and nothing else in this
+        codebase currently shrinks a run of `Swap`s on its own between
+        rounds -- so once `match()` backs a chain off past the point
+        where a second bundle would need crossing, there's no later
+        round that ever gets a *shorter* span to retry. The chosen
+        behavior is therefore to leave a state/effect pair connected by
+        two or more `Swap`s exactly as it is -- unreduced, indefinitely
+        -- rather than forcing the full closure through every bundle in
+        one match. A single-wire (`1, 1`) leftover carries no other wire
+        to protect and costs only one hop to cross, so it's never
+        counted against this cap.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to read (never mutated).
+        first_id : int
+            The chain's own first member (the wire's origin).
+        last_id : int
+            The chain's own last member (the wire's true destination).
+        port : int
+            Which of `first_id`'s own output ports to trace.
+        known_absorbed : set[int]
+            Node IDs belonging to the current match itself -- safe to
+            pass through unconditionally, and never inspected directly.
+
+        Returns
+        -------
+        list[tuple[int, int]] | None
+            `(node_id, port)` for every leftover (non-`known_absorbed`)
+            `VoidDiagram` strictly between `first_id` and `last_id`, in
+            structural order nearest-first, `port` being the specific
+            port index this wire passes through it at -- or `None` if
+            the wire doesn't reach `last_id` through nothing but those
+            two kinds of node.
+        """
+        leftovers: list[tuple[int, int]] = []
+        bundles_crossed = 0
+        current_id, current_port = first_id, port
+        for _ in range(10_000):
+            next_id, next_port = self._structural_step(graph, current_id, current_port, forward=True)
+            if next_id is None or next_port is None:
+                return None
+            if next_id == last_id:
+                return leftovers
+            if next_id in known_absorbed:
+                current_id, current_port = next_id, next_port
+                continue
+            next_attrs = graph.nodes[next_id]
+            if next_attrs.get("type") != "VoidDiagram":
+                return None
+            # A leftover only has an established port-for-port identity
+            # correspondence (needed for the *next* hop to reinterpret
+            # `next_port` as one of its OUTPUT ports) when it's square --
+            # e.g. an untouched voided `Swap`/spider bundle. A leftover
+            # some earlier round already shrunk asymmetrically no longer
+            # has any reliable input-port-to-output-port mapping, so
+            # walking "through" it here would just be guessing; refuse.
+            next_in = next_attrs.get("num_inputs", 0)
+            if next_in != next_attrs.get("num_outputs", 0):
+                return None
+            # At most one Swap-like bundle (more than one wire) is
+            # crossed per call; a second one means this whole span is
+            # left unreduced this round (see the docstring above).
+            if next_in > 1:
+                if bundles_crossed >= 1:
+                    return None
+                bundles_crossed += 1
+            leftovers.append((next_id, next_port))
+            current_id, current_port = next_id, next_port
+        return None
+
 
 class IdentityRule(RewriteRule):
     r"""Identity rule (id) from [3] Eq. (69) - Graph-based version.
@@ -1403,8 +1847,23 @@ class ChainReductionRule(RewriteRule):
     - ControlledSumGate(i,j,g1) ∘ ControlledSumGate(i,j,g2) → ControlledSumGate(i,j,g1+g2)
     """
 
-    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
-        """Find all chains of reducible gates in CompositionDiagram containers.
+    def match(  # ruff: ignore[too-many-locals, too-many-branches, too-many-statements, complex-structure]
+        self, cvzx_graph: CVZXGraph
+    ) -> list[dict]:
+        """Find all chains of reducible gates in the graph.
+
+        Candidates are found by scanning the graph's own "composition"
+        edges (mirroring `CopyRule`/`TerminalAbsorptionRule`), rather than
+        only checking adjacent `sub_diagram_ids` entries of one
+        CompositionDiagram -- so this also finds chains that cross a
+        TensorDiagram/ContractedDiagram boundary. `_find_full_neighbor`
+        additionally chases through any run of identity spiders or
+        `Swap`s sitting directly in the path, so a passthrough there
+        never blocks an otherwise-reducible chain either.
+
+        Each maximal chain is discovered exactly once, starting from its
+        true first member (`_is_chain_start`), then extended forward one
+        `can_chain`-compatible neighbor at a time.
 
         Parameters
         ----------
@@ -1415,40 +1874,329 @@ class ChainReductionRule(RewriteRule):
         -------
         list[dict]
             List of matches, each containing:
-            - 'container_id': the node ID of the CompositionDiagram
+            - 'container_id': grouping key for `RewriteRule.apply_rule`
+              (the chain's shared immediate parent when it's a
+              contiguous run in one flat CompositionDiagram, else a
+              synthetic per-match key)
+            - 'same_parent': whether the chain is such a contiguous run
             - 'gate_type': type of gates in the chain
             - 'values': list of values for each gate in the chain
             - 'node_ids': list of node IDs in the chain (in order)
+            - 'gate_info': gate_info for `reduce_chain`
+            - 'identity_chain': passthrough node ids crossed while
+              chasing between chain members, in traversal order
+
+        Raises
+        ------
+        ValueError
+            If `get_gate_info` returns no `gate_info` for a 'Q'/'P' node
+            (should not occur: those kinds always carry gate_info).
         """
         graph = cvzx_graph.graph
-        registry = cvzx_graph.registry
         matches: list[dict] = []
+        used_nodes: set[int] = set()
 
-        # Sort for deterministic match order (set iteration order is not stable).
-        for container_id in sorted(registry.composition_nodes):
-            attrs = graph.nodes[container_id]
-            sub_ids = attrs.get("sub_diagram_ids", [])
+        # Sort for deterministic match order (dict/node iteration order
+        # isn't guaranteed to reflect any particular scan order).
+        candidates = sorted(
+            node
+            for node in graph.nodes
+            if graph.nodes[node].get("kind") in {"proper", "compact"}
+            and self.get_gate_info(graph, node)[0] is not None
+            and not self._is_directly_in_contracted(graph, node)
+        )
 
-            if not sub_ids:
+        for start_id in candidates:
+            if start_id in used_nodes:
                 continue
 
-            # Find chains in this CompositionDiagram
-            chains = self.find_chains_in_composition(graph, sub_ids)
+            gate_type, value, gate_info = self.get_gate_info(graph, start_id)
+            if gate_type is None or not self._is_chain_start(graph, start_id, gate_type, value, gate_info):
+                continue
 
-            matches.extend(
-                {
-                    "container_id": container_id,
-                    "gate_type": chain["gate_type"],
-                    "values": chain["values"],
-                    "node_ids": chain["node_ids"],
-                    "gate_info": chain["gate_info"],
-                }
-                for chain in chains
-            )
+            values = [value]
+            node_ids = [start_id]
+            identity_chain: list[int] = []
+            identity_chain_checkpoints = [0]
+            gate_info_history = [gate_info]
+            last_gate_info = gate_info
+            cur_id, cur_type, cur_value, cur_gate_info = start_id, gate_type, value, gate_info
 
+            while True:
+                neighbor_id, chain = self._find_full_neighbor(graph, cur_id, forward=True)
+                if (
+                    neighbor_id is None
+                    or neighbor_id in used_nodes
+                    or neighbor_id in node_ids
+                    or any(cid in used_nodes for cid in chain)
+                ):
+                    break
+                next_type, next_value, next_gate_info = self.get_gate_info(graph, neighbor_id)
+                if not self.can_chain(cur_type, cur_value, cur_gate_info, next_type, next_value, next_gate_info):
+                    break
+                # `can_chain` only returns True when `next_type == cur_type`
+                # (its very first check), and `cur_type` is never None here.
+                assert next_type is not None  # ruff: ignore[assert]
+
+                for cid in chain:
+                    if cid not in identity_chain:
+                        identity_chain.append(cid)
+                values.append(next_value)
+                node_ids.append(neighbor_id)
+                identity_chain_checkpoints.append(len(identity_chain))
+                gate_info_history.append(next_gate_info)
+                last_gate_info = next_gate_info
+
+                # {F, Finv} chains are only of size 2.
+                if {cur_value, next_value} == {"F", "Finv"}:
+                    gate_type = "F_pair"
+                    break
+
+                cur_id, cur_type, cur_value, cur_gate_info = neighbor_id, next_type, next_value, next_gate_info
+
+            if len(values) < 2:  # ruff: ignore[magic-value-comparison]
+                continue
+
+            if gate_type in {"Q", "P"}:
+                if gate_info is None or last_gate_info is None:
+                    msg = f"get_gate_info returned no gate_info for a {gate_type!r} node."
+                    raise ValueError(msg)
+                gate_info["num_outputs"] = last_gate_info["num_outputs"]
+
+                # A chain whose first and last members' own OUTPUT counts
+                # differ folds down to a `first_node` with a genuinely
+                # different arity -- `apply_single` only knows how to
+                # cascade that safely through the rest of the diagram when
+                # it's a FULL closure to zero outputs (a state fusing all
+                # the way through to an effect, becoming a bare scalar):
+                # every node structurally sitting on the wire that's about
+                # to vanish -- this chain's own members, once absorbed,
+                # included -- has to be nothing but `VoidDiagram`
+                # placeholders, since cutting that wire out of a REAL
+                # multi-wire gate (a `Swap` whose other port carries
+                # unrelated, still-live content) isn't something anything
+                # here does. `_trace_closure_leftovers` checks that by
+                # walking the true diagram structure (not graph edges,
+                # which an earlier round may already have short-circuited
+                # past exactly this kind of leftover) -- and when the full
+                # chain isn't safe, this backs off one member at a time
+                # until it finds a length that's either shape-preserving
+                # or fully safe, rather than either forcing an unsafe
+                # collapse or discarding a perfectly good shorter
+                # reduction outright. Any OTHER first/last mismatch
+                # (shrinking to some other nonzero count, or growing) is
+                # left exactly as it was before this check existed.
+                while len(node_ids) >= 2:  # ruff: ignore[magic-value-comparison]
+                    first_id, candidate_last_id = node_ids[0], node_ids[-1]
+                    first_out = graph.nodes[first_id].get("num_outputs", 0)
+                    last_out = gate_info_history[-1].get("num_outputs", 0) if gate_info_history[-1] else 0
+                    if last_out != 0 or first_out == last_out:
+                        break
+                    known_absorbed = set(node_ids)
+                    if all(
+                        self._trace_closure_leftovers(graph, first_id, candidate_last_id, port, known_absorbed)
+                        is not None
+                        for port in range(first_out)
+                    ):
+                        break
+                    node_ids = node_ids[:-1]
+                    values = values[:-1]
+                    gate_info_history = gate_info_history[:-1]
+                if len(node_ids) < 2:  # ruff: ignore[magic-value-comparison]
+                    continue
+                identity_chain = identity_chain[: identity_chain_checkpoints[len(node_ids) - 1]]
+                last_gate_info = gate_info_history[-1]
+                gate_info["num_outputs"] = last_gate_info["num_outputs"] if last_gate_info else 0
+
+            first_id, last_id = node_ids[0], node_ids[-1]
+
+            match: dict = {
+                "gate_type": gate_type,
+                "values": values,
+                "node_ids": node_ids,
+                "gate_info": gate_info,
+                "identity_chain": identity_chain,
+            }
+
+            # Classic case: every member of the chain sits, contiguously
+            # and in order, in ONE flat CompositionDiagram's own
+            # `sub_diagram_ids` -- exactly what the old same-container
+            # scan required. Fully collapsible, no leftover placeholder.
+            # A crossed identity/Swap means members aren't actually
+            # adjacent there even when they share an immediate parent --
+            # see `CopyRule._resolve_containers` for the same reasoning.
+            #
+            # A node's own `container_id` attribute can't be trusted in
+            # isolation: `to_graph` assigns a single shared graph node to
+            # a diagram object reused at two different tree positions,
+            # and that node's `container_id` reflects only whichever
+            # position was processed last -- even though the OTHER
+            # position's container still legitimately lists it in its own
+            # `sub_diagram_ids`. So instead of anchoring on
+            # `first_id`'s own `container_id`, try every distinct
+            # `container_id` seen among the chain's members as a
+            # candidate parent, and accept the first candidate whose OWN
+            # `sub_diagram_ids` contiguously contains every node_id --
+            # regardless of what individual members' possibly-aliased
+            # `container_id` attributes say.
+            same_parent = False
+            resolved_parent: int | None = None
+            if not identity_chain:
+                candidate_parents = []
+                seen_candidates = set()
+                for nid in node_ids:
+                    candidate = graph.nodes[nid].get("container_id")
+                    if candidate is not None and candidate not in seen_candidates:
+                        seen_candidates.add(candidate)
+                        candidate_parents.append(candidate)
+                for candidate in candidate_parents:
+                    if candidate not in graph.nodes:
+                        continue
+                    if graph.nodes[candidate].get("container_type") != "composition":
+                        continue
+                    sub_ids = graph.nodes[candidate].get("sub_diagram_ids", [])
+                    if not all(nid in sub_ids for nid in node_ids):
+                        continue
+                    indices = [sub_ids.index(nid) for nid in node_ids]
+                    if indices == list(range(indices[0], indices[0] + len(node_ids))):
+                        same_parent = True
+                        resolved_parent = candidate
+                        break
+
+            match["same_parent"] = same_parent
+            match["container_id"] = resolved_parent if same_parent else ("cross", first_id, last_id)
+
+            matches.append(match)
+            used_nodes.update(node_ids)
+            used_nodes.update(identity_chain)
+
+        matches.sort(key=lambda m: m["node_ids"][0])
         return matches
 
-    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:
+    def _is_chain_start(
+        self,
+        graph: nx.DiGraph,
+        node_id: int,
+        gate_type: str,
+        value: Any,  # ruff: ignore[any-type]
+        gate_info: dict | None,
+    ) -> bool:
+        """Check that nothing chains INTO `node_id` -- i.e. it's a chain's true first member.
+
+        Prevents re-discovering the same maximal chain more than once
+        from an internal member: `match()` only ever starts building a
+        chain from a node whose own predecessor either doesn't exist or
+        doesn't `can_chain` into it.
+
+        Returns
+        -------
+        bool
+            True if `node_id` has no `can_chain`-compatible predecessor.
+        """
+        prev_id, _chain = self._find_full_neighbor(graph, node_id, forward=False)
+        if prev_id is None:
+            return True
+        prev_type, prev_value, prev_gate_info = self.get_gate_info(graph, prev_id)
+        if prev_type is None:
+            return True
+        return not self.can_chain(prev_type, prev_value, prev_gate_info, gate_type, value, gate_info)
+
+    def _find_full_neighbor(  # ruff: ignore[complex-structure, too-many-return-statements]
+        self, graph: nx.DiGraph, node_id: int, *, forward: bool
+    ) -> tuple[int | None, list[int]]:
+        """Find `node_id`'s single full composition neighbor, chasing every port.
+
+        Generalizes `_chase_identity_chain` (single-wire) to a
+        potentially-multi-port gate: every one of `node_id`'s own ports
+        on the relevant side is chased independently -- each stepping
+        over any identity/`Swap` passthrough directly in its own path --
+        and the result only counts as a match when all of them agree on
+        landing at the SAME neighbor, at DISTINCT ports of its own,
+        together covering that neighbor's entire arity on the other
+        side. That's exactly what "two gates are fully, serially
+        composed with nothing else feeding either of them" means at the
+        port level, and it's what a `sub_diagram_ids`-adjacent pair in a
+        flat CompositionDiagram is always guaranteed to satisfy, so this
+        reduces to the old same-container adjacency check as a special
+        case while also working across container boundaries.
+
+        Parameters
+        ----------
+        graph : nx.DiGraph
+            The graph to search.
+        node_id : int
+            The node to look for a full neighbor from.
+        forward : bool
+            True to look downstream (chase every OUTPUT port), False to
+            look upstream (chase every INPUT port).
+
+        Returns
+        -------
+        tuple[int | None, list[int]]
+            `(neighbor_id, passthrough_ids_crossed)`, deduplicated in
+            first-seen order, or `(None, [])` if there's no such single,
+            fully-saturating neighbor.
+        """
+        attrs = graph.nodes[node_id]
+        num_ports = attrs.get("num_outputs" if forward else "num_inputs", 0)
+        if not num_ports:
+            return None, []
+
+        neighbor_id: int | None = None
+        seen_neighbor_ports: set[int] = set()
+        combined_chain: list[int] = []
+        seen_chain: set[int] = set()
+
+        for port in range(num_ports):
+            nxt, nxt_port, chain = self._chase_identity_chain(graph, node_id, forward=forward, start_port=port)
+            if nxt is None or nxt_port is None:
+                return None, []
+            if neighbor_id is None:
+                neighbor_id = nxt
+            elif nxt != neighbor_id:
+                return None, []
+            if nxt_port in seen_neighbor_ports:
+                return None, []
+            seen_neighbor_ports.add(nxt_port)
+            for cid in chain:
+                if cid not in seen_chain:
+                    seen_chain.add(cid)
+                    combined_chain.append(cid)
+
+        if neighbor_id is None:
+            return None, []
+        # A node that is directly one of a ContractedDiagram's own two
+        # halves (its `first_id`/`second_id`) can have SOME of its ports
+        # wired internally by the contraction itself (I1/I2/J1/J2) rather
+        # than to this diagram's own external interface -- merging such a
+        # node into a chain would silently change the ContractedDiagram's
+        # own external arity in a way nothing here accounts for. Mirrors
+        # `TerminalAbsorptionRule.match`'s identical exclusion.
+        if self._is_directly_in_contracted(graph, neighbor_id):
+            return None, []
+        neighbor_attrs = graph.nodes[neighbor_id]
+        neighbor_arity = neighbor_attrs.get("num_inputs" if forward else "num_outputs", 0)
+        if neighbor_arity != num_ports:
+            return None, []
+        return neighbor_id, combined_chain
+
+    @staticmethod
+    def _is_directly_in_contracted(graph: nx.DiGraph, node_id: int) -> bool:
+        """Check whether `node_id` is directly a ContractedDiagram's own half.
+
+        Returns
+        -------
+        bool
+            True if `node_id`'s own immediate parent is a `ContractedDiagram`
+            (i.e. `node_id` is literally that container's `first_id` or
+            `second_id`), False otherwise.
+        """
+        parent_id = graph.nodes[node_id].get("container_id")
+        return parent_id is not None and graph.nodes[parent_id].get("container_type") == "contracted"
+
+    def apply_single(  # ruff: ignore[too-many-locals, too-many-branches, too-many-statements, complex-structure]
+        self, cvzx_graph: CVZXGraph, match: dict
+    ) -> None:
         """Apply chain reduction to a specific match in-place.
 
         Parameters
@@ -1465,15 +2213,21 @@ class ChainReductionRule(RewriteRule):
             (should not occur for a match produced by `match()`).
         """
         graph = cvzx_graph.graph
-        container_id = match["container_id"]
         gate_type = match["gate_type"]
         values = match["values"]
         node_ids = match["node_ids"]
         gate_info = match["gate_info"]
 
-        # Get container attributes
-        container_attrs = graph.nodes[container_id]
-        sub_ids = container_attrs.get("sub_diagram_ids", [])
+        # Any identity/Swap crossed by `match()` while finding this chain
+        # is a pure pass-through with no bearing on the reduction itself
+        # -- convert each into a same-shape, in-place `VoidDiagram`,
+        # exactly as `CopyRule`/`TerminalAbsorptionRule` already do.
+        for passthrough_id in match.get("identity_chain", []):
+            passthrough_attrs = graph.nodes[passthrough_id]
+            if passthrough_attrs.get("type") == "Swap":
+                _uncross_voided_swap_edges(graph, passthrough_id)
+            passthrough_attrs["type"] = "VoidDiagram"
+            passthrough_attrs["phase"] = None
 
         # Reduce the chain based on gate type
         reduced_gate = self.reduce_chain(gate_type, values, gate_info)
@@ -1484,109 +2238,250 @@ class ChainReductionRule(RewriteRule):
         # Get the first node in the chain (will absorb the others)
         first_node = node_ids[0]
 
-        # Contract all nodes in the chain into the first node
-        for i in range(1, len(node_ids), 1):
-            nx.contracted_nodes(graph, first_node, node_ids[i], self_loops=False, copy=False)
-            if "contraction" in graph.nodes[first_node]:
-                del graph.nodes[first_node]["contraction"]
+        if match.get("same_parent", True):
+            container_id = match["container_id"]
+            container_attrs = graph.nodes[container_id]
+            sub_ids = container_attrs.get("sub_diagram_ids", [])
 
-        # Update the first node with reduced gate attributes
-        self._update_node_for_reduced_gate(graph, first_node, reduced_gate, container_attrs)
+            # Contract all nodes in the chain into the first node
+            for i in range(1, len(node_ids), 1):
+                nx.contracted_nodes(graph, first_node, node_ids[i], self_loops=False, copy=False)
+                if "contraction" in graph.nodes[first_node]:
+                    del graph.nodes[first_node]["contraction"]
 
-        # Update sub_diagram_ids: keep only the first node, remove the rest
-        new_sub_ids = []
-        removed_connectivity = []
-        for i, sub_id in enumerate(sub_ids):
-            if sub_id in node_ids:
-                if sub_id == first_node:
-                    new_sub_ids.append(first_node)
-                else:
-                    removed_connectivity.append(i - 1)
-                # Skip other nodes in chain
-            else:
-                new_sub_ids.append(sub_id)
+            # Update the first node with reduced gate attributes
+            self._update_node_for_reduced_gate(graph, first_node, reduced_gate)
 
-        graph.nodes[container_id]["sub_diagram_ids"] = new_sub_ids
-        graph.nodes[container_id]["sub_diagram_indices"] = list(range(len(new_sub_ids)))
-        # Update connectivity
-        self._update_connectivity_after_reduction(graph, container_id, removed_connectivity)
-
-        # Flatten if container has only one element
-        if len(new_sub_ids) == 1:
-            self._flatten_container(graph, container_id)
-
-    def find_chains_in_composition(self, graph: nx.DiGraph, sub_ids: list[int]) -> list[dict]:
-        """Find all maximal chains of reducible gates in a CompositionDiagram.
-
-        Parameters
-        ----------
-        graph : nx.DiGraph
-            The graph containing the nodes.
-        sub_ids : list[int]
-            List of sub-diagram IDs in the composition.
-
-        Returns
-        -------
-        list[dict]
-            List of chains, each containing:
-            - 'start_node': first node in the chain
-            - 'gate_type': type of gates
-            - 'values': list of values for each gate
-            - 'node_ids': list of node IDs in order
-
-        Raises
-        ------
-        ValueError
-            If `get_gate_info` returns no `gate_info` for a 'Q'/'P' node
-            (should not occur: those kinds always carry gate_info).
-        """
-        chains = []
-        i = 0
-
-        while i < len(sub_ids):
-            node_id = sub_ids[i]
-            gate_type, value, gate_info = self.get_gate_info(graph, node_id)
-            if gate_type is not None:
-                values = [value]
-                node_ids = [node_id]
-                j = i + 1
-
-                # Check if this is a reducible chain
-                while j < len(sub_ids):
-                    next_node_id = sub_ids[j]
-                    next_type, next_value, next_gate_info = self.get_gate_info(graph, next_node_id)
-                    if self.can_chain(gate_type, value, gate_info, next_type, next_value, next_gate_info):
-                        values.append(next_value)
-                        node_ids.append(next_node_id)
-                        j += 1
-                        # {F, Finv} chains are only of size 2
-                        if {value, next_value} == {"F", "Finv"}:
-                            gate_type = "F_pair"
-                            break
+            # Update sub_diagram_ids: keep only the first node, remove the rest
+            new_sub_ids = []
+            removed_connectivity = []
+            for i, sub_id in enumerate(sub_ids):
+                if sub_id in node_ids:
+                    if sub_id == first_node:
+                        new_sub_ids.append(first_node)
                     else:
-                        next_node_id = sub_ids[j - 1]
-                        next_type, next_value, next_gate_info = self.get_gate_info(graph, next_node_id)
-                        break
+                        removed_connectivity.append(i - 1)
+                    # Skip other nodes in chain
+                else:
+                    new_sub_ids.append(sub_id)
 
-                # Record the chain if it has at least 2 gates
-                if len(values) >= 2:  # ruff: ignore[magic-value-comparison]
-                    if gate_type in {"Q", "P"}:
-                        if gate_info is None or next_gate_info is None:
-                            msg = f"get_gate_info returned no gate_info for a {gate_type!r} node."
-                            raise ValueError(msg)
-                        gate_info["num_outputs"] = next_gate_info["num_outputs"]
-                    chains.append({
-                        "gate_type": gate_type,
-                        "values": values,
-                        "node_ids": node_ids,
-                        "gate_info": gate_info,
-                    })
+            graph.nodes[container_id]["sub_diagram_ids"] = new_sub_ids
+            graph.nodes[container_id]["sub_diagram_indices"] = list(range(len(new_sub_ids)))
+            # Update connectivity
+            self._update_connectivity_after_reduction(graph, container_id, removed_connectivity)
 
-                i = max(i + 1, j)
+            # Flatten if container has only one element
+            if len(new_sub_ids) == 1:
+                self._flatten_container(graph, container_id)
+            return
+
+        # Cross-container / gapped case: `first_node` survives in place
+        # -- its own immediate parent is untouched, mirroring
+        # `TerminalAbsorptionRule`'s `keep_id` -- while every OTHER
+        # member of the chain gets voided in its own original slot
+        # instead, capturing each one's own parent/shape before removal.
+        #
+        # Chains are only ever built forward (`match()` always calls
+        # `_find_full_neighbor(..., forward=True)`), so `first_node`'s
+        # own backward/input side is never touched here -- only its
+        # forward/output side leads into the (now-collapsing) chain.
+        # Blindly `nx.contracted_nodes`-ing every internal `node_ids`
+        # member into `first_node` is wrong whenever a passthrough
+        # separates two chain members: `self_loops=False` only drops an
+        # edge directly between the two contraction endpoints, not one
+        # that merely round-trips through some other node, so the
+        # member's OTHER edge (the one facing back through the
+        # passthrough) survives the contraction and gets reattached onto
+        # `first_node` as a stray, wrong edge -- corrupting the graph
+        # (extra degree, cycles) enough to make a later round in this
+        # same fixed-point loop find and apply a bogus match.
+        #
+        # Instead: capture `node_ids[-1]`'s own forward edges first (the
+        # real link to whatever follows the chain), capture and drop
+        # `first_node`'s own now-obsolete forward edge (whether it
+        # pointed straight at `node_ids[1]` or into a passthrough
+        # leading to it), bulk-remove every internal member (which also
+        # drops all of their own incident edges), then re-attach the
+        # captured far edges directly onto `first_node`, keeping their
+        # original port numbers -- `gate_info["num_outputs"]` is set to
+        # `node_ids[-1]`'s own original output count/order, so `first_node`
+        # now has exactly the shape those ports were numbered for. Any
+        # passthrough that only ever sat *between* two now-removed chain
+        # members is left with a dangling, incomplete edge -- harmless,
+        # since `match()` needs a complete edge on both sides to ever use
+        # it again, and `to_diagram()` never reads graph edges at all.
+        last_node = node_ids[-1]
+        absorbed_info = [
+            (
+                nid,
+                graph.nodes[nid].get("container_id"),
+                graph.nodes[nid].get("num_inputs", 0),
+                graph.nodes[nid].get("num_outputs", 0),
+            )
+            for nid in node_ids[1:]
+        ]
+        first_parent_id = graph.nodes[first_node].get("container_id")
+        first_old_shape = (
+            graph.nodes[first_node].get("num_inputs", 0),
+            graph.nodes[first_node].get("num_outputs", 0),
+        )
+
+        # A FULL closure -- `first_node`'s own combined shape collapsing
+        # all the way to zero outputs, e.g. a state fusing through to an
+        # effect and becoming a bare scalar -- leaves every OTHER node
+        # that physically sat on that now-dead wire declaring a stale,
+        # nonzero shape unless something forces it empty too: not just
+        # this match's own `node_ids[1:]`/`identity_chain` members, but
+        # also any EARLIER round's own leftover `VoidDiagram`s further
+        # along the same wire, invisible to `match()`'s own graph-edge
+        # chase once a previous round's fix already rewired past them
+        # (see the module-level discussion above `_structural_step`).
+        # `match()` has already verified (`_trace_closure_leftovers`,
+        # walked there against the same still-pristine graph this runs
+        # against) that the ENTIRE span consists of nothing else, so this
+        # is done unconditionally once `is_closure` is true, not
+        # re-checked here -- discovered now, while `node_ids[1:]` still
+        # exist as real graph nodes for the walk to step through, applied
+        # once assignments below settle their new (fresh-id) shapes.
+        is_closure = (
+            graph.nodes[first_node].get("num_outputs", 0) != 0 and graph.nodes[last_node].get("num_outputs", 0) == 0
+        )
+        closure_leftovers: list[tuple[int, int]] = []
+        if is_closure:
+            known_absorbed = set(node_ids)
+            seen_leftovers: set[tuple[int, int]] = set()
+            for port in range(graph.nodes[first_node].get("num_outputs", 0)):
+                found = self._trace_closure_leftovers(graph, first_node, last_node, port, known_absorbed)
+                for entry in found or []:
+                    if entry not in seen_leftovers:
+                        seen_leftovers.add(entry)
+                        closure_leftovers.append(entry)
+
+        # Every OTHER leftover discovered above -- not this match's own
+        # member, just something already sitting, as a void, further
+        # along the same now-fully-vanished wire -- needs the vanishing
+        # wire cut out of it too. Unlike this match's own members (whole
+        # gates being fully absorbed, handled below), a leftover can be
+        # a *bundle*: a `Swap` voided in place by an earlier round's own
+        # `_uncross_voided_swap_edges` carries two independent wires on
+        # its two port-pairs, and only the ONE this walk actually
+        # stepped through belongs to this closure -- the other may be
+        # live, unrelated content that must survive untouched.
+        #
+        # Only the OUTPUT side of the traced port is ever removed here,
+        # deliberately never the input side. Every leftover's input is
+        # already fed by *something* earlier on this same wire -- either
+        # this match's own `first_node`/absorbed members or an earlier
+        # leftover in this very list -- and shrinking THAT upstream
+        # node's output already cascades forward through
+        # `_propagate_arity_to_parent`'s own composition/tensor
+        # machinery (the same machinery used everywhere else in this
+        # rule) to trim the downstream node's matching input for us,
+        # using live `connectivity`/`external_*_mapping` state rather
+        # than a port index captured back when this walk was traced.
+        # Explicitly re-removing that same input here too -- using the
+        # now-possibly-stale traced index -- would double-cut it: once
+        # correctly (by the cascade, against current state) and once
+        # more against a port that, after the first cut renumbered its
+        # neighbors, may no longer be the same wire at all -- silently
+        # severing the leftover's OTHER, unrelated live input instead.
+        # Only the output side has no such upstream cascade acting on
+        # it, so it alone needs an explicit cut, and it still needs one
+        # for every leftover including the last, since nothing else
+        # will ever trim it. Ports for the same node are removed
+        # highest-index-first so an already-live index traced on that
+        # same node is never shifted out from under a still-pending
+        # removal. Distinct nodes are processed in structural order
+        # nearest-first, so that each one's own cascade has already run
+        # by the time a later leftover's turn comes.
+        leftover_ports_by_id: dict[int, list[int]] = {}
+        leftover_order: list[int] = []
+        for nid, original_port in closure_leftovers:
+            if nid not in leftover_ports_by_id:
+                leftover_ports_by_id[nid] = []
+                leftover_order.append(nid)
+            leftover_ports_by_id[nid].append(original_port)
+
+        for leftover_id in leftover_order:
+            if leftover_id not in graph.nodes:
+                continue
+            for port in sorted(set(leftover_ports_by_id[leftover_id]), reverse=True):
+                leftover_attrs = graph.nodes[leftover_id]
+                old_in = leftover_attrs.get("num_inputs", 0)
+                old_out = leftover_attrs.get("num_outputs", 0)
+                if port >= old_out:
+                    continue
+                if not self._remove_external_port(graph, leftover_id, is_input=False, port=port):
+                    continue
+                new_out = old_out - 1
+                output_remap = {i: (i if i < port else i - 1) for i in range(old_out) if i != port}
+                self._propagate_arity_to_parent(graph, leftover_id, old_in, old_in, old_out, new_out, {}, output_remap)
+
+        first_stale_out = [
+            target
+            for _, target, edge_attrs in graph.out_edges(first_node, data=True)
+            if edge_attrs.get("edge_type") == "composition"
+        ]
+        far_edges = [
+            (target, dict(edge_attrs))
+            for _, target, edge_attrs in graph.out_edges(last_node, data=True)
+            if edge_attrs.get("edge_type") == "composition"
+        ]
+
+        graph.remove_nodes_from(node_ids[1:])
+
+        for target in first_stale_out:
+            if graph.has_edge(first_node, target):
+                graph.remove_edge(first_node, target)
+        for far_target, edge_attrs in far_edges:
+            if far_target in graph.nodes:
+                graph.add_edge(first_node, far_target, **edge_attrs)
+
+        self._update_node_for_reduced_gate(graph, first_node, reduced_gate)
+
+        for nid, parent_id, n_in, n_out in absorbed_info:
+            if parent_id is None or parent_id not in graph.nodes:
+                continue
+            if is_closure:
+                void_id = self._install_void_placeholder(graph, parent_id, nid, num_inputs=0, num_outputs=0)
+                if n_in != 0 or n_out != 0:
+                    self._propagate_arity_to_parent(graph, void_id, n_in, 0, n_out, 0, {}, {})
             else:
-                i += 1
+                self._install_void_placeholder(graph, parent_id, nid, num_inputs=n_in, num_outputs=n_out)
 
-        return chains
+        # Every fixed-shape gate type this rule folds keeps first_node's
+        # own arity unchanged; only a Q/P spider chain whose first and
+        # last members differ in shape can trigger this. When it does,
+        # `first_node`'s own immediate parent needs to hear about it --
+        # a TensorDiagram parent's own external shape is a function of
+        # its children's, so it's recomputed first and the (possibly
+        # different) recomputed change is what climbs from there; a flat
+        # CompositionDiagram parent instead has `first_node` sitting
+        # directly in its `sub_diagram_ids`, so `_propagate_arity_to_parent`
+        # is called on `first_node` itself -- its own "composition" branch
+        # fixes up the adjacent `connectivity` entry (and, when the
+        # neighbor traces back to a `VoidDiagram`, cascades the shrink
+        # into it via `_remove_external_port`) without needing a
+        # recompute step first. None of `first_node`'s own OLD ports on
+        # the side that changed correspond to anything after the fusion
+        # (the new shape comes from `node_ids[-1]`, not from `first_node`
+        # itself), so that side's remap is empty -- every old port on it
+        # is treated as gone, exactly like `_recompute_tensor_arity`'s
+        # own remaps do for a child that dropped out of a tensor lane.
+        new_shape = (graph.nodes[first_node].get("num_inputs", 0), graph.nodes[first_node].get("num_outputs", 0))
+        if new_shape != first_old_shape and first_parent_id is not None and first_parent_id in graph.nodes:
+            first_parent_type = graph.nodes[first_parent_id].get("container_type")
+            if first_parent_type == "tensor":
+                arity_change = self._recompute_tensor_arity(graph, first_parent_id)
+                self._propagate_arity_to_parent(graph, first_parent_id, *arity_change)
+            else:
+                old_in, old_out = first_old_shape
+                new_in, new_out = new_shape
+                in_remap = {p: p for p in range(old_in)} if new_in == old_in else {}
+                out_remap = {p: p for p in range(old_out)} if new_out == old_out else {}
+                self._propagate_arity_to_parent(
+                    graph, first_node, old_in, new_in, old_out, new_out, in_remap, out_remap
+                )
 
     def get_gate_info(self, graph: nx.DiGraph, node_id: int) -> tuple[str | None, Any, dict | None]:  # ruff: ignore[complex-structure, too-many-return-statements]
         """Extract gate type and value from a node.
@@ -1861,16 +2756,22 @@ class ChainReductionRule(RewriteRule):
 
         return None
 
-    def _update_node_for_reduced_gate(
-        self, graph: nx.DiGraph, node_id: int, reduced_gate: dict, container_attrs: dict
-    ) -> None:
-        """Update a node with reduced gate attributes."""
+    def _update_node_for_reduced_gate(self, graph: nx.DiGraph, node_id: int, reduced_gate: dict) -> None:
+        """Update a node with reduced gate attributes.
+
+        `node_id`'s own `container_id` is deliberately left untouched --
+        it doesn't move, only its type/phase/arity change (mirroring
+        `TerminalAbsorptionRule`/`CopyRule`'s own in-place survivors).
+        `_flatten_container`, called separately once the chain's other
+        members are spliced away, is what updates it on the rare
+        occasion `node_id` ends up as its container's sole remaining
+        child.
+        """
         gate_type = reduced_gate["type"]
 
         # Base attributes
         updates = {
             "type": gate_type,
-            "container_id": container_attrs.get("container_id"),
         }
 
         # Type-specific attributes
@@ -2118,6 +3019,8 @@ class FourierNormalizationRule(RewriteRule):
 
         if len(new_sub_ids) == 1:
             self._flatten_container(graph, container_id)
+        else:
+            self._refresh_composition_external_mappings(graph, container_id)
 
 
 class TerminalAbsorptionRule(RewriteRule):
@@ -2125,7 +3028,7 @@ class TerminalAbsorptionRule(RewriteRule):
 
     Absorbs a gate adjacent to a QSpider/PSpider terminal (arity (1,0)
     effect or (0,1) state) into the terminal's own phase, eliminating the
-    gate. Three sub-cases (the gate may sit on either side of the
+    gate. Four sub-cases (the gate may sit on either side of the
     terminal, whichever its own arity allows -- an effect's gate is
     upstream, a state's gate is downstream):
 
@@ -2147,14 +3050,22 @@ class TerminalAbsorptionRule(RewriteRule):
       leaves the terminal's phase unchanged -- the gate simply vanishes.
       Same-color (1,1) spiders are ordinary spider fusion, FusionRule's
       job, not this rule's.
+    - Displacement (QSpider or PSpider terminal, input phase degree <=
+      1, i.e. in R1[X] -- the same restriction `CopyRule.is_in_R1`
+      enforces for its own copy pattern): a `DisplacementGate` adjacent
+      to such a terminal simply collapses, phase unchanged, exactly like
+      cross-color discard. A higher-degree terminal phase describes a
+      genuinely squeezed (curved) eigenstate, for which an adjacent
+      displacement is not simply irrelevant, so this sub-case doesn't
+      match there (`_check_pair` returns no match rather than guessing).
 
     Only the rotation sub-case is an exact identity for any physical
-    state. Squeezing absorption and cross-color discard both treat the
-    terminal's arbitrary-polynomial phase as an idealized (infinite
+    state. Squeezing absorption, cross-color discard, and displacement
+    absorption all treat the terminal's phase as an idealized (infinite
     squeezing) eigenstate -- a real finite-squeezed state would carry
-    extra terms these two sub-cases drop. `assume_infinite_squeezing`
-    (default False) gates whether those two sub-cases are allowed to
-    match at all; when False, only rotation absorption runs.
+    extra terms these sub-cases drop. `assume_infinite_squeezing`
+    (default False) gates whether those sub-cases are allowed to match
+    at all; when False, only rotation absorption runs.
 
     Neither the terminal nor the gate may be directly one of a
     ContractedDiagram's own two halves (its `first_id`/`second_id`) --
@@ -2177,19 +3088,24 @@ class TerminalAbsorptionRule(RewriteRule):
         """
         self.assume_infinite_squeezing = assume_infinite_squeezing
 
-    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:  # ruff: ignore[too-many-locals]
         """Find all gate/terminal pairs that can be absorbed.
 
-        Candidate pairs are found by scanning the graph's own
-        "composition" edges directly (mirroring `CopyRule`), rather than
-        only checking adjacent `sub_diagram_ids` entries of one
-        CompositionDiagram. Every composition edge already connects
-        fully-resolved leaf nodes regardless of how deeply either
-        endpoint sits inside a TensorDiagram/ContractedDiagram wrapper,
-        so this also finds pairs that cross a container boundary -- e.g.
-        a gate sitting in one Tensor lane feeding a measurement terminal
-        that lives in a completely different Tensor two containers away.
-        `_check_pair` itself is unchanged.
+        Candidates are the graph's own terminal (state/effect) nodes --
+        the same universe `CopyRule` scans -- restricted to QSpider/PSpider,
+        since only those can ever be `_check_pair`'s terminal side. From
+        each one, `_chase_identity_chain` follows its single wire,
+        stepping over any run of identity spiders or `Swap`s directly in
+        the path, to find the real neighboring gate to check -- exactly
+        mirroring `CopyRule`'s own candidate-and-chase scan, rather than
+        only checking pairs directly joined by one composition edge.
+        Every composition edge already connects fully-resolved leaf nodes
+        regardless of how deeply either endpoint sits inside a
+        TensorDiagram/ContractedDiagram wrapper, so this also finds pairs
+        that cross a container boundary -- e.g. a gate sitting in one
+        Tensor lane feeding a measurement terminal that lives in a
+        completely different Tensor two containers away. `_check_pair`
+        itself is unchanged.
 
         A pair is skipped outright, before `_check_pair` even runs, when
         either endpoint's own immediate parent is a ContractedDiagram --
@@ -2206,29 +3122,49 @@ class TerminalAbsorptionRule(RewriteRule):
         list[dict]
             List of matches, each containing:
             - 'container_id': grouping key for `RewriteRule.apply_rule`
-              (the pair's shared immediate parent when they have one,
-              else a synthetic per-match key)
+              (the pair's shared immediate parent when they have one and
+              no identity/`Swap` sits between them, else a synthetic
+              per-match key)
             - 'node_ids': [keep_id, absorb_id] in list order (keep_id survives)
+            - 'identity_chain': passthrough node ids crossed to find this
+              pair, nearest the terminal first
             - 'result_type': 'QSpider' or 'PSpider'
             - 'result_num_inputs' / 'result_num_outputs': the terminal's own arity
             - 'result_phase': the folded phase
         """
         graph = cvzx_graph.graph
-        matches = []
+        registry = cvzx_graph.registry
+        ordered_matches: list[tuple[int, int, dict]] = []
         used_nodes: set[int] = set()
 
-        # Sort for deterministic match order (dict/edge iteration order
-        # isn't guaranteed to reflect any particular scan order).
-        composition_edges = sorted(
-            (u, v) for u, v, edge_attrs in graph.edges(data=True) if edge_attrs.get("edge_type") == "composition"
+        # Every real match's terminal is a bare state (0,1) or effect
+        # (1,0) QSpider/PSpider -- the same candidate shape `CopyRule`
+        # scans -- so this finds exactly the pairs the old direct-edge
+        # scan did, while ALSO transparently chasing through any run of
+        # identity/`Swap` passthroughs sitting directly in the path.
+        candidates = sorted(
+            node
+            for node in registry.input_states | registry.measurement_nodes
+            if node in graph.nodes and graph.nodes[node].get("type") in {"QSpider", "PSpider"}
         )
 
-        for first_id, second_id in composition_edges:
-            # Avoid reusing a node a prior match in this same batch
-            # already consumed (same reasoning as the old index-stepping
-            # loop this replaces).
-            if first_id in used_nodes or second_id in used_nodes:
+        for terminal_id in candidates:
+            if terminal_id in used_nodes:
                 continue
+
+            forward = graph.nodes[terminal_id].get("num_outputs") == 1
+            gate_id, _gate_port, identity_chain = self._chase_identity_chain(graph, terminal_id, forward=forward)
+            if gate_id is None or gate_id in used_nodes or any(cid in used_nodes for cid in identity_chain):
+                continue
+            # At most one `Swap` is voided per match -- crossing a second
+            # one is left for a later round (same "resolve one swap per
+            # run" policy as `ChainReductionRule`'s closure cap), so a
+            # single absorption never sweeps through an entire run of
+            # chained swaps at once.
+            if sum(1 for cid in identity_chain if graph.nodes[cid].get("type") == "Swap") > 1:
+                continue
+
+            first_id, second_id = (terminal_id, gate_id) if forward else (gate_id, terminal_id)
 
             # Neither endpoint may be directly one of a ContractedDiagram's
             # own two halves (its `first_id`/`second_id`).
@@ -2246,10 +3182,17 @@ class TerminalAbsorptionRule(RewriteRule):
             match = self._check_pair(graph, first_id, second_id)
             if match is None:
                 continue
+            match["identity_chain"] = identity_chain
 
             first_parent = graph.nodes[first_id].get("container_id")
             second_parent = graph.nodes[second_id].get("container_id")
-            if first_parent == second_parent and first_parent is not None:
+            # A crossed identity/Swap means the pair isn't actually
+            # adjacent in any flat CompositionDiagram's own list, even
+            # when they happen to share an immediate parent -- see
+            # `CopyRule._resolve_containers` for the same reasoning --
+            # so the adjacent-index bookkeeping below is only used when
+            # the chase found nothing in between.
+            if not identity_chain and first_parent == second_parent and first_parent is not None:
                 match["container_id"] = first_parent
                 sub_ids = graph.nodes[first_parent].get("sub_diagram_ids", [])
                 if first_id in sub_ids and second_id in sub_ids:
@@ -2257,11 +3200,19 @@ class TerminalAbsorptionRule(RewriteRule):
             else:
                 match["container_id"] = ("cross", first_id, second_id)
 
-            matches.append(match)
+            ordered_matches.append((first_id, second_id, match))
             used_nodes.add(first_id)
             used_nodes.add(second_id)
+            used_nodes.update(identity_chain)
 
-        return matches
+        # Sort by the (first_id, second_id) pair the chase discovered --
+        # not by `match["node_ids"]`, whose order reflects `keep_id`
+        # (always the terminal) rather than graph scan order -- for
+        # deterministic match order (dict/node iteration order isn't
+        # guaranteed to reflect any particular scan order), mirroring
+        # `CopyRule`'s own sort.
+        ordered_matches.sort(key=operator.itemgetter(0, 1))
+        return [entry[2] for entry in ordered_matches]
 
     def _check_pair(self, graph: nx.DiGraph, first_id: int, second_id: int) -> dict | None:
         """Check if a pair of adjacent nodes forms an absorbable gate/terminal pattern.
@@ -2293,12 +3244,21 @@ class TerminalAbsorptionRule(RewriteRule):
         ):
             result = self._try_absorb(terminal_attrs=second_attrs, gate_attrs=first_attrs)
             if result:
-                result["node_ids"] = [first_id, second_id]
+                # `node_ids` is always [terminal_id, gate_id] -- the
+                # terminal is `apply_single`'s `keep_id` in both cases,
+                # never the gate: only the terminal's arity is
+                # guaranteed unchanged by folding (its phase changes, its
+                # shape doesn't), so it's the only one of the two whose
+                # own immediate parent can safely stay untouched when the
+                # pair turns out to be cross-container.
+                result["node_ids"] = [second_id, first_id]
                 return result
 
         return None
 
-    def _try_absorb(self, *, terminal_attrs: dict, gate_attrs: dict) -> dict | None:
+    def _try_absorb(  # ruff: ignore[complex-structure]
+        self, *, terminal_attrs: dict, gate_attrs: dict
+    ) -> dict | None:
         """Fold `gate_attrs` into `terminal_attrs`, if the pattern matches.
 
         Returns
@@ -2350,6 +3310,11 @@ class TerminalAbsorptionRule(RewriteRule):
             and self.assume_infinite_squeezing
         ):
             new_phase = phase  # Cross-color discard: unchanged.
+        elif gate_type == "DisplacementGate" and self.assume_infinite_squeezing:
+            if phase is None:
+                msg = f"terminal_attrs has no 'phase' to absorb {gate_type!r} into."
+                raise ValueError(msg)
+            new_phase = self._displacement_absorb(phase)
 
         if new_phase is None:
             return None
@@ -2399,6 +3364,32 @@ class TerminalAbsorptionRule(RewriteRule):
         return ZxPoly({degree: coeff / tau**degree for degree, coeff in phase.coeffs.items()})
 
     @staticmethod
+    def _displacement_absorb(phase: ZxPoly) -> ZxPoly | None:
+        """Fold a `DisplacementGate` into a terminal's phase, if the phase allows it.
+
+        Like squeezing absorption, this idealizes the terminal as an
+        infinite-squeezing eigenstate -- but unlike squeezing (any
+        degree) or rotation (its own, separate degree <= 1 restriction),
+        the eigenstate stays exact under an adjacent displacement only
+        when its own phase is already in R1[X] (degree <= 1, the same
+        restriction `CopyRule.is_in_R1` enforces for its own copy
+        pattern): a higher-degree phase describes a genuinely squeezed
+        (curved) state, for which an adjacent displacement is not simply
+        irrelevant. When the phase does qualify, the gate contributes
+        nothing to it at all -- it just collapses, phase unchanged,
+        exactly like cross-color discard.
+
+        Returns
+        -------
+        ZxPoly | None
+            `phase` unchanged if its degree is <= 1, else None (no
+            match).
+        """
+        if phase.degree() > 1:
+            return None
+        return phase
+
+    @staticmethod
     def _is_degenerate_angle(theta: float | Expr) -> bool:
         """True if theta is an odd multiple of pi/2 (tan/1-over-cos undefined).
 
@@ -2412,7 +3403,9 @@ class TerminalAbsorptionRule(RewriteRule):
             return False  # Symbolic theta: can't determine, assume safe.
         return math.isclose(abs(theta_val) % math.pi, math.pi / 2)
 
-    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:  # ruff: ignore[complex-structure]
+    def apply_single(  # ruff: ignore[complex-structure, too-many-branches, too-many-locals, too-many-statements]
+        self, cvzx_graph: CVZXGraph, match: dict
+    ) -> None:
         """Apply a terminal absorption to a specific match in-place.
 
         Parameters
@@ -2427,6 +3420,19 @@ class TerminalAbsorptionRule(RewriteRule):
         if keep_id not in graph or absorb_id not in graph:
             return
 
+        # Any identity/Swap crossed by `match()` while finding this pair
+        # is a pure pass-through with no bearing on the absorption
+        # itself: convert each into a same-shape, in-place `VoidDiagram`
+        # -- a bare type/phase relabeling at its own exact existing
+        # position, touching no container's shape or bookkeeping at all
+        # -- exactly as `CopyRule` already does for its own chase.
+        for passthrough_id in match.get("identity_chain", []):
+            passthrough_attrs = graph.nodes[passthrough_id]
+            if passthrough_attrs.get("type") == "Swap":
+                _uncross_voided_swap_edges(graph, passthrough_id)
+            passthrough_attrs["type"] = "VoidDiagram"
+            passthrough_attrs["phase"] = None
+
         # Capture the absorbed gate's own parent before the contraction
         # below removes `absorb_id` from the graph entirely.
         absorb_parent_id = graph.nodes[absorb_id].get("container_id")
@@ -2436,9 +3442,14 @@ class TerminalAbsorptionRule(RewriteRule):
         # out of `sub_diagram_ids`/`connectivity` entirely, exactly as
         # before this rule could also look past a single container -- the
         # common case, and it keeps producing a fully collapsed result
-        # (no leftover placeholder) for it.
+        # (no leftover placeholder) for it. A crossed identity/Swap means
+        # `keep_id` and `absorb_id` aren't actually adjacent in any flat
+        # CompositionDiagram's own list, even when they happen to share
+        # an immediate parent -- see `CopyRule._resolve_containers` for
+        # the same reasoning -- so this splice is never used then.
         same_parent = (
-            absorb_parent_id is not None
+            not match.get("identity_chain")
+            and absorb_parent_id is not None
             and absorb_parent_id == keep_parent_id
             and graph.nodes[absorb_parent_id].get("container_type") == "composition"
         )
@@ -2446,9 +3457,88 @@ class TerminalAbsorptionRule(RewriteRule):
         sub_ids = container_attrs.get("sub_diagram_ids", []) if container_attrs is not None else []
         same_parent = same_parent and keep_id in sub_ids and absorb_id in sub_ids
 
-        nx.contracted_nodes(graph, keep_id, absorb_id, self_loops=False, copy=False)
-        if "contraction" in graph.nodes[keep_id]:
-            del graph.nodes[keep_id]["contraction"]
+        # When `identity_chain` is empty, `absorb_id` is directly adjacent
+        # to `keep_id` and contracting them together is exactly right:
+        # their one connecting edge becomes a self-loop and
+        # `self_loops=False` drops it, leaving nothing stray behind. But
+        # when a chase crossed one or more passthroughs to reach
+        # `absorb_id`, `keep_id` is NOT `absorb_id`'s neighbor -- the
+        # nearest passthrough (`identity_chain[-1]`) is. Contracting into
+        # `keep_id` regardless, as if it always were, drags `absorb_id`'s
+        # *other* edge -- the one facing back through the passthrough
+        # chain towards `keep_id` itself -- along for the ride: nothing
+        # makes that a self-loop (its other endpoint is
+        # `identity_chain[-1]`, not `keep_id`), so it survives
+        # unchanged, just re-pointed at `keep_id`. For a state (0
+        # inputs) that fabricates a bogus incoming edge on a node that
+        # should never have one; for an effect (0 outputs), a bogus
+        # outgoing one. Left in place, it closes a cycle back through
+        # the very passthroughs the chase just crossed, which
+        # `_chase_identity_chain`'s next call reaches and stops at
+        # (mistaking `keep_id` itself for the next real neighbor) --
+        # silently truncating any further absorption through the same
+        # terminal, even though nothing about the diagram itself blocks
+        # it.
+        #
+        # Contracting into `identity_chain[-1]` instead -- `keep_id`
+        # itself when the chain is empty, exactly today's behaviour --
+        # fixes this: `identity_chain[-1]` genuinely is `absorb_id`'s
+        # neighbor on that side, so their connecting edge becomes the
+        # self-loop `self_loops=False` drops, while `absorb_id`'s other
+        # edge (the real, continuing one) still lands correctly on
+        # `identity_chain[-1]`, which was already wired back to
+        # `keep_id` through the rest of the chain before this call ever
+        # ran.
+        identity_chain = match.get("identity_chain") or []
+        contract_target = identity_chain[-1] if identity_chain else keep_id
+        is_state = match["result_num_inputs"] == 0  # Forward case: contract_target precedes absorb_id.
+
+        # `contracted_nodes` below reattaches `absorb_id`'s one surviving
+        # edge (to whatever lies past it, `far_id`) onto `contract_target`
+        # verbatim -- including that edge's own port value on
+        # `absorb_id`'s side, which is always 0 (every sub-case this rule
+        # matches -- rotation/squeezing/cross-color-discard gate -- is
+        # 1-in/1-out). That's harmless when `contract_target` is `keep_id`
+        # itself (also always single-port on this side, so 0 was already
+        # right), but wrong the moment `contract_target` is a genuinely
+        # multi-port node, e.g. a voided `Swap` mid-`identity_chain`:
+        # `contract_target`'s REAL port that used to bridge to
+        # `absorb_id` -- recorded on the "near" edge directly between
+        # them, about to be dropped as a self-loop below -- can be a
+        # different port entirely (e.g. 1, not 0). Landing the far edge
+        # on the wrong port silently claims a port `contract_target`
+        # never actually had a live connection on while leaving its real
+        # bridging port with no outgoing edge at all -- a dead end that
+        # truncates any further chase through it, even though nothing
+        # about the diagram blocks continuing. Recover the real port
+        # from the near edge before it's dropped, and fix the far edge's
+        # port up to match once the contraction is done.
+        near_port = None
+        far_id = None
+        if is_state:
+            if graph.has_edge(contract_target, absorb_id):
+                near_port = graph.edges[contract_target, absorb_id]["source_ports"][0]
+            for _, far_candidate, edge_attrs in graph.out_edges(absorb_id, data=True):
+                if edge_attrs.get("edge_type") == "composition":
+                    far_id = far_candidate
+                    break
+        else:
+            if graph.has_edge(absorb_id, contract_target):
+                near_port = graph.edges[absorb_id, contract_target]["target_ports"][0]
+            for far_candidate, _, edge_attrs in graph.in_edges(absorb_id, data=True):
+                if edge_attrs.get("edge_type") == "composition":
+                    far_id = far_candidate
+                    break
+
+        nx.contracted_nodes(graph, contract_target, absorb_id, self_loops=False, copy=False)
+        if "contraction" in graph.nodes[contract_target]:
+            del graph.nodes[contract_target]["contraction"]
+
+        if near_port is not None and far_id is not None and far_id != contract_target:
+            if is_state and graph.has_edge(contract_target, far_id):
+                graph.edges[contract_target, far_id]["source_ports"] = [near_port]
+            elif not is_state and graph.has_edge(far_id, contract_target):
+                graph.edges[far_id, contract_target]["target_ports"] = [near_port]
 
         # `keep_id` doesn't move -- only its own type/phase/arity change;
         # its own immediate parent is untouched.
@@ -2483,6 +3573,8 @@ class TerminalAbsorptionRule(RewriteRule):
 
             if len(new_sub_ids) == 1:
                 self._flatten_container(graph, absorb_parent_id)
+            else:
+                self._refresh_composition_external_mappings(graph, absorb_parent_id)
             return
 
         if absorb_parent_id is not None and absorb_parent_id in graph.nodes:
@@ -2589,7 +3681,7 @@ class CopyRule(RewriteRule):
 
         for copy_id in candidates:
             forward = graph.nodes[copy_id].get("num_outputs") == 1
-            neighbor_id, identity_chain = self._chase_identity_chain(graph, copy_id, forward=forward)
+            neighbor_id, _neighbor_port, identity_chain = self._chase_identity_chain(graph, copy_id, forward=forward)
             if neighbor_id is None:
                 continue
 
@@ -2613,63 +3705,6 @@ class CopyRule(RewriteRule):
         # doesn't cross an identity chain.
         ordered_matches.sort(key=operator.itemgetter(0, 1))
         return [entry[2] for entry in ordered_matches]
-
-    def _chase_identity_chain(
-        self, graph: nx.DiGraph, start_id: int, *, forward: bool
-    ) -> tuple[int | None, list[int]]:
-        """Follow composition edges from `start_id`, stepping over identities.
-
-        Walks from `start_id` in the given direction, one composition
-        edge at a time, continuing past every node that is itself an
-        identity spider (zero-phase, raw arity (1,1)) -- a pure
-        pass-through with no bearing on the copy law -- until it reaches
-        the first node that isn't. That node is the real neighbor to
-        check as a copy-law hub; the identities skipped along the way
-        are returned too, so `apply_single` can convert each into an
-        in-place `VoidDiagram` once the match fires.
-
-        Parameters
-        ----------
-        graph : nx.DiGraph
-            The graph to search.
-        start_id : int
-            The node to start from -- a copy_spider candidate.
-        forward : bool
-            True to follow outgoing composition edges (`start_id` is a
-            state, arity (0,1)); False to follow incoming ones
-            (`start_id` is an effect, arity (1,0)).
-
-        Returns
-        -------
-        tuple[int | None, list[int]]
-            `(neighbor_id, identity_ids_crossed)` -- the identity ids in
-            traversal order, nearest `start_id` first -- or `(None, [])`
-            if there is no composition edge at all in that direction.
-        """
-        crossed: list[int] = []
-        current = start_id
-        while True:
-            if forward:
-                neighbors = [
-                    v
-                    for _, v, edge_attrs in graph.out_edges(current, data=True)
-                    if edge_attrs.get("edge_type") == "composition"
-                ]
-            else:
-                neighbors = [
-                    u
-                    for u, _, edge_attrs in graph.in_edges(current, data=True)
-                    if edge_attrs.get("edge_type") == "composition"
-                ]
-            if not neighbors:
-                return None, crossed
-            nxt = neighbors[0]
-            nxt_attrs = graph.nodes[nxt]
-            if nxt_attrs.get("kind") == "proper" and is_wiring_node_from_attrs(nxt_attrs):
-                crossed.append(nxt)
-                current = nxt
-                continue
-            return nxt, crossed
 
     def _resolve_containers(
         self, graph: nx.DiGraph, base_match: dict, identity_chain: list[int] | None = None
@@ -2720,8 +3755,19 @@ class CopyRule(RewriteRule):
                 "indices": indices,
             }
 
-        # Cross-container case:
-        if copy_parent_type != "tensor":
+        # Cross-container case: `copy_id`'s own parent is either a
+        # TensorDiagram (a plain lane, direct list substitution -- Step 2
+        # below) or a flat CompositionDiagram. The latter is only safe
+        # when `copy_id` sits at one of its own two ends -- but that's
+        # automatically true whenever `copy_id` is a bare state (0,1) or
+        # effect (1,0), which every real match's copy_spider always is:
+        # a state has no input ports for anything to compose into, so it
+        # can only ever be the FIRST entry of its own composition; an
+        # effect has no output ports, so it can only ever be the LAST.
+        # No extra position check is needed -- Step 2's void-swap below
+        # doesn't care about position either way, replacing `copy_id`'s
+        # own slot in place with no effect on its neighbors.
+        if copy_parent_type not in {"tensor", "composition"}:
             return None
         if disappear_parent_type not in {"tensor", "contracted"}:
             return None
@@ -2920,6 +3966,8 @@ class CopyRule(RewriteRule):
         # so it trivially preserves connectivity.
         for identity_id in match.get("identity_chain", []):
             identity_attrs = graph.nodes[identity_id]
+            if identity_attrs.get("type") == "Swap":
+                _uncross_voided_swap_edges(graph, identity_id)
             identity_attrs["type"] = "VoidDiagram"
             identity_attrs["phase"] = None
 
@@ -3011,6 +4059,8 @@ class CopyRule(RewriteRule):
                 graph.nodes[container_id]["connectivity"] = new_connectivity
             if len(sub_ids) == 2:  # ruff: ignore[magic-value-comparison]
                 self._flatten_container(graph, container_id)
+            else:
+                self._refresh_composition_external_mappings(graph, container_id)
             return
 
         # Cross-container case
@@ -3249,6 +4299,253 @@ def is_wiring_node_from_attrs(attrs: dict) -> bool:
         return False
 
     return bool(phase.is_zero)
+
+
+def _is_chase_passthrough(attrs: dict) -> bool:
+    """Check if a node's attributes represent a `_chase_identity_chain` passthrough.
+
+    A passthrough is an identity/wiring diagram (see
+    `is_wiring_node_from_attrs`), a `Swap`, or a same-arity (square)
+    `VoidDiagram` -- all three are pure wire-routing with no bearing on
+    whatever pattern is being chased through them.
+
+    A square `VoidDiagram` belongs here alongside a bare identity spider
+    and a `Swap` because it is one of them, mid-chase: every rule that
+    installs one in place of a chain member it has already decided is a
+    pure pass-through (an identity spider, or a `Swap` whose crossing has
+    already been compensated into the surrounding connectivity by
+    `_uncross_voided_swap_edges` -- see its docstring) does so via a bare
+    type relabel, at the *same* node, with the *same* arity. Nothing
+    about what the node physically does changes; only its label does.
+    Treating it as opaque instead -- which is what happened before this
+    was added -- makes a voided `Swap` a permanent one-way wall: since
+    `_simplify_to_fixed_point` re-runs every rule to a fixed point,
+    a chain that shares a `Swap` with another, already-reduced chain
+    would otherwise never become reachable on any later pass, not just
+    the current one, even though the wire it needs to cross is exactly
+    as pass-through as it always was.
+
+    A `VoidDiagram`'s arity must still be checked here rather than
+    assumed: this rule's own `identity_chain` mechanism (see
+    `_is_chase_passthrough`'s callers) only ever installs one at 1-in/
+    1-out (a voided identity spider) or 2-in/2-out (a voided `Swap`), so
+    in practice this only ever matches those two shapes -- but a
+    `VoidDiagram` installed by some other mechanism entirely (a vanished
+    state/effect, arity (0, 1) or (1, 0)) is a genuine dead end, not a
+    wire to chase through, and must stay opaque.
+
+    Parameters
+    ----------
+    attrs : dict
+        Node attributes from the graph.
+
+    Returns
+    -------
+    bool
+        True if the node is transparent to `_chase_identity_chain`.
+    """
+    if is_wiring_node_from_attrs(attrs) or attrs.get("type") == "Swap":
+        return True
+    if attrs.get("type") == "VoidDiagram":
+        num_inputs = attrs.get("num_inputs", 0)
+        return bool(num_inputs > 0 and num_inputs == attrs.get("num_outputs", 0))
+    return False
+
+
+def _passthrough_exit_port(attrs: dict, entry_port: int) -> int:
+    """The port to continue a chase from, on the far side of a passthrough node.
+
+    An identity spider has exactly one port on each side (always index
+    0), so the exit port is just the entry port unchanged. A `Swap`
+    exchanges its two modes (`in0<->out1`, `in1<->out0` -- self-inverse,
+    so the same rule works whether `entry_port` names an input port
+    (chasing forward) or an output port (chasing backward)): the exit
+    port is the other one.
+
+    Parameters
+    ----------
+    attrs : dict
+        The passthrough node's attributes.
+    entry_port : int
+        The port the chase arrived on.
+
+    Returns
+    -------
+    int
+        The port to look for the next composition edge from.
+    """
+    if attrs.get("type") == "Swap":
+        return 1 - entry_port
+    return entry_port
+
+
+def _uncross_voided_swap_edges(  # ruff: ignore[complex-structure, too-many-locals]
+    graph: nx.DiGraph, swap_id: int
+) -> None:
+    """Pre-compensate a `Swap` node before voiding it in place.
+
+    `Swap` crosses its two ports (`out0` carries whatever arrived on
+    `in1`, `out1` carries whatever arrived on `in0`) -- but that
+    crossing is *leaf-internal*: it lives entirely in what `Swap` itself
+    means, never in the surrounding `CompositionDiagram.connectivity`,
+    which stays the default identity mapping on both sides of a `Swap`
+    exactly as it would around any other leaf. `to_diagram` reconstructs
+    a `CompositionDiagram` purely from its container node's own
+    `"connectivity"` attribute (see `_reconstruct_composition_node`) --
+    it never inspects leaf-to-leaf edges for this, so those edges'
+    `source_ports`/`target_ports` are along for the ride, not load-
+    bearing for reconstruction. A `TensorDiagram`, by contrast, has no
+    connectivity of its own to compensate against at all: its
+    reconstruction (`_reconstruct_tensor_node`) is purely positional, so
+    a `Swap` sitting alone in one of its lanes is only ever wired to
+    "whatever comes next" via the nearest enclosing `CompositionDiagram`
+    -- however many purely-positional containers sit in between.
+
+    A `VoidDiagram` of the same arity does not cross anything -- it is
+    treated everywhere (drawing, `diagram_to_circuit`) as a literal
+    `out_k = in_k` identity. Simply relabelling a `Swap` node's `type`
+    to `"VoidDiagram"` in place -- as every rule's `identity_chain`
+    installation loop does -- therefore silently breaks the wiring for
+    whichever port still carries real, kept content: the connectivity
+    entry immediately after the `Swap` is left saying "my port k feeds
+    your port k", which was true reading through a real `Swap`'s own
+    crossing semantics, but becomes false the instant the node is
+    reinterpreted as a non-crossing identity.
+
+    Calling this first keeps every downstream node wired to the exact
+    same upstream signal it always was: it flips, within the *nearest
+    enclosing* `CompositionDiagram`'s connectivity entry for the
+    boundary immediately after `swap_id` (or after whichever ancestor of
+    `swap_id` is that `CompositionDiagram`'s own direct child), just the
+    two port assignments that correspond to `swap_id`'s own two output
+    ports -- leaving every other port of that boundary (any tensor
+    siblings `swap_id` has along the way) untouched. This bakes the
+    compensating cross into the diagram's actual data before the node's
+    type ever changes. It also flips the `source_ports` of `swap_id`'s
+    own outgoing graph edges to match, purely so the graph stays
+    internally consistent for anything else that inspects it directly
+    -- this part needs no translation, since it concerns only
+    `swap_id`'s own two ports, regardless of what contains it.
+
+    When `swap_id` is a direct child of a `CompositionDiagram`, "the two
+    port assignments that correspond to `swap_id`'s own two output
+    ports" are just ports 0 and 1 of that boundary, and this reduces to
+    flipping the whole (necessarily 2-wide) boundary -- the original,
+    simpler behaviour this generalizes. When `swap_id` instead sits
+    inside one or more `TensorDiagram` lanes first (the only other
+    container this walks through, since `_reconstruct_tensor_node`'s
+    purely-positional reconstruction means nothing else needs
+    compensating along the way), each level's `external_output_mapping`
+    is used in reverse to translate `swap_id`'s ports into that
+    ancestor's own external output port numbering, one level at a time,
+    until an ancestor is found whose *own* parent is the
+    `CompositionDiagram` to compensate against.
+
+    Flipping the boundary *after* `swap_id` alone is an arbitrary but
+    sufficient choice -- `Swap` is self-inverse, so compensating on
+    either side alone recovers the correct routing, and flipping both
+    would just cancel out.
+
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        The graph being rewritten, mutated in place.
+    swap_id : int
+        Node id of the `Swap` about to be voided. Must have exactly 2
+        inputs and 2 outputs -- the only arity a `Swap` ever has.
+
+    Raises
+    ------
+    ValueError
+        If `swap_id` is not a 2-in/2-out node; if walking up from it
+        reaches a node with no `container_id` (no enclosing
+        `CompositionDiagram` to compensate against) or a container type
+        other than `TensorDiagram`/`CompositionDiagram` (not yet
+        supported by this compensation); if a `sub_diagram_ids` or
+        `external_output_mapping` lookup along the way doesn't contain
+        the node/port it should; or if the two translated ports don't
+        land on two distinct, present entries of the final boundary --
+        `_chase_identity_chain` only ever crosses a bare, untouched
+        `Swap`, so this should not occur for a genuine chase member.
+    """
+    attrs = graph.nodes[swap_id]
+    if attrs.get("num_inputs") != 2 or attrs.get("num_outputs") != 2:  # ruff: ignore[magic-value-comparison]
+        msg = f"_uncross_voided_swap_edges: node {swap_id} is not a 2-in/2-out Swap."
+        raise ValueError(msg)
+
+    # Walk up from `swap_id`, translating its own two output ports
+    # through any purely-positional `TensorDiagram` ancestors, until we
+    # reach the nearest ancestor that is a direct child of the
+    # `CompositionDiagram` to compensate against.
+    current_id = swap_id
+    port_map = {0: 0, 1: 1}  # swap_id's own output port -> current_id's own output port
+    while True:
+        parent_id = graph.nodes[current_id].get("container_id")
+        parent_attrs = graph.nodes[parent_id] if parent_id is not None else None
+        if parent_attrs is None:
+            msg = (
+                f"_uncross_voided_swap_edges: node {swap_id} has no enclosing "
+                "CompositionDiagram to compensate against."
+            )
+            raise ValueError(msg)
+
+        parent_type = parent_attrs.get("type")
+        if parent_type == "CompositionDiagram":
+            break
+        if parent_type != "TensorDiagram":
+            msg = (
+                f"_uncross_voided_swap_edges: node {swap_id} is nested inside a "
+                f"{parent_type!r} container ({parent_id}) on the way up to its "
+                "enclosing CompositionDiagram -- not supported by this "
+                "compensation."
+            )
+            raise ValueError(msg)
+
+        sub_diagram_ids = parent_attrs.get("sub_diagram_ids", [])
+        if current_id not in sub_diagram_ids:
+            msg = f"_uncross_voided_swap_edges: node {current_id} is not a direct child of parent {parent_id}."
+            raise ValueError(msg)
+        lane_index = sub_diagram_ids.index(current_id)
+
+        output_mapping = parent_attrs.get("external_output_mapping", {})
+        reverse_mapping = {target: source for source, target in output_mapping.items()}
+        new_port_map = {}
+        for swap_port, internal_port in port_map.items():
+            target_key = (lane_index, internal_port)
+            if target_key not in reverse_mapping:
+                msg = (
+                    f"_uncross_voided_swap_edges: parent {parent_id}'s "
+                    f"external_output_mapping has no entry for {target_key!r} "
+                    f"(node {current_id}'s own output port {internal_port})."
+                )
+                raise ValueError(msg)
+            new_port_map[swap_port] = reverse_mapping[target_key]
+        port_map = new_port_map
+        current_id = parent_id
+
+    sub_diagram_ids = parent_attrs.get("sub_diagram_ids", [])
+    if current_id not in sub_diagram_ids:
+        msg = f"_uncross_voided_swap_edges: node {current_id} is not a direct child of parent {parent_id}."
+        raise ValueError(msg)
+    stage_index = sub_diagram_ids.index(current_id)
+
+    connectivity = parent_attrs.get("connectivity")
+    boundary = connectivity.get(stage_index) if connectivity is not None else None
+    port_a, port_b = port_map[0], port_map[1]
+    if boundary is None or port_a not in boundary or port_b not in boundary or boundary[port_a] == boundary[port_b]:
+        msg = (
+            f"_uncross_voided_swap_edges: parent {parent_id}'s connectivity "
+            f"entry for boundary {stage_index} does not have clean, distinct "
+            f"entries for ports {port_a} and {port_b} (got {boundary!r}) -- "
+            "cannot safely compensate for the Swap's crossing."
+        )
+        raise ValueError(msg)
+    boundary[port_a], boundary[port_b] = boundary[port_b], boundary[port_a]
+
+    for _, _, edge_data in graph.out_edges(swap_id, data=True):
+        source_ports = edge_data.get("source_ports")
+        if source_ports:
+            edge_data["source_ports"] = [1 - p for p in source_ports]
 
 
 def apply_rule_to_diagram(rule: RewriteRule, diagram: Diagram) -> Diagram:

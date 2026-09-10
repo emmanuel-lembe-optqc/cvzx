@@ -330,15 +330,16 @@ class TestFourierNormalizationRule(unittest.TestCase):
         assert result.diagrams[1].tau == -2.0  # ruff: ignore[float-equality-comparison]
 
     def test_apply_rule_overlapping_chain_needs_two_passes(self):
-        """F, R, Finv: one apply_rule() pass folds only the first pair."""
+        """F, R, Finv: one `apply_rule()` call reaches the full fixed point.
+
+        Folding the first pair (F, R) exposes a second, overlapping match
+        against `Finv` that a single internal round can't also claim (see
+        `RewriteRule.apply_rule`'s docstring for why) -- but `apply_rule`
+        loops internally until nothing further matches, so one call is
+        still enough to reach the fully-folded `PhaseRotationGate`.
+        """
         comp = CompositionDiagram([Fourier(), PhaseRotationGate(self.theta1), FourierInv()])
         graph = to_graph(comp)
-        self.rule.apply_rule(graph)
-        after_one_pass = to_diagram(graph)
-        assert isinstance(after_one_pass, CompositionDiagram)
-        assert len(after_one_pass.diagrams) == 2
-
-        # Second pass: fixed point.
         self.rule.apply_rule(graph)
         final = to_diagram(graph)
         assert isinstance(final, PhaseRotationGate)

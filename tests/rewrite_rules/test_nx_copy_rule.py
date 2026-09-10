@@ -971,6 +971,200 @@ class TestCopyRule(unittest.TestCase):
         assert result.num_inputs == 0
         assert result.num_outputs == 2
 
+    # -------------------------------------------------------------------------
+    # 8. Chain-chasing through identity spiders AND `Swap`: `_chase_identity_chain`
+    #    (shared via `RewriteRule`, see its docstring) must transparently see
+    #    past a run of zero-phase identity spiders *and* a wire-crossing `Swap`
+    #    alike, in either chase direction, including when the far end sits
+    #    inside a `ContractedDiagram`.
+    # -------------------------------------------------------------------------
+
+    def test_match_cross_container_contracted_input_direction_through_identities(self):
+        """Input-direction chase through a ContractedDiagram.
+
+        A state feeds forward, through two identity spiders, into a
+        copy-law hub that is directly `first`/`second` of a
+        `ContractedDiagram` produced by expanding a CSUM gate.
+
+        `forward=True` here because the copy spider is a bare input state
+        (arity (0,1)) -- see `CopyRule.match`'s `candidates` scan, which is
+        exactly `registry.input_states`'s half of the terminal shapes.
+        """
+        control_state = PSpider(0, 1, self.phase_x2)
+        target_state = QSpider(0, 1, self.phase_x)
+        id1 = QSpider(1, 1, self.zero_phase)
+        id2 = PSpider(1, 1, self.zero_phase)
+        csum = ControlledSumGate(control=2, target=1)
+        comp = CompositionDiagram([
+            TensorDiagram([
+                CompositionDiagram([control_state, id1, id2]),
+                target_state,
+            ]),
+            csum,
+        ])
+        expanded = expand_two_mode_gates(comp)
+        graph = to_graph(expanded)
+        matches = self.rule.match(graph)
+        by_copy_id = {m["copy_spider_id"]: m for m in matches}
+        assert control_state.id in by_copy_id
+        control_match = by_copy_id[control_state.id]
+        assert control_match["same_parent"] is False
+        assert control_match["disappear_container_type"] == "contracted"
+        assert set(control_match["identity_chain"]) == {id1.id, id2.id}
+        # The other, identity-free state->hub pair still matches normally.
+        target_match = by_copy_id[target_state.id]
+        assert target_match["identity_chain"] == []
+
+    def test_apply_rule_cross_container_contracted_input_direction_through_identities(self):
+        """Applying the rule resolves both pairs.
+
+        No match remains afterward, and both identity spiders end up
+        converted in place (never breaking reconstruction), regardless
+        of which one sits on the crossed path.
+        """
+        control_state = PSpider(0, 1, self.phase_x2)
+        target_state = QSpider(0, 1, self.phase_x)
+        id1 = QSpider(1, 1, self.zero_phase)
+        id2 = PSpider(1, 1, self.zero_phase)
+        csum = ControlledSumGate(control=2, target=1)
+        comp = CompositionDiagram([
+            TensorDiagram([
+                CompositionDiagram([control_state, id1, id2]),
+                target_state,
+            ]),
+            csum,
+        ])
+        expanded = expand_two_mode_gates(comp)
+
+        result = apply_rule_to_diagram(self.rule, expanded)
+
+        assert isinstance(result, CompositionDiagram)
+        assert result.num_inputs == 0
+        assert result.num_outputs == 2
+        graph = to_graph(result)
+        assert len(self.rule.match(graph)) == 0
+
+    def test_match_cross_container_contracted_measurement_direction_through_identities(self):
+        """Measurement-direction chase through a ContractedDiagram.
+
+        A copy-law hub that is directly `first` of a `ContractedDiagram`
+        feeds forward, through two identity spiders, into an effect
+        (arity (1,0)) outside the contraction.
+
+        `forward=False` here because the copy spider is a bare measurement
+        effect -- see `CopyRule.match`'s `candidates` scan, which is exactly
+        `registry.measurement_nodes`'s half of the terminal shapes.
+        """
+        hub = QSpider(2, 1, self.phi_any)  # disappearing spider, `first`
+        partner = PSpider(1, 1, self.zero_phase)  # trivial partner, `second`
+        # J1=[0]/J2=[0]: hub's 2nd input is fed back from partner's output,
+        # leaving hub's 1st input and single output, plus partner's input,
+        # as the contraction's 3 external ports.
+        contracted = ContractedDiagram(hub, partner, [], [], [0], [0])
+        id1 = QSpider(1, 1, self.zero_phase)
+        id2 = PSpider(1, 1, self.zero_phase)
+        effect = PSpider(1, 0, self.phase_x)
+
+        comp = CompositionDiagram([contracted, id1, id2, effect])
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["copy_spider_id"] == effect.id
+        assert matches[0]["disappearing_spider_id"] == hub.id
+        assert matches[0]["same_parent"] is False
+        assert matches[0]["disappear_container_type"] == "contracted"
+        assert set(matches[0]["identity_chain"]) == {id1.id, id2.id}
+        # `hub`'s raw shape is (2,1), but one of its two inputs is
+        # consumed internally by the contraction (fed back from
+        # `partner`) -- only the OTHER input is externally visible, so
+        # the copy law here sees an effective arity of 1, not 2.
+        assert matches[0]["n_copies"] == 1
+
+    def test_apply_rule_cross_container_contracted_measurement_direction_through_identities(self):
+        """Applying the measurement-direction match.
+
+        No match is left behind, and the diagram's overall arity is
+        preserved.
+        """
+        hub = QSpider(2, 1, self.phi_any)
+        partner = PSpider(1, 1, self.zero_phase)
+        contracted = ContractedDiagram(hub, partner, [], [], [0], [0])
+        id1 = QSpider(1, 1, self.zero_phase)
+        id2 = PSpider(1, 1, self.zero_phase)
+        effect = PSpider(1, 0, self.phase_x)
+        comp = CompositionDiagram([contracted, id1, id2, effect])
+
+        result = apply_rule_to_diagram(self.rule, comp)
+
+        assert result.num_inputs == 2
+        assert result.num_outputs == 0
+        graph = to_graph(result)
+        assert len(self.rule.match(graph)) == 0
+
+    def test_match_swap_interleaved_with_identities(self):
+        """Chase forward through a `Swap` interleaved with an identity.
+
+        A copy-law state chases forward through a `Swap` AND an identity
+        spider (interleaved on its own lane, with an unrelated
+        independent lane sharing the `Swap`'s other two ports) to reach
+        its hub.
+
+        The `Swap`'s other port carries a completely unrelated wire (a
+        bad-phase filler state feeding a trivial identity), proving the
+        chase is genuinely port-aware: it must follow only the ONE port
+        that actually continues the copy spider's own wire through the
+        crossing, not get confused by the sibling wire sharing the same
+        `Swap` node.
+        """
+        q_state = QSpider(0, 1, self.phase_x2)  # copy spider (state)
+        filler_state = PSpider(0, 1, self.phase_x3)  # unrelated lane, bad phase
+        id_filler = PSpider(1, 1, self.zero_phase)  # identity, filler lane (post-swap)
+        id_q = QSpider(1, 1, self.zero_phase)  # identity, copy-spider lane (post-swap)
+        hub = PSpider(1, 3, self.phi_any)  # disappearing hub (case 1)
+        filler_terminal = PSpider(1, 1, self.zero_phase)  # caps off the filler lane
+
+        lhs = TensorDiagram([q_state, filler_state])
+        swap = Swap()
+        mid = TensorDiagram([id_filler, id_q])
+        final_stage = TensorDiagram([filler_terminal, hub])
+        comp = CompositionDiagram([lhs, swap, mid, final_stage])
+
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["copy_spider_id"] == q_state.id
+        assert matches[0]["disappearing_spider_id"] == hub.id
+        assert matches[0]["n_copies"] == 3
+        assert set(matches[0]["identity_chain"]) == {swap.id, id_q.id}
+        # The filler lane's own identity never gets crossed by this chase.
+        assert id_filler.id not in matches[0]["identity_chain"]
+
+    def test_apply_rule_swap_interleaved_with_identities(self):
+        """Applying the rule resolves the crossed pattern.
+
+        The unrelated filler lane is left untouched (no match left,
+        arity preserved).
+        """
+        q_state = QSpider(0, 1, self.phase_x2)
+        filler_state = PSpider(0, 1, self.phase_x3)
+        id_filler = PSpider(1, 1, self.zero_phase)
+        id_q = QSpider(1, 1, self.zero_phase)
+        hub = PSpider(1, 3, self.phi_any)
+        filler_terminal = PSpider(1, 1, self.zero_phase)
+
+        lhs = TensorDiagram([q_state, filler_state])
+        swap = Swap()
+        mid = TensorDiagram([id_filler, id_q])
+        final_stage = TensorDiagram([filler_terminal, hub])
+        comp = CompositionDiagram([lhs, swap, mid, final_stage])
+
+        result = apply_rule_to_diagram(self.rule, comp)
+
+        assert result.num_inputs == 0
+        assert result.num_outputs == 4
+        graph = to_graph(result)
+        assert len(self.rule.match(graph)) == 0
+
 
 if __name__ == "__main__":
     # Create output directory for visualizations
@@ -1034,3 +1228,50 @@ if __name__ == "__main__":
     diagram = CompositionDiagram([fourier, ph_rot])
     diagram_after = apply_rule_to_diagram(rule, diagram)
     visualize_before_after(diagram, diagram_after, "No reduction", rule_name)
+
+    # Test 7: Input-direction chase through identity spiders into a hub
+    # nested inside a ContractedDiagram (produced by expanding a CSUM gate).
+    control_state = PSpider(0, 1, phase_x2)
+    target_state = QSpider(0, 1, phase_x)
+    id1 = QSpider(1, 1, ZxPoly({}))
+    id2 = PSpider(1, 1, ZxPoly({}))
+    csum = ControlledSumGate(control=2, target=1)
+    comp7 = CompositionDiagram([
+        TensorDiagram([
+            CompositionDiagram([control_state, id1, id2]),
+            target_state,
+        ]),
+        csum,
+    ])
+    comp7_new: Diagram = expand_two_mode_gates(comp7)
+    comp7_after = apply_rule_to_diagram(rule, comp7_new)
+    visualize_before_after(comp7_new, comp7_after, "Input Direction Through Identities Into Contracted", rule_name)
+
+    # Test 8: Measurement-direction chase through identity spiders, from a
+    # hub nested inside a ContractedDiagram, out to an external effect.
+    hub = QSpider(2, 1, phi_any)
+    partner = PSpider(1, 1, ZxPoly({}))
+    contracted8 = ContractedDiagram(hub, partner, [], [], [0], [0])
+    id3 = QSpider(1, 1, ZxPoly({}))
+    id4 = PSpider(1, 1, ZxPoly({}))
+    effect8 = PSpider(1, 0, phase_x)
+    comp8 = CompositionDiagram([contracted8, id3, id4, effect8])
+    comp8_after = apply_rule_to_diagram(rule, comp8)
+    visualize_before_after(comp8, comp8_after, "Measurement Direction Through Identities From Contracted", rule_name)
+
+    # Test 9: A Swap interleaved with an identity spider on the copy
+    # spider's own lane, with an unrelated wire sharing the Swap's other
+    # two ports.
+    q_state9 = QSpider(0, 1, phase_x2)
+    filler_state9 = PSpider(0, 1, ZxPoly({3: 2}))
+    id_filler9 = PSpider(1, 1, ZxPoly({}))
+    id_q9 = QSpider(1, 1, ZxPoly({}))
+    hub9 = PSpider(1, 3, phi_any)
+    filler_terminal9 = PSpider(1, 1, ZxPoly({}))
+    lhs9 = TensorDiagram([q_state9, filler_state9])
+    swap9 = Swap()
+    mid9 = TensorDiagram([id_filler9, id_q9])
+    final_stage9 = TensorDiagram([filler_terminal9, hub9])
+    comp9 = CompositionDiagram([lhs9, swap9, mid9, final_stage9])
+    comp9_after = apply_rule_to_diagram(rule, comp9)
+    visualize_before_after(comp9, comp9_after, "Swap Interleaved With Identities", rule_name)

@@ -200,6 +200,41 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert len(matches) == 1
         assert matches[0]["result_phase"] == self.q_state.phase
 
+    def test_match_displacement_effect_qspider(self):
+        """A DisplacementGate collapses into an adjacent QSpider effect, unchanged."""
+        comp = CompositionDiagram([DisplacementGate(0.5), self.q_effect])
+        graph = to_graph(comp)
+        matches = self.rule_idealized.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["result_type"] == "QSpider"
+        assert matches[0]["result_phase"] == self.q_effect.phase
+
+    def test_match_displacement_effect_pspider(self):
+        """A DisplacementGate collapses into an adjacent PSpider effect too -- either color."""
+        comp = CompositionDiagram([DisplacementGate(0.5), self.p_effect])
+        graph = to_graph(comp)
+        matches = self.rule_idealized.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["result_type"] == "PSpider"
+        assert matches[0]["result_phase"] == self.p_effect.phase
+
+    def test_match_displacement_state(self):
+        """A DisplacementGate collapses into an adjacent state, list order [state, D]."""
+        comp = CompositionDiagram([self.q_state, DisplacementGate(-1.0)])
+        graph = to_graph(comp)
+        matches = self.rule_idealized.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["result_phase"] == self.q_state.phase
+        assert matches[0]["result_num_inputs"] == 0
+        assert matches[0]["result_num_outputs"] == 1
+
+    def test_match_displacement_high_degree_no_match(self):
+        """A DisplacementGate does not collapse into a degree > 1 (non-R1) terminal."""
+        curved_effect = QSpider(1, 0, ZxPoly({2: 1.0, 1: -3.0}))
+        comp = CompositionDiagram([DisplacementGate(0.5), curved_effect])
+        graph = to_graph(comp)
+        assert len(self.rule_idealized.match(graph)) == 0
+
     def test_match_same_color_no_match(self):
         """Same-color (1,1) spider next to the terminal is FusionRule's job."""
         comp = CompositionDiagram([self.q_filler, self.q_effect])
@@ -228,13 +263,19 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert len(self.rule.match(graph)) == 0
 
     def test_match_indices_and_node_ids(self):
-        """Match records correct container/indices/node_ids for a simple pair."""
+        """Match records correct container/indices/node_ids for a simple pair.
+
+        `node_ids` is always [terminal_id, gate_id] -- the terminal is
+        `apply_single`'s `keep_id` regardless of which side of the pair
+        it sits on, since folding only ever changes the terminal's phase,
+        never its arity (see `TerminalAbsorptionRule._check_pair`).
+        """
         comp = CompositionDiagram([self.r1, self.q_effect])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
         assert matches[0]["container_id"] == comp.id
         assert matches[0]["indices"] == [0, 1]
-        assert matches[0]["node_ids"] == [self.r1.id, self.q_effect.id]
+        assert matches[0]["node_ids"] == [self.q_effect.id, self.r1.id]
 
     def test_match_multiple_independent(self):
         """State-end and effect-end absorptions both match in one call."""
@@ -319,6 +360,16 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     def test_apply_single_cross_color_discard(self):
         """Discarding a raw opposite-color spider leaves the terminal untouched."""
         comp = CompositionDiagram([self.p_filler, self.q_effect])
+        graph = to_graph(comp)
+        matches = self.rule_idealized.match(graph)
+        self.rule_idealized.apply_single(graph, matches[0])
+        result = to_diagram(graph)
+        assert isinstance(result, QSpider)
+        assert result.phase == self.q_effect.phase
+
+    def test_apply_single_displacement_effect(self):
+        """Collapsing a DisplacementGate leaves the terminal untouched."""
+        comp = CompositionDiagram([DisplacementGate(0.5), self.q_effect])
         graph = to_graph(comp)
         matches = self.rule_idealized.match(graph)
         self.rule_idealized.apply_single(graph, matches[0])
@@ -443,6 +494,20 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert isinstance(result, QSpider)
         assert result.phase == self.q_state.phase
 
+    def test_apply_rule_displacement_effect(self):
+        """Full rule application collapsing a DisplacementGate into an effect."""
+        comp = CompositionDiagram([DisplacementGate(0.5), self.q_effect])
+        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        assert isinstance(result, QSpider)
+        assert result.phase == self.q_effect.phase
+
+    def test_apply_rule_displacement_state(self):
+        """Full rule application collapsing a DisplacementGate into a state."""
+        comp = CompositionDiagram([self.q_state, DisplacementGate(-1.0)])
+        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        assert isinstance(result, QSpider)
+        assert result.phase == self.q_state.phase
+
     def test_apply_rule_no_match_returns_same_diagram(self):
         """If no pattern is present, apply_rule should return the original diagram."""
         comp = CompositionDiagram([self.swap, self.bs])
@@ -513,6 +578,12 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     def test_default_rule_skips_cross_color_discard(self):
         """The default (exact-only) rule does not match cross-color discard."""
         comp = CompositionDiagram([self.p_filler, self.q_effect])
+        graph = to_graph(comp)
+        assert len(self.rule.match(graph)) == 0
+
+    def test_default_rule_skips_displacement(self):
+        """The default (exact-only) rule does not match displacement absorption."""
+        comp = CompositionDiagram([DisplacementGate(0.5), self.q_effect])
         graph = to_graph(comp)
         assert len(self.rule.match(graph)) == 0
 
@@ -593,6 +664,28 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert isinstance(result, QSpider)
         assert result.phase == self.q_effect.phase
 
+    def test_displacement_constant_phase(self):
+        """Displacement absorption works for a constant-only (degree 0) terminal phase."""
+        constant_effect = QSpider(1, 0, ZxPoly({0: 4.0}))
+        comp = CompositionDiagram([DisplacementGate(0.5), constant_effect])
+        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        assert isinstance(result, QSpider)
+        assert result.phase == constant_effect.phase
+
+    def test_displacement_high_degree_left_untouched(self):
+        """A DisplacementGate next to a degree > 1 (non-R1) terminal is left untouched.
+
+        Unlike squeezing (any degree) or cross-color discard (any
+        degree), displacement absorption requires the terminal's own
+        phase to be in R1[X] -- a higher-degree phase describes a
+        genuinely curved (squeezed) eigenstate, for which an adjacent
+        displacement is not simply irrelevant.
+        """
+        curved_effect = QSpider(1, 0, ZxPoly({2: 1.0, 1: -3.0}))
+        comp = CompositionDiagram([DisplacementGate(0.5), curved_effect])
+        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        assert result == comp
+
     def test_same_color_left_for_fusion_rule(self):
         """A same-color (1,1) filler next to a terminal is left untouched."""
         comp = CompositionDiagram([self.q_filler, self.q_effect])
@@ -605,6 +698,210 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         result = apply_rule_to_diagram(self.rule_idealized, comp)
         assert isinstance(result, QSpider)
         assert isclose(result.phase.coeffs[1], -3.0 / -3.0)
+
+    # -------------------------------------------------------------------------
+    # 5. Chain-chasing through identity spiders AND `Swap`: `_chase_identity_chain`
+    #    (shared via `RewriteRule`, see its docstring) lets the terminal see
+    #    past a run of zero-phase identity spiders and a wire-crossing `Swap`
+    #    alike, in either direction, to reach the gate it absorbs.
+    # -------------------------------------------------------------------------
+
+    def test_match_through_identity_effect_direction(self):
+        """An effect chases backward through one identity spider to its gate."""
+        zero_phase = ZxPoly({})
+        id1 = QSpider(1, 1, zero_phase)
+        comp = CompositionDiagram([self.r1, id1, self.q_effect])
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["identity_chain"] == [id1.id]
+        assert matches[0]["node_ids"] == [self.q_effect.id, self.r1.id]
+
+    def test_apply_rule_through_identity_effect_direction(self):
+        """Applying the rule folds the rotation and leaves no match.
+
+        This holds despite the identity sitting directly between the
+        gate and the terminal.
+        """
+        zero_phase = ZxPoly({})
+        id1 = QSpider(1, 1, zero_phase)
+        comp = CompositionDiagram([self.r1, id1, self.q_effect])
+        result = apply_rule_to_diagram(self.rule, comp)
+        lin, quad = self._expected_rotation(-3.0, self.theta1)
+        qspiders = [
+            d
+            for d in (result.diagrams if hasattr(result, "diagrams") else [result])
+            if isinstance(d, QSpider) and d.num_inputs == 1 and d.num_outputs == 0
+        ]
+        assert len(qspiders) == 1
+        assert isclose(qspiders[0].phase.coeffs[1], lin)
+        assert isclose(qspiders[0].phase.coeffs[2], quad)
+        graph = to_graph(result)
+        assert len(self.rule.match(graph)) == 0
+
+    def test_match_through_identity_state_direction(self):
+        """A state chases forward through one identity spider to its gate."""
+        zero_phase = ZxPoly({})
+        id1 = PSpider(1, 1, zero_phase)
+        comp = CompositionDiagram([self.q_state, id1, self.r1])
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["identity_chain"] == [id1.id]
+        assert matches[0]["node_ids"] == [self.q_state.id, self.r1.id]
+
+    def test_match_swap_interleaved_with_identities(self):
+        """Chase forward through a `Swap` interleaved with an identity.
+
+        A terminal state chases forward through a `Swap` AND an
+        identity spider (interleaved on its own lane, with an unrelated
+        independent lane sharing the `Swap`'s other two ports) to reach
+        its gate.
+
+        Mirrors `CopyRule`'s own swap-interleaved chase test: the `Swap`'s
+        other port carries a completely unrelated wire, proving the chase
+        is genuinely port-aware.
+        """
+        zero_phase = ZxPoly({})
+        term_state = QSpider(0, 1, ZxPoly({1: 3.0}))
+        filler_state = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
+        id_filler = PSpider(1, 1, zero_phase)
+        id_term = QSpider(1, 1, zero_phase)
+        filler_terminal = PSpider(1, 1, zero_phase)
+
+        lhs = TensorDiagram([term_state, filler_state])
+        swap = Swap()
+        mid = TensorDiagram([id_filler, id_term])
+        final_stage = TensorDiagram([filler_terminal, self.r1])
+        comp = CompositionDiagram([lhs, swap, mid, final_stage])
+
+        graph = to_graph(comp)
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["node_ids"] == [term_state.id, self.r1.id]
+        assert set(matches[0]["identity_chain"]) == {swap.id, id_term.id}
+        # The filler lane's own identity never gets crossed by this chase.
+        assert id_filler.id not in matches[0]["identity_chain"]
+
+    def test_apply_rule_swap_interleaved_with_identities(self):
+        """Applying the rule resolves the crossed pattern.
+
+        The unrelated filler lane is left untouched (no match left,
+        arity preserved).
+        """
+        zero_phase = ZxPoly({})
+        term_state = QSpider(0, 1, ZxPoly({1: 3.0}))
+        filler_state = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
+        id_filler = PSpider(1, 1, zero_phase)
+        id_term = QSpider(1, 1, zero_phase)
+        filler_terminal = PSpider(1, 1, zero_phase)
+
+        lhs = TensorDiagram([term_state, filler_state])
+        swap = Swap()
+        mid = TensorDiagram([id_filler, id_term])
+        final_stage = TensorDiagram([filler_terminal, self.r1])
+        comp = CompositionDiagram([lhs, swap, mid, final_stage])
+
+        result = apply_rule_to_diagram(self.rule, comp)
+
+        assert result.num_inputs == 0
+        assert result.num_outputs == 2
+        graph = to_graph(result)
+        assert len(self.rule.match(graph)) == 0
+
+    def test_match_displacement_through_identity_effect_direction(self):
+        """An effect chases backward through one identity spider to a DisplacementGate."""
+        zero_phase = ZxPoly({})
+        id1 = QSpider(1, 1, zero_phase)
+        d = DisplacementGate(0.5)
+        comp = CompositionDiagram([d, id1, self.q_effect])
+        graph = to_graph(comp)
+        matches = self.rule_idealized.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["identity_chain"] == [id1.id]
+        assert matches[0]["node_ids"] == [self.q_effect.id, d.id]
+        assert matches[0]["result_phase"] == self.q_effect.phase
+
+    def test_apply_rule_displacement_through_identity_effect_direction(self):
+        """Applying the rule collapses the DisplacementGate, leaving the effect's phase unchanged.
+
+        `apply_rule` doesn't flatten leftover `VoidDiagram` placeholders
+        (that's `_elide_voids`'s job, for display only) -- the crossed
+        identity and the absorbed gate both become same-shape voids in
+        place, and the composition around them keeps its own shape.
+        """
+        zero_phase = ZxPoly({})
+        id1 = QSpider(1, 1, zero_phase)
+        comp = CompositionDiagram([DisplacementGate(0.5), id1, self.q_effect])
+        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        qspiders = [
+            d
+            for d in (result.diagrams if hasattr(result, "diagrams") else [result])
+            if isinstance(d, QSpider) and d.num_inputs == 1 and d.num_outputs == 0
+        ]
+        assert len(qspiders) == 1
+        assert qspiders[0].phase == self.q_effect.phase
+        graph = to_graph(result)
+        assert len(self.rule_idealized.match(graph)) == 0
+
+    def test_match_displacement_swap_interleaved_with_identities(self):
+        """Chase forward through a `Swap` interleaved with an identity, to a DisplacementGate.
+
+        Mirrors `test_match_swap_interleaved_with_identities`, with the
+        rotation gate on the terminal's own lane replaced by a
+        DisplacementGate -- proving the same cross-container,
+        swap-and-identity chase this rule already does for rotation
+        equally reaches a displacement absorption.
+        """
+        zero_phase = ZxPoly({})
+        term_state = QSpider(0, 1, ZxPoly({1: 3.0}))
+        filler_state = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
+        id_filler = PSpider(1, 1, zero_phase)
+        id_term = QSpider(1, 1, zero_phase)
+        filler_terminal = PSpider(1, 1, zero_phase)
+        d = DisplacementGate(0.5)
+
+        lhs = TensorDiagram([term_state, filler_state])
+        swap = Swap()
+        mid = TensorDiagram([id_filler, id_term])
+        final_stage = TensorDiagram([filler_terminal, d])
+        comp = CompositionDiagram([lhs, swap, mid, final_stage])
+
+        graph = to_graph(comp)
+        matches = self.rule_idealized.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["node_ids"] == [term_state.id, d.id]
+        assert matches[0]["result_phase"] == term_state.phase
+        assert set(matches[0]["identity_chain"]) == {swap.id, id_term.id}
+        # The filler lane's own identity never gets crossed by this chase.
+        assert id_filler.id not in matches[0]["identity_chain"]
+
+    def test_apply_rule_displacement_swap_interleaved_with_identities(self):
+        """Applying the rule resolves the crossed displacement pattern.
+
+        The unrelated filler lane is left untouched (no match left,
+        arity preserved) -- the terminal state's own lane collapses to
+        just the (unchanged) state.
+        """
+        zero_phase = ZxPoly({})
+        term_state = QSpider(0, 1, ZxPoly({1: 3.0}))
+        filler_state = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
+        id_filler = PSpider(1, 1, zero_phase)
+        id_term = QSpider(1, 1, zero_phase)
+        filler_terminal = PSpider(1, 1, zero_phase)
+
+        lhs = TensorDiagram([term_state, filler_state])
+        swap = Swap()
+        mid = TensorDiagram([id_filler, id_term])
+        final_stage = TensorDiagram([filler_terminal, DisplacementGate(0.5)])
+        comp = CompositionDiagram([lhs, swap, mid, final_stage])
+
+        result = apply_rule_to_diagram(self.rule_idealized, comp)
+
+        assert result.num_inputs == 0
+        assert result.num_outputs == 2
+        graph = to_graph(result)
+        assert len(self.rule_idealized.match(graph)) == 0
 
 
 if __name__ == "__main__":
@@ -677,3 +974,86 @@ if __name__ == "__main__":
     diagram_f = CompositionDiagram([Fourier(), QSpider(1, 0, ZxPoly({1: -3.0}))])
     diagram_f_after = apply_rule_to_diagram(rule, diagram_f)
     visualize_before_after(diagram_f, diagram_f_after, "Fourier into Effect - No reduction", rule_name)
+
+    # Test 11: effect chases backward through an identity spider to its gate
+    id1 = QSpider(1, 1, ZxPoly({}))
+    comp11 = CompositionDiagram([PhaseRotationGate(theta), id1, QSpider(1, 0, ZxPoly({1: -3.0}))])
+    comp11_after = apply_rule_to_diagram(rule, comp11)
+    visualize_before_after(comp11, comp11_after, "Through Identity - Effect Direction", rule_name)
+
+    # Test 12: state chases forward through an identity spider to its gate
+    id2 = PSpider(1, 1, ZxPoly({}))
+    comp12 = CompositionDiagram([QSpider(0, 1, ZxPoly({1: 3.0})), id2, PhaseRotationGate(theta)])
+    comp12_after = apply_rule_to_diagram(rule, comp12)
+    visualize_before_after(comp12, comp12_after, "Through Identity - State Direction", rule_name)
+
+    # Test 13: a Swap interleaved with an identity spider on the terminal
+    # state's own lane, with an unrelated wire sharing the Swap's other
+    # two ports.
+    term_state13 = QSpider(0, 1, ZxPoly({1: 3.0}))
+    filler_state13 = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
+    id_filler13 = PSpider(1, 1, ZxPoly({}))
+    id_term13 = QSpider(1, 1, ZxPoly({}))
+    filler_terminal13 = PSpider(1, 1, ZxPoly({}))
+    lhs13 = TensorDiagram([term_state13, filler_state13])
+    swap13 = Swap()
+    mid13 = TensorDiagram([id_filler13, id_term13])
+    final_stage13 = TensorDiagram([filler_terminal13, PhaseRotationGate(theta)])
+    comp13 = CompositionDiagram([lhs13, swap13, mid13, final_stage13])
+    comp13_after = apply_rule_to_diagram(rule, comp13)
+    visualize_before_after(comp13, comp13_after, "Swap Interleaved With Identities", rule_name)
+
+    # Test 14: Complex Swap Network
+    zero_phase = ZxPoly({})
+    bloc1 = TensorDiagram([
+        CompositionDiagram([DisplacementGate(2), QSpider(1, 1, zero_phase), QSpider(1, 1, zero_phase)]),
+        CompositionDiagram([QSpider(0, 1, zero_phase), SqueezingGate(2.5), PSpider(1, 1, zero_phase)]),
+        CompositionDiagram([PhaseRotationGate(4), PhaseRotationGate(8)]),
+    ])
+    bloc2 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
+    bloc3 = TensorDiagram([SqueezingGate(2.5), DisplacementGate(-1), QSpider(1, 1, zero_phase)])
+    bloc4 = TensorDiagram([QSpider(1, 1, zero_phase), Swap()])
+    bloc5 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
+    bloc6 = TensorDiagram([
+        PhaseRotationGate(10),
+        SqueezingGate(2.5),
+        CompositionDiagram([DisplacementGate(-1), QSpider(1, 0, zero_phase)]),
+    ])
+    comp14 = CompositionDiagram([bloc1, bloc2, bloc3, bloc4, bloc5, bloc6])
+    comp14_after = apply_rule_to_diagram(rule_idealized, comp14)
+    visualize_before_after(
+        comp14,
+        comp14_after,
+        "Complex Cross-Container Chain Through Swap And Identities",
+        rule_name,
+    )
+
+    # Test 15: Complex Swap Network
+    zero_phase = ZxPoly({})
+    bloc1 = TensorDiagram([
+        CompositionDiagram([
+            QSpider(0, 1, zero_phase),
+            DisplacementGate(2),
+            QSpider(1, 1, zero_phase),
+            QSpider(1, 1, zero_phase),
+        ]),
+        CompositionDiagram([QSpider(0, 1, zero_phase), SqueezingGate(2.5), PSpider(1, 1, zero_phase)]),
+        CompositionDiagram([PhaseRotationGate(4), PhaseRotationGate(8)]),
+    ])
+    bloc2 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
+    bloc3 = TensorDiagram([SqueezingGate(2.5), DisplacementGate(-1), QSpider(1, 1, zero_phase)])
+    bloc4 = TensorDiagram([QSpider(1, 1, zero_phase), Swap()])
+    bloc5 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
+    bloc6 = TensorDiagram([
+        PhaseRotationGate(10),
+        SqueezingGate(2.5),
+        CompositionDiagram([DisplacementGate(-1), QSpider(1, 0, ZxPoly({1: 1}))]),
+    ])
+    comp15 = CompositionDiagram([bloc1, bloc2, bloc3, bloc4, bloc5, bloc6])
+    comp15_after = apply_rule_to_diagram(rule_idealized, comp14)
+    visualize_before_after(
+        comp15,
+        comp15_after,
+        "Complex Cross-Container Chain Through Swap And Identities 2",
+        rule_name,
+    )

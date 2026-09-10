@@ -396,23 +396,22 @@ class TestFusionRule(unittest.TestCase):
         assert result == contracted
 
     def test_fusion_multiple_times(self):
-        """Apply fusion rule twice should fuse nested structures."""
+        """A single `apply_rule` call fuses nested structures completely.
+
+        `apply_rule` loops internally to its own local fixed point (see
+        its docstring): fusing the inner pair turns the outer
+        `ContractedDiagram` into a fusible pair too, so that gets folded
+        in the same call -- no second `apply_rule_to_diagram` call is
+        needed to reach the fully-fused `QSpider`.
+        """
         inner_contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
         outer_contracted = ContractedDiagram(inner_contracted, self.q_2x2, [0], [0], [], [])
 
-        # Apply once - fuses inner pair
-        result1 = apply_rule_to_diagram(self.rule, outer_contracted)
-        assert isinstance(result1, ContractedDiagram)
-        assert isinstance(result1.first, QSpider)
-        assert result1.first.phase == self.phase_sum
-        assert result1.second == self.q_2x2
-
-        # Apply again - fuses outer pair
-        result2 = apply_rule_to_diagram(self.rule, result1)
-        assert isinstance(result2, QSpider)
-        assert result2.num_inputs == 2
-        assert result2.num_outputs == 2
-        assert result2.phase == self.phase_sum + self.phase_poly
+        result = apply_rule_to_diagram(self.rule, outer_contracted)
+        assert isinstance(result, QSpider)
+        assert result.num_inputs == 2
+        assert result.num_outputs == 2
+        assert result.phase == self.phase_sum + self.phase_poly
 
 
 if __name__ == "__main__":

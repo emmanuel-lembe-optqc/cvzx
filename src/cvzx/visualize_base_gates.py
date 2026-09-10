@@ -36,6 +36,7 @@ from cvzx.base_gates import (
     QSpider,
     Swap,
     TensorDiagram,
+    VoidDiagram,
     ZxPoly,
 )
 from cvzx.gates import (
@@ -48,7 +49,7 @@ from cvzx.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
-from cvzx.nx_graph import to_graph
+from cvzx.nx_graph import get_root_node, to_graph
 
 # A single wire/node anchor point in the drawing, as (x, y) figure coordinates.
 type Position = tuple[float, float]
@@ -82,6 +83,235 @@ def _require[T](value: T | None, message: str) -> T:
     if value is None:
         raise RuntimeError(message)
     return value
+
+
+def _elide_voids(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-structure, too-many-branches, too-many-statements, too-many-locals]
+    """Strip `VoidDiagram` placeholders out of `diagram` for display.
+
+    A `VoidDiagram` is purely a bookkeeping artifact left behind by rewrite
+    rules to preserve port counts/indices after absorbing a real node into
+    its neighbor -- it carries no information a viewer should see. Drawing
+    it (even as an invisible node whose wires still get drawn, so real
+    neighbors stay visually connected) is a reasonable fallback, but it
+    still leaves empty boxes worth of layout space and, for a wire that is
+    void on *both* ends (fully absorbed, connecting nothing real to
+    nothing real), a stray floating arrow.
+
+    This instead flattens `diagram` to its leaf/wire graph (`to_graph`,
+    the same flattening the rewrite rules themselves operate on), traces
+    each real leaf's ports through any run of same-arity ("square") void
+    leaves -- which, since the rewrite rules bake any crossing a voided
+    `Swap` used to perform back into the surrounding connectivity before
+    voiding it (see `_uncross_voided_swap_edges` in `nx_rewrite_rules`),
+    are always genuine identity pass-throughs -- and rebuilds a fresh
+    diagram containing only real leaves, wired directly to whichever real
+    leaf (or the diagram's own boundary) each one's trace actually
+    reaches. What's drawn is then only ever real content, correctly
+    connected, with every void gone rather than merely hidden.
+
+    This rebuild only follows a leaf's *single* input/output port, so it
+    only applies to diagrams where every real leaf has at most one input
+    and at most one output -- true of every real leaf the rewrite rules
+    covered here (`CopyRule`, `TerminalAbsorptionRule`,
+    `ChainReductionRule`) ever leave behind or introduce (spiders, gates,
+    states, and effects are all <=1-in/<=1-out; a wide spider that
+    disappears, e.g. `CopyRule`'s copy hub, is replaced by fresh,
+    already-disconnected copies, not left wired through a void). A wider
+    real leaf's connections aren't a simple chain to re-lay-out, so this
+    bails out to `diagram` unchanged rather than guess; so does any
+    topology this trace can't cleanly resolve into a set of straight
+    chains (a cycle, or a real leaf never reached from a chain head).
+
+    Parameters
+    ----------
+    diagram : Diagram
+        The diagram to elide voids from.
+
+    Returns
+    -------
+    Diagram
+        An equivalent diagram for display purposes, with all `VoidDiagram`
+        content removed. If `diagram` has no void content, is entirely
+        void, or its topology falls outside what this rebuild handles (see
+        above), it is returned unchanged.
+    """
+    cvzx_graph = to_graph(diagram)
+    graph = cvzx_graph.graph
+
+    def is_void_leaf(node_id: int) -> bool:
+        attrs = graph.nodes[node_id]
+        return bool(attrs.get("type") == "VoidDiagram")
+
+    leaf_ids = [n for n, attrs in graph.nodes(data=True) if attrs.get("kind") != "container"]
+    real_leaf_ids = [n for n in leaf_ids if not is_void_leaf(n)]
+    if len(real_leaf_ids) == len(leaf_ids):
+        return diagram  # Nothing to elide.
+    if not real_leaf_ids:
+        return diagram  # Entirely void -- nothing real left to show.
+
+    for node_id in real_leaf_ids:
+        attrs = graph.nodes[node_id]
+        if attrs.get("num_inputs", 0) > 1 or attrs.get("num_outputs", 0) > 1:
+            return diagram
+
+    out_map: dict[tuple[int, int], tuple[int, int]] = {}
+    in_map: dict[tuple[int, int], tuple[int, int]] = {}
+    for u, v, data in graph.edges(data=True):
+        for source_port, target_port in zip(data["source_ports"], data["target_ports"], strict=True):
+            out_map[u, source_port] = (v, target_port)
+            in_map[v, target_port] = (u, source_port)
+
+    def is_square_void(node_id: int) -> bool:
+        attrs = graph.nodes[node_id]
+        num_inputs = attrs.get("num_inputs", 0)
+        return is_void_leaf(node_id) and num_inputs == attrs.get("num_outputs", 0) and num_inputs > 0
+
+    def trace(start: tuple[int, int], edge_map: dict[tuple[int, int], tuple[int, int]]) -> tuple[int, int] | None:
+        """Follow `edge_map` from `start`, skipping any run of voids.
+
+        Transparently skips any run of same-arity void leaves, until a
+        real leaf or a dead end (a non-square void, or the diagram's own
+        boundary) is reached.
+
+        Returns
+        -------
+        tuple[int, int] | None
+            The `(node_id, port)` of the first real leaf reached, or
+            `None` at a dead end.
+        """
+        current = start
+        while True:
+            nxt = edge_map.get(current)
+            if nxt is None:
+                return None
+            next_node, next_port = nxt
+            if not is_square_void(next_node):
+                return None if is_void_leaf(next_node) else (next_node, next_port)
+            current = (next_node, next_port)
+
+    leaves_by_id: dict[int, Diagram] = {}
+
+    def collect(node: Diagram) -> None:
+        if isinstance(node, (CompositionDiagram, TensorDiagram)):
+            for sub in node.diagrams:
+                collect(sub)
+        elif isinstance(node, ContractedDiagram):
+            collect(node.first)
+            collect(node.second)
+        else:
+            leaves_by_id[node.id] = node
+
+    collect(diagram)
+
+    successor: dict[int, tuple[int, int] | None] = {}
+    predecessor: dict[int, tuple[int, int] | None] = {}
+    for node_id in real_leaf_ids:
+        attrs = graph.nodes[node_id]
+        successor[node_id] = trace((node_id, 0), out_map) if attrs.get("num_outputs", 0) == 1 else None
+        predecessor[node_id] = trace((node_id, 0), in_map) if attrs.get("num_inputs", 0) == 1 else None
+
+    chains: list[list[int]] = []
+    visited: set[int] = set()
+    for node_id in real_leaf_ids:
+        if predecessor[node_id] is not None or node_id in visited:
+            continue
+        chain = [node_id]
+        visited.add(node_id)
+        current = node_id
+        while True:
+            nxt = successor[current]
+            if nxt is None:
+                break
+            next_id, _next_port = nxt
+            if next_id in visited or next_id not in successor:
+                return diagram  # Unexpected topology (cycle) -- bail out.
+            chain.append(next_id)
+            visited.add(next_id)
+            current = next_id
+        chains.append(chain)
+
+    if len(visited) != len(real_leaf_ids):
+        # Some real leaf's true predecessor is another real leaf that
+        # isn't itself a chain head -- not a simple set of straight
+        # chains. Bail out rather than drop content silently.
+        return diagram
+
+    # Order the surviving chains by where they actually terminate, not by
+    # construction-order node id. `chains.sort(key=min)` used to sort by
+    # each chain's minimum raw node id, which happens to correlate with
+    # construction order (an earlier-built sub-diagram gets lower ids)
+    # but has no relationship to which external output port a chain's
+    # signal reaches once `Swap`s have permuted the physical routing --
+    # e.g. a chain built early but routed (via Swap) to a *later*
+    # external output would still have displayed first, ahead of a
+    # later-built chain that actually lands on an earlier output.
+    #
+    # Instead, resolve -- for each of `diagram`'s own external output
+    # ports -- which leaf currently occupies it, by descending through
+    # the graph's own container attributes (`sub_diagram_ids`/
+    # `first_id`/`second_id`, `external_output_mapping`), the same way
+    # `to_graph`'s own edge-construction resolves a boundary port to its
+    # underlying leaf. If that leaf is a void, walk backwards through
+    # `in_map` (skipping the same runs of square voids that `trace` skips
+    # going forward) to find the real leaf feeding it. This gives each
+    # chain's tail real leaf a definitive output port to sort by. A chain
+    # whose tail never reaches a real external output (e.g. it terminates
+    # in a discard) has no entry here and sorts after every chain that
+    # does, in original id order among themselves.
+    def _descend_to_leaf(node_id: int, port: int) -> tuple[int, int]:
+        """Descend from container `node_id`'s output `port` to the leaf that produces it.
+
+        Mirrors the descent `find_node_by_external_output` does over a
+        `Diagram` object, but works directly off the graph's own
+        container attributes (`sub_diagram_ids`/`first_id`/`second_id`,
+        `external_output_mapping`) -- `to_graph` deliberately strips the
+        "diagram" object reference from every node once the graph is
+        built, so that helper can't be reused on a finished graph.
+
+        Returns
+        -------
+        tuple[int, int]
+            The `(node_id, port)` of the leaf (real or void) that
+            produces `node_id`'s output `port`.
+        """
+        current_id, current_port = node_id, port
+        while graph.nodes[current_id].get("kind") == "container":
+            attrs = graph.nodes[current_id]
+            mapping = attrs.get("external_output_mapping", {})
+            if current_port not in mapping:
+                return current_id, current_port
+            ref, internal_port = mapping[current_port]
+            if attrs.get("container_type") == "contracted":
+                child_id = attrs.get("first_id") if ref == "first" else attrs.get("second_id")
+            else:
+                child_id = attrs.get("sub_diagram_ids", [])[ref]
+            current_id, current_port = child_id, internal_port
+        return current_id, current_port
+
+    root_id = get_root_node(cvzx_graph)
+    tail_to_port: dict[int, int] = {}
+    if root_id is not None:
+        for port in range(diagram.num_outputs):
+            leaf_id, internal_port = _descend_to_leaf(root_id, port)
+            if is_void_leaf(leaf_id):
+                resolved = trace((leaf_id, internal_port), in_map)
+                if resolved is None:
+                    continue
+                leaf_id = resolved[0]
+            tail_to_port[leaf_id] = port
+
+    def _chain_sort_key(chain: list[int]) -> tuple[int, int]:
+        port = tail_to_port.get(chain[-1])
+        return (0, port) if port is not None else (1, min(chain))
+
+    chains.sort(key=_chain_sort_key)
+
+    lanes: list[Diagram] = []
+    for chain in chains:
+        chain_diagrams = [leaves_by_id[node_id] for node_id in chain]
+        lanes.append(chain_diagrams[0] if len(chain_diagrams) == 1 else CompositionDiagram(chain_diagrams))
+
+    return lanes[0] if len(lanes) == 1 else TensorDiagram(lanes)
 
 
 @dataclass
@@ -172,6 +402,11 @@ class DiagramVisualizer:
         plt.Figure
             Matplotlib figure.
         """
+        # Strip void placeholders before doing anything else, so neither
+        # the drawing below nor the registry/feedforward bookkeeping ever
+        # sees them -- see `_elide_voids`.
+        diagram = _elide_voids(diagram)
+
         fig, ax = plt.subplots(figsize=(12, 8))
         ax.set_aspect("equal")
         ax.axis("off")
@@ -197,6 +432,26 @@ class DiagramVisualizer:
                 0.5, 0.5, f"Unknown diagram type: {type(diagram)}", ha="center", va="center", transform=ax.transAxes
             )
         self._draw_feedforward(ax)
+        # Force the axes to (re)compute their view limits from every patch
+        # added while drawing (rectangles, arrows, ...). Matplotlib updates
+        # `ax.dataLim` as patches are added, but does not always mark the
+        # view as stale purely from `add_patch` calls -- in this version,
+        # nothing here reliably requests an autoscale unless something else
+        # (e.g. a `Line2D`) is added too. Previously that "something else"
+        # was an incidental no-op `ax.plot()` call buried inside the
+        # QSpider/PSpider/CompactDiagram drawing branch, which only ran for
+        # the last sub-diagram of a composition *and* only when that last
+        # sub-diagram happened to be one of those types. Whenever the last
+        # sub-diagram was anything else (a `VoidDiagram`, `Swap`, Fourier
+        # gate, ...) the axes were left at matplotlib's default (0, 1)x(0, 1)
+        # view, so the real content -- however far from the origin -- was
+        # rendered as if squeezed into (or ballooned out of) that tiny
+        # window, e.g. as one giant, mostly-blank box. Calling `relim` and
+        # `autoscale_view` explicitly and unconditionally here makes the
+        # view limits always reflect the actual drawn content, regardless
+        # of which diagram type ends up last.
+        ax.relim()
+        ax.autoscale_view()
         plt.tight_layout()
         return fig
 
@@ -350,7 +605,7 @@ class DiagramVisualizer:
         output_positions: list[Position] = []
         init_input_positions: list[Position] = []
         # Determine spider type
-        if isinstance(diagram, (QSpider, PSpider, CompactDiagram)):
+        if isinstance(diagram, (QSpider, PSpider, CompactDiagram, VoidDiagram)):
             width = 2 * radius
             height = 2 * radius
             arrow_length = 2 * radius
@@ -366,32 +621,45 @@ class DiagramVisualizer:
             init_input_positions = [
                 (pivot[0] + width + arrow_length, pivot[1] + y_offset_in[i]) for i in range(diagram.num_inputs)
             ]
-            # Spider diagram
-            spider_type = self._get_spider_type(diagram)
-            color = self.config.colors.get(spider_type, self.config.colors["default"])
 
-            # Draw node
-            pivot = (x - radius, y - radius)
-            box = patches.Rectangle(pivot, width, height, facecolor=color)
-            if is_wiring_diagram(diagram):
-                box = patches.Rectangle(pivot, width, height, facecolor="white", edgecolor=color)
-            ax.add_patch(box)
+            # A VoidDiagram reserves exactly the layout space an identity wire
+            # of the same arity would take (per its own docstring), but draws
+            # no box or phase label -- unlike QSpider/PSpider/CompactDiagram,
+            # which always render a box (filled, or white with a colored edge
+            # for an identity/"wiring diagram"). Skipping straight to the wire
+            # drawing below (instead of an early return) matters: without it,
+            # any real node immediately upstream or downstream of a
+            # VoidDiagram -- e.g. a leftover placeholder from a cross-container
+            # chain/absorption reduction -- would have nothing to connect the
+            # arrow to on this node's side, leaving that neighbor looking
+            # visually disconnected even though the underlying wire is intact.
+            if not isinstance(diagram, VoidDiagram):
+                # Spider diagram
+                spider_type = self._get_spider_type(diagram)
+                color = self.config.colors.get(spider_type, self.config.colors["default"])
 
-            # Draw phase if present
-            phase = diagram.phase if isinstance(diagram, (QSpider, PSpider)) else diagram.label
-            phase_str = self._format_phase(phase)
+                # Draw node
+                pivot = (x - radius, y - radius)
+                box = patches.Rectangle(pivot, width, height, facecolor=color)
+                if is_wiring_diagram(diagram):
+                    box = patches.Rectangle(pivot, width, height, facecolor="white", edgecolor=color)
+                ax.add_patch(box)
 
-            # Wrap text
-            phase_str = textwrap.fill(phase_str, width=max(int(width), 1))
-            ax.text(
-                x,
-                y,
-                phase_str,
-                ha="center",
-                va="center",
-                fontsize=self.config.fontsize,
-                clip_on=True,
-            )
+                # Draw phase if present
+                phase = diagram.phase if isinstance(diagram, (QSpider, PSpider)) else diagram.label
+                phase_str = self._format_phase(phase)
+
+                # Wrap text
+                phase_str = textwrap.fill(phase_str, width=max(int(width), 1))
+                ax.text(
+                    x,
+                    y,
+                    phase_str,
+                    ha="center",
+                    va="center",
+                    fontsize=self.config.fontsize,
+                    clip_on=True,
+                )
             # We will draw input and output wires depending of the block is part of
             # a composition diagram
             draw_in_wires = True
@@ -939,9 +1207,20 @@ class DiagramVisualizer:
         k = 0
         J2_info = {}  # ruff: ignore[non-lowercase-variable-in-function]
         for j, sub_diagram in enumerate(second_diagrams):
-            x_offset_2_i = [float(v) for v in np.linspace(0, 2 * new_output_radius_2[j], sub_diagram.num_outputs + 2)]
-            x_offset_2_i.pop(0)
-            x_offset_2_i.pop(1)
+            # A sub-diagram with no outputs at all (e.g. a `VoidDiagram`
+            # or a bare effect) has nothing to offset -- the loops below
+            # never index into `x_offset_2_i` in that case anyway, since
+            # `range(k, k + 0)` never yields, so an empty list is exactly
+            # the right stand-in (avoids popping off an empty/singleton
+            # list further down).
+            if sub_diagram.num_outputs:
+                x_offset_2_i = [
+                    float(v) for v in np.linspace(0, 2 * new_output_radius_2[j], sub_diagram.num_outputs + 2)
+                ]
+                x_offset_2_i.pop(0)
+                x_offset_2_i.pop(1)
+            else:
+                x_offset_2_i = []
             sub_output_positions_2 = output_positions_2[k : k + sub_diagram.num_outputs]
             sub_J2 = []  # ruff: ignore[non-lowercase-variable-in-function]
             sub_J2_dict = {}  # ruff: ignore[non-lowercase-variable-in-function]
@@ -990,9 +1269,16 @@ class DiagramVisualizer:
         J1_info = {}  # ruff: ignore[non-lowercase-variable-in-function]
         J1_sub_diag_mapping = {}  # ruff: ignore[non-lowercase-variable-in-function]
         for j, sub_diagram in enumerate(first_diagrams):
-            x_offset_1_i = [float(v) for v in np.linspace(0, 2 * new_output_radius_1[j], sub_diagram.num_inputs + 2)]
-            x_offset_1_i.pop(0)
-            x_offset_1_i.pop(1)
+            # See the analogous `x_offset_2_i` guard above: a sub-diagram
+            # with no inputs has nothing to offset.
+            if sub_diagram.num_inputs:
+                x_offset_1_i = [
+                    float(v) for v in np.linspace(0, 2 * new_output_radius_1[j], sub_diagram.num_inputs + 2)
+                ]
+                x_offset_1_i.pop(0)
+                x_offset_1_i.pop(1)
+            else:
+                x_offset_1_i = []
             sub_input_positions_1 = input_positions_1[k : k + sub_diagram.num_inputs]
             sub_J1 = []  # ruff: ignore[non-lowercase-variable-in-function]
             sub_J1_dict = {}  # ruff: ignore[non-lowercase-variable-in-function]
@@ -1081,9 +1367,16 @@ class DiagramVisualizer:
         I1_sub_diag_mapping = {}  # ruff: ignore[non-lowercase-variable-in-function]
         k = 0
         for j, sub_diagram in enumerate(first_diagrams):
-            x_offset_1_i = [float(v) for v in np.linspace(0, 2 * new_output_radius_1[j], sub_diagram.num_outputs + 2)]
-            x_offset_1_i.pop(0)
-            x_offset_1_i.pop(1)
+            # See the analogous `x_offset_2_i` guard above: a sub-diagram
+            # with no outputs has nothing to offset.
+            if sub_diagram.num_outputs:
+                x_offset_1_i = [
+                    float(v) for v in np.linspace(0, 2 * new_output_radius_1[j], sub_diagram.num_outputs + 2)
+                ]
+                x_offset_1_i.pop(0)
+                x_offset_1_i.pop(1)
+            else:
+                x_offset_1_i = []
             sub_output_positions_1 = output_positions_1[k : k + sub_diagram.num_outputs]
             sub_I1 = []  # ruff: ignore[non-lowercase-variable-in-function]
             sub_I1_dict = {}  # ruff: ignore[non-lowercase-variable-in-function]
@@ -1129,9 +1422,16 @@ class DiagramVisualizer:
         I2_sub_diag_mapping = {}  # ruff: ignore[non-lowercase-variable-in-function]
         k = 0
         for j, sub_diagram in enumerate(second_diagrams):
-            x_offset_2_i = [float(v) for v in np.linspace(0, 2 * new_output_radius_2[j], sub_diagram.num_inputs + 2)]
-            x_offset_2_i.pop(0)
-            x_offset_2_i.pop(1)
+            # See the analogous `x_offset_2_i` guard above: a sub-diagram
+            # with no inputs has nothing to offset.
+            if sub_diagram.num_inputs:
+                x_offset_2_i = [
+                    float(v) for v in np.linspace(0, 2 * new_output_radius_2[j], sub_diagram.num_inputs + 2)
+                ]
+                x_offset_2_i.pop(0)
+                x_offset_2_i.pop(1)
+            else:
+                x_offset_2_i = []
             sub_input_positions_2 = input_positions_2[k : k + sub_diagram.num_inputs]
             sub_I2 = []  # ruff: ignore[non-lowercase-variable-in-function]
             sub_I2_dict = {}  # ruff: ignore[non-lowercase-variable-in-function]
