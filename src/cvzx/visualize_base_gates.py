@@ -49,7 +49,7 @@ from cvzx.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
-from cvzx.nx_graph import get_root_node, to_graph
+from cvzx.nx_graph import to_graph
 
 # A single wire/node anchor point in the drawing, as (x, y) figure coordinates.
 type Position = tuple[float, float]
@@ -85,7 +85,7 @@ def _require[T](value: T | None, message: str) -> T:
     return value
 
 
-def _elide_voids(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-structure, too-many-branches, too-many-statements, too-many-locals]
+def _elide_voids(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-structure, too-many-return-statements]
     """Strip `VoidDiagram` placeholders out of `diagram` for display.
 
     A `VoidDiagram` is purely a bookkeeping artifact left behind by rewrite
@@ -97,30 +97,38 @@ def _elide_voids(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-structure
     void on *both* ends (fully absorbed, connecting nothing real to
     nothing real), a stray floating arrow.
 
-    This instead flattens `diagram` to its leaf/wire graph (`to_graph`,
-    the same flattening the rewrite rules themselves operate on), traces
-    each real leaf's ports through any run of same-arity ("square") void
-    leaves -- which, since the rewrite rules bake any crossing a voided
-    `Swap` used to perform back into the surrounding connectivity before
-    voiding it (see `_uncross_voided_swap_edges` in `nx_rewrite_rules`),
-    are always genuine identity pass-throughs -- and rebuilds a fresh
-    diagram containing only real leaves, wired directly to whichever real
-    leaf (or the diagram's own boundary) each one's trace actually
-    reaches. What's drawn is then only ever real content, correctly
-    connected, with every void gone rather than merely hidden.
+    This rebuilds `diagram`'s container hierarchy in place, dropping void
+    leaves as it goes, rather than flattening to a leaf graph and
+    reconstructing chains from scratch. Preserving the hierarchy is what
+    keeps a tensor's lane count, a composition's element order, and a
+    contraction's first/second slots intact: a three-lane tensor stays a
+    three-lane tensor with each lane's voids removed, instead of the
+    lane count being re-derived from however many chains the leaf graph
+    happens to decompose into (which can differ, e.g. when a
+    non-square void -- a `(0,1)` or `(1,0)` placeholder from a terminal
+    absorption -- splits what was one visual lane into two, or when two
+    lanes happen to be joined by a surviving wire).
 
-    This rebuild only follows a leaf's *single* input/output port, so it
-    only applies to diagrams where every real leaf has at most one input
-    and at most one output -- true of every real leaf the rewrite rules
-    covered here (`CopyRule`, `TerminalAbsorptionRule`,
-    `ChainReductionRule`) ever leave behind or introduce (spiders, gates,
-    states, and effects are all <=1-in/<=1-out; a wide spider that
-    disappears, e.g. `CopyRule`'s copy hub, is replaced by fresh,
-    already-disconnected copies, not left wired through a void). A wider
-    real leaf's connections aren't a simple chain to re-lay-out, so this
-    bails out to `diagram` unchanged rather than guess; so does any
-    topology this trace can't cleanly resolve into a set of straight
-    chains (a cycle, or a real leaf never reached from a chain head).
+    Each container is rebuilt as follows:
+
+    - `CompositionDiagram`: drop void children from `diagrams`, then
+      recompute `connectivity` from the remaining children's arities
+      (adjacent pair `(i, i+1)` maps the identity over the intersection
+      of slot `i`'s outputs and slot `i+1`'s inputs). If nothing real
+      remains, the whole composition collapses to a same-shaped
+      `VoidDiagram`; if exactly one child remains, that child is
+      returned directly.
+    - `TensorDiagram`: drop void children from `diagrams`. If every
+      child was a void, collapse to a same-shaped `VoidDiagram`; if any
+      real child remains, keep the tensor with the reduced child list
+      so its lane count and per-lane layout still come from the tensor
+      structure, not from a chain-count.
+    - `ContractedDiagram`: elide voids in `first` and `second`
+      independently, keeping `I1`/`I2`/`J1`/`J2` unchanged. A side that
+      reduces to a void stays a void in place, preserving the contract's
+      shape.
+    - Proper leaves (including `VoidDiagram` itself): returned as-is.
+      The caller decides what to do with them.
 
     Parameters
     ----------
@@ -130,188 +138,60 @@ def _elide_voids(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-structure
     Returns
     -------
     Diagram
-        An equivalent diagram for display purposes, with all `VoidDiagram`
-        content removed. If `diagram` has no void content, is entirely
-        void, or its topology falls outside what this rebuild handles (see
-        above), it is returned unchanged.
+        An equivalent diagram for display purposes, with all void content
+        removed from the parts of the hierarchy where it can be dropped
+        without changing container shapes. If `diagram` has no void
+        content, it is returned unchanged.
     """
-    cvzx_graph = to_graph(diagram)
-    graph = cvzx_graph.graph
+    if isinstance(diagram, CompositionDiagram):
+        kept: list[Diagram] = []
+        for sub in diagram.diagrams:
+            stripped = _elide_voids(sub)
+            if isinstance(stripped, VoidDiagram):
+                continue
+            kept.append(stripped)
 
-    def is_void_leaf(node_id: int) -> bool:
-        attrs = graph.nodes[node_id]
-        return bool(attrs.get("type") == "VoidDiagram")
+        if not kept:
+            return VoidDiagram(diagram.num_inputs, diagram.num_outputs)
+        if len(kept) == 1:
+            return kept[0]
 
-    leaf_ids = [n for n, attrs in graph.nodes(data=True) if attrs.get("kind") != "container"]
-    real_leaf_ids = [n for n in leaf_ids if not is_void_leaf(n)]
-    if len(real_leaf_ids) == len(leaf_ids):
-        return diagram  # Nothing to elide.
-    if not real_leaf_ids:
-        return diagram  # Entirely void -- nothing real left to show.
+        new_conn: dict[int, dict[int, int]] = {}
+        for i in range(len(kept) - 1):
+            left = kept[i]
+            right = kept[i + 1]
+            n = min(left.num_outputs, right.num_inputs)
+            new_conn[i] = {j: j for j in range(n)}
+        return CompositionDiagram(kept, new_conn)
 
-    for node_id in real_leaf_ids:
-        attrs = graph.nodes[node_id]
-        if attrs.get("num_inputs", 0) > 1 or attrs.get("num_outputs", 0) > 1:
+    if isinstance(diagram, TensorDiagram):
+        kept = []
+        all_void = True
+        for sub in diagram.diagrams:
+            stripped = _elide_voids(sub)
+            if not isinstance(stripped, VoidDiagram):
+                all_void = False
+            kept.append(stripped)
+
+        if all_void:
+            return VoidDiagram(diagram.num_inputs, diagram.num_outputs)
+        return TensorDiagram(kept)
+
+    if isinstance(diagram, ContractedDiagram):
+        new_first = _elide_voids(diagram.first)
+        new_second = _elide_voids(diagram.second)
+        if new_first is diagram.first and new_second is diagram.second:
             return diagram
+        return ContractedDiagram(
+            first=new_first,
+            second=new_second,
+            I1=diagram.I1,
+            I2=diagram.I2,
+            J1=diagram.J1,
+            J2=diagram.J2,
+        )
 
-    out_map: dict[tuple[int, int], tuple[int, int]] = {}
-    in_map: dict[tuple[int, int], tuple[int, int]] = {}
-    for u, v, data in graph.edges(data=True):
-        for source_port, target_port in zip(data["source_ports"], data["target_ports"], strict=True):
-            out_map[u, source_port] = (v, target_port)
-            in_map[v, target_port] = (u, source_port)
-
-    def is_square_void(node_id: int) -> bool:
-        attrs = graph.nodes[node_id]
-        num_inputs = attrs.get("num_inputs", 0)
-        return is_void_leaf(node_id) and num_inputs == attrs.get("num_outputs", 0) and num_inputs > 0
-
-    def trace(start: tuple[int, int], edge_map: dict[tuple[int, int], tuple[int, int]]) -> tuple[int, int] | None:
-        """Follow `edge_map` from `start`, skipping any run of voids.
-
-        Transparently skips any run of same-arity void leaves, until a
-        real leaf or a dead end (a non-square void, or the diagram's own
-        boundary) is reached.
-
-        Returns
-        -------
-        tuple[int, int] | None
-            The `(node_id, port)` of the first real leaf reached, or
-            `None` at a dead end.
-        """
-        current = start
-        while True:
-            nxt = edge_map.get(current)
-            if nxt is None:
-                return None
-            next_node, next_port = nxt
-            if not is_square_void(next_node):
-                return None if is_void_leaf(next_node) else (next_node, next_port)
-            current = (next_node, next_port)
-
-    leaves_by_id: dict[int, Diagram] = {}
-
-    def collect(node: Diagram) -> None:
-        if isinstance(node, (CompositionDiagram, TensorDiagram)):
-            for sub in node.diagrams:
-                collect(sub)
-        elif isinstance(node, ContractedDiagram):
-            collect(node.first)
-            collect(node.second)
-        else:
-            leaves_by_id[node.id] = node
-
-    collect(diagram)
-
-    successor: dict[int, tuple[int, int] | None] = {}
-    predecessor: dict[int, tuple[int, int] | None] = {}
-    for node_id in real_leaf_ids:
-        attrs = graph.nodes[node_id]
-        successor[node_id] = trace((node_id, 0), out_map) if attrs.get("num_outputs", 0) == 1 else None
-        predecessor[node_id] = trace((node_id, 0), in_map) if attrs.get("num_inputs", 0) == 1 else None
-
-    chains: list[list[int]] = []
-    visited: set[int] = set()
-    for node_id in real_leaf_ids:
-        if predecessor[node_id] is not None or node_id in visited:
-            continue
-        chain = [node_id]
-        visited.add(node_id)
-        current = node_id
-        while True:
-            nxt = successor[current]
-            if nxt is None:
-                break
-            next_id, _next_port = nxt
-            if next_id in visited or next_id not in successor:
-                return diagram  # Unexpected topology (cycle) -- bail out.
-            chain.append(next_id)
-            visited.add(next_id)
-            current = next_id
-        chains.append(chain)
-
-    if len(visited) != len(real_leaf_ids):
-        # Some real leaf's true predecessor is another real leaf that
-        # isn't itself a chain head -- not a simple set of straight
-        # chains. Bail out rather than drop content silently.
-        return diagram
-
-    # Order the surviving chains by where they actually terminate, not by
-    # construction-order node id. `chains.sort(key=min)` used to sort by
-    # each chain's minimum raw node id, which happens to correlate with
-    # construction order (an earlier-built sub-diagram gets lower ids)
-    # but has no relationship to which external output port a chain's
-    # signal reaches once `Swap`s have permuted the physical routing --
-    # e.g. a chain built early but routed (via Swap) to a *later*
-    # external output would still have displayed first, ahead of a
-    # later-built chain that actually lands on an earlier output.
-    #
-    # Instead, resolve -- for each of `diagram`'s own external output
-    # ports -- which leaf currently occupies it, by descending through
-    # the graph's own container attributes (`sub_diagram_ids`/
-    # `first_id`/`second_id`, `external_output_mapping`), the same way
-    # `to_graph`'s own edge-construction resolves a boundary port to its
-    # underlying leaf. If that leaf is a void, walk backwards through
-    # `in_map` (skipping the same runs of square voids that `trace` skips
-    # going forward) to find the real leaf feeding it. This gives each
-    # chain's tail real leaf a definitive output port to sort by. A chain
-    # whose tail never reaches a real external output (e.g. it terminates
-    # in a discard) has no entry here and sorts after every chain that
-    # does, in original id order among themselves.
-    def _descend_to_leaf(node_id: int, port: int) -> tuple[int, int]:
-        """Descend from container `node_id`'s output `port` to the leaf that produces it.
-
-        Mirrors the descent `find_node_by_external_output` does over a
-        `Diagram` object, but works directly off the graph's own
-        container attributes (`sub_diagram_ids`/`first_id`/`second_id`,
-        `external_output_mapping`) -- `to_graph` deliberately strips the
-        "diagram" object reference from every node once the graph is
-        built, so that helper can't be reused on a finished graph.
-
-        Returns
-        -------
-        tuple[int, int]
-            The `(node_id, port)` of the leaf (real or void) that
-            produces `node_id`'s output `port`.
-        """
-        current_id, current_port = node_id, port
-        while graph.nodes[current_id].get("kind") == "container":
-            attrs = graph.nodes[current_id]
-            mapping = attrs.get("external_output_mapping", {})
-            if current_port not in mapping:
-                return current_id, current_port
-            ref, internal_port = mapping[current_port]
-            if attrs.get("container_type") == "contracted":
-                child_id = attrs.get("first_id") if ref == "first" else attrs.get("second_id")
-            else:
-                child_id = attrs.get("sub_diagram_ids", [])[ref]
-            current_id, current_port = child_id, internal_port
-        return current_id, current_port
-
-    root_id = get_root_node(cvzx_graph)
-    tail_to_port: dict[int, int] = {}
-    if root_id is not None:
-        for port in range(diagram.num_outputs):
-            leaf_id, internal_port = _descend_to_leaf(root_id, port)
-            if is_void_leaf(leaf_id):
-                resolved = trace((leaf_id, internal_port), in_map)
-                if resolved is None:
-                    continue
-                leaf_id = resolved[0]
-            tail_to_port[leaf_id] = port
-
-    def _chain_sort_key(chain: list[int]) -> tuple[int, int]:
-        port = tail_to_port.get(chain[-1])
-        return (0, port) if port is not None else (1, min(chain))
-
-    chains.sort(key=_chain_sort_key)
-
-    lanes: list[Diagram] = []
-    for chain in chains:
-        chain_diagrams = [leaves_by_id[node_id] for node_id in chain]
-        lanes.append(chain_diagrams[0] if len(chain_diagrams) == 1 else CompositionDiagram(chain_diagrams))
-
-    return lanes[0] if len(lanes) == 1 else TensorDiagram(lanes)
+    return diagram
 
 
 @dataclass
@@ -405,7 +285,7 @@ class DiagramVisualizer:
         # Strip void placeholders before doing anything else, so neither
         # the drawing below nor the registry/feedforward bookkeeping ever
         # sees them -- see `_elide_voids`.
-        diagram = _elide_voids(diagram)
+        # diagram = _elide_voids(diagram)
 
         fig, ax = plt.subplots(figsize=(12, 8))
         ax.set_aspect("equal")
@@ -604,6 +484,7 @@ class DiagramVisualizer:
             radius = self.config.node_radius
         output_positions: list[Position] = []
         init_input_positions: list[Position] = []
+        is_void = isinstance(diagram, VoidDiagram)
         # Determine spider type
         if isinstance(diagram, (QSpider, PSpider, CompactDiagram, VoidDiagram)):
             width = 2 * radius
@@ -622,18 +503,7 @@ class DiagramVisualizer:
                 (pivot[0] + width + arrow_length, pivot[1] + y_offset_in[i]) for i in range(diagram.num_inputs)
             ]
 
-            # A VoidDiagram reserves exactly the layout space an identity wire
-            # of the same arity would take (per its own docstring), but draws
-            # no box or phase label -- unlike QSpider/PSpider/CompactDiagram,
-            # which always render a box (filled, or white with a colored edge
-            # for an identity/"wiring diagram"). Skipping straight to the wire
-            # drawing below (instead of an early return) matters: without it,
-            # any real node immediately upstream or downstream of a
-            # VoidDiagram -- e.g. a leftover placeholder from a cross-container
-            # chain/absorption reduction -- would have nothing to connect the
-            # arrow to on this node's side, leaving that neighbor looking
-            # visually disconnected even though the underlying wire is intact.
-            if not isinstance(diagram, VoidDiagram):
+            if not is_void:
                 # Spider diagram
                 spider_type = self._get_spider_type(diagram)
                 color = self.config.colors.get(spider_type, self.config.colors["default"])
@@ -646,7 +516,7 @@ class DiagramVisualizer:
                 ax.add_patch(box)
 
                 # Draw phase if present
-                phase = diagram.phase if isinstance(diagram, (QSpider, PSpider)) else diagram.label
+                phase = diagram.phase if isinstance(diagram, (QSpider, PSpider)) else diagram.label  # type: ignore[union-attr]
                 phase_str = self._format_phase(phase)
 
                 # Wrap text
@@ -673,7 +543,7 @@ class DiagramVisualizer:
             if draw_kept_outputs is None:
                 draw_kept_outputs = range(diagram.num_outputs)
             # Draw input wires (left side)
-            if draw_in_wires:
+            if draw_in_wires and not is_void:
                 if input_positions is None:
                     # input_positions is empty only for the first element of a composition
                     # or a single proper diagram
@@ -725,7 +595,6 @@ class DiagramVisualizer:
             output_positions, init_input_positions, radius = self._draw_fourier(
                 ax, x, y, diagram, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs
             )
-        # Register the position of nodes and its radius
         self.graph.nodes[diagram.id]["pos"] = (x, y)
         self.graph.nodes[diagram.id]["radius"] = radius
         return output_positions, init_input_positions, radius

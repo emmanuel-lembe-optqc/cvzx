@@ -262,10 +262,10 @@ class Diagram(ABC):
         - Contraction (partial trace over connected modes)
     """
 
-    _id_counter = count(1)
+    id_counter = count(1)
 
     def __init__(self) -> None:
-        self._id = next(Diagram._id_counter)
+        self.id = next(Diagram.id_counter)  # type: ignore[misc]
 
     @abstractmethod
     def tensor(self, other: "Diagram") -> "Diagram":
@@ -343,7 +343,7 @@ class Diagram(ABC):
             int
                 ID of the diagram.
         """
-        return self._id
+        return self.id
 
     @property
     @abstractmethod

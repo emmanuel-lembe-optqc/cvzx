@@ -553,7 +553,7 @@ def to_diagram(cvzx_graph: CVZXGraph) -> Diagram:
         raise ValueError(msg)
 
     # Reconstruct the diagram from the root
-    return _reconstruct_from_node(graph, root)
+    return _reconstruct_from_node(graph, root, cvzx_graph.registry)
 
 
 # =========================================================================
@@ -1424,7 +1424,7 @@ def _add_contracted_node(  # ruff: ignore[complex-structure]
 # =========================================================================
 
 
-def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
+def _reconstruct_from_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a diagram from a graph node.
 
     Parameters
@@ -1433,6 +1433,8 @@ def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ign
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
+    reg : GateRegister
+        Gate register of the input graph.
 
     Returns
     -------
@@ -1448,22 +1450,22 @@ def _reconstruct_from_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ign
     kind = attrs.get("kind")
 
     if kind in {"proper", "compact"}:
-        return _reconstruct_proper_node(G, node_id)
+        return _reconstruct_proper_node(G, node_id, reg)
     if kind == "container":
         container_type = attrs.get("container_type")
         if container_type == "composition":
-            return _reconstruct_composition_node(G, node_id)
+            return _reconstruct_composition_node(G, node_id, reg)
         if container_type == "tensor":
-            return _reconstruct_tensor_node(G, node_id)
+            return _reconstruct_tensor_node(G, node_id, reg)
         if container_type == "contracted":
-            return _reconstruct_contracted_node(G, node_id)
+            return _reconstruct_contracted_node(G, node_id, reg)
         msg = f"Unknown container type: {container_type}"
         raise ValueError(msg)
     msg = f"Unknown node kind: {kind}"
     raise ValueError(msg)
 
 
-def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[complex-structure, invalid-argument-name, too-many-return-statements, too-many-branches, too-many-locals]
+def _reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[complex-structure, invalid-argument-name, too-many-return-statements, too-many-branches, too-many-locals]
     """Reconstruct a proper diagram from a graph node.
 
     Parameters
@@ -1472,6 +1474,8 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: i
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
+    reg : GateRegister
+        Gate register of the input graph.
 
     Returns
     -------
@@ -1492,10 +1496,17 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: i
     feedforward = attrs.get("feedforward")
     measurement_ids = attrs.get("measurement_ids")
 
+    # To avoid id mismatch, we must not modify the ids of measurement gates
     if node_type == "QSpider":
-        return QSpider(num_inputs, num_outputs, phase if phase is not None else ZxPoly({}))
+        result = QSpider(num_inputs, num_outputs, phase if phase is not None else ZxPoly({}))
+        if node_id in reg.measurement_nodes:
+            result.id = node_id  # type: ignore[misc]
+        return result
     if node_type == "PSpider":
-        return PSpider(num_inputs, num_outputs, phase if phase is not None else ZxPoly({}))
+        result = PSpider(num_inputs, num_outputs, phase if phase is not None else ZxPoly({}))  # type: ignore[assignment]
+        if node_id in reg.measurement_nodes:
+            result.id = node_id  # type: ignore[misc]
+        return result
     if node_type == "Swap":
         return Swap()
     if node_type == "VoidDiagram":
@@ -1545,7 +1556,7 @@ def _reconstruct_proper_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: i
     raise ValueError(msg)
 
 
-def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
+def _reconstruct_composition_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a CompositionDiagram from a graph node.
 
     Parameters
@@ -1554,6 +1565,8 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ru
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
+    reg : GateRegister
+        Gate register of the input graph.
 
     Returns
     -------
@@ -1568,21 +1581,10 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ru
     attrs = G.nodes[node_id]
     sub_diagram_ids = attrs.get("sub_diagram_ids", [])
     # Shallow-copy the connectivity dict rather than handing out the
-    # graph-owned object directly: several rewrite rules (e.g.
-    # `RewriteRule._propagate_arity_to_parent`, `IdentityRule.apply_single`)
-    # mutate a container's "connectivity" dict IN PLACE (`connectivity[key]
-    # = ...`, `del connectivity[key]`) rather than always replacing it
-    # wholesale. A `Diagram` built from this node must stay a genuine,
-    # independent snapshot even if the source graph keeps being mutated
-    # afterward (e.g. `optimize()` calls `to_diagram(graph)` to capture
-    # its pre-cleanup result, then keeps mutating `graph` in
-    # `remove_void_and_identity_nodes`) -- without this copy, the earlier
-    # snapshot's `connectivity` would silently change underneath it. A
-    # shallow copy is enough: no rule mutates one of the per-index INNER
-    # dicts in place, only ever the outer one.
+    # graph-owned object directly
     connectivity = dict(attrs.get("connectivity", {}))
     # Recursively reconstruct all sub-diagrams
-    sub_diagrams = [_reconstruct_from_node(G, sub_id) for sub_id in sub_diagram_ids]
+    sub_diagrams = [_reconstruct_from_node(G, sub_id, reg) for sub_id in sub_diagram_ids]
 
     # The connectivity in the graph should already be in the correct format:
     # connectivity[left_idx] = {in_port: out_port}
@@ -1617,7 +1619,7 @@ def _reconstruct_composition_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ru
     return CompositionDiagram(sub_diagrams, connectivity)
 
 
-def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
+def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a TensorDiagram from a graph node.
 
     Parameters
@@ -1626,6 +1628,8 @@ def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: i
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
+    reg : GateRegister
+        Gate register of the input graph.
 
     Returns
     -------
@@ -1636,12 +1640,12 @@ def _reconstruct_tensor_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: i
     sub_diagram_ids = attrs.get("sub_diagram_ids", [])
 
     # Recursively reconstruct all sub-diagrams
-    sub_diagrams = [_reconstruct_from_node(G, sub_id) for sub_id in sub_diagram_ids]
+    sub_diagrams = [_reconstruct_from_node(G, sub_id, reg) for sub_id in sub_diagram_ids]
 
     return TensorDiagram(sub_diagrams)
 
 
-def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruff: ignore[invalid-argument-name]
+def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a ContractedDiagram from a graph node.
 
     Parameters
@@ -1650,6 +1654,8 @@ def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruf
         The graph containing the node.
     node_id : int
         The node ID to reconstruct.
+    reg : GateRegister
+        Gate register of the input graph.
 
     Returns
     -------
@@ -1673,7 +1679,7 @@ def _reconstruct_contracted_node(G: nx.DiGraph, node_id: int) -> Diagram:  # ruf
         msg = f"ContractedDiagram node {node_id} missing first_id or second_id"
         raise ValueError(msg)
 
-    first = _reconstruct_from_node(G, first_id)
-    second = _reconstruct_from_node(G, second_id)
+    first = _reconstruct_from_node(G, first_id, reg)
+    second = _reconstruct_from_node(G, second_id, reg)
 
     return ContractedDiagram(first, second, I1, I2, J1, J2)

@@ -1461,8 +1461,7 @@ class ControlledZGate(CompactDiagram):
 
         q_spider1 = QSpider(2, 1, ZxPoly({}))
         q_spider2 = QSpider(1, 2, ZxPoly({}))
-        identity = QSpider(1, 1, ZxPoly({}))
-        i_tensor_f = TensorDiagram([fourier_inv, identity])
+        i_tensor_f = TensorDiagram([fourier_inv, QSpider(1, 1, ZxPoly({}))])
 
         if self._is_unbiased():
             # Identity on mode 1: a q-spider with zero phase
@@ -1484,7 +1483,7 @@ class ControlledZGate(CompactDiagram):
             inv_sqrt = 1 / sqrt_gain
 
         squeeze1 = SqueezingGate(tau=sqrt_gain, parametric=self.parametric)
-        squeeze1_id = squeeze1.tensor(identity)
+        squeeze1_id = squeeze1.tensor(QSpider(1, 1, ZxPoly({})))
         upper_diagram = q_spider1.compose(squeeze1_id)
         squeeze2 = SqueezingGate(tau=inv_sqrt, parametric=self.parametric)
         upper_diagram = squeeze2.compose(upper_diagram)
@@ -1739,14 +1738,18 @@ class BeamsplitterGate(CompactDiagram):
         sq1 = SqueezingGate(tau=1 / tan_theta, parametric=self.parametric)
         sq2 = SqueezingGate(tau=sin2_theta / cos_theta, parametric=self.parametric)
         sq3 = SqueezingGate(tau=1 / cos_theta, parametric=self.parametric)
-        identity = QSpider(1, 1, ZxPoly({}))
-        tensor1 = sq1.tensor(identity)
-        tensor2 = sq2.tensor(sq3)
+        tensor3 = sq2.tensor(sq3)
 
         csum12 = ControlledSumGate(gain=1, control=1, target=2)
         csum21 = ControlledSumGate(gain=1, control=2, target=1)
 
-        return CompositionDiagram([tensor1, csum12.expand(), tensor2, csum21.expand(), tensor1])
+        return CompositionDiagram([
+            sq1.tensor(QSpider(1, 1, ZxPoly({}))),
+            csum12.expand(),
+            tensor3,
+            csum21.expand(),
+            sq1.tensor(QSpider(1, 1, ZxPoly({}))),
+        ])
 
     def substitute_parameters(self, mapping: dict[Symbol | str, Any]) -> CompactDiagram:
         """Substitute symbolic parameters in the beamsplitter gate.

@@ -5,6 +5,15 @@ adjacent to a (1,0) effect or (0,1) state QSpider/PSpider terminal is folded
 into the terminal's own phase. Three sub-cases: rotation (QSpider only,
 degree <= 1 input), squeezing (either color, any degree), and cross-color
 discard (opposite-color (1,1) raw spider vanishes, phase unchanged).
+
+`TerminalAbsorptionRule.apply_single` updates the terminal's phase in place,
+resets the absorbed gate to a zero-phase identity spider of its own color
+and arity, and resets every identity/`Swap` passthrough the chase crossed
+the same way. Nothing is contracted, spliced, or voided. Tests that assert
+the fully-collapsed form drive `IdentityRule` themselves, via
+`_absorb_then_identity`, after a `rebuild_registry()` -- `apply_single`
+mutates node attrs without touching the registry, so `IdentityRule` would
+otherwise read a stale index.
 """
 
 import unittest
@@ -27,8 +36,31 @@ from cvzx.base_gates import (
     ZxPoly,
 )
 from cvzx.gates import BeamsplitterGate, DisplacementGate, PhaseRotationGate, SqueezingGate
-from cvzx.nx_graph import to_diagram, to_graph
-from cvzx.nx_rewrite_rules import TerminalAbsorptionRule, apply_rule_to_diagram
+from cvzx.nx_graph import CVZXGraph, to_diagram, to_graph
+from cvzx.nx_rewrite_rules import IdentityRule, TerminalAbsorptionRule
+
+
+def _apply_absorption_and_cleanup(graph: CVZXGraph, rule: TerminalAbsorptionRule) -> None:
+    """Apply `rule` then `IdentityRule`, in that order, in place.
+
+    `TerminalAbsorptionRule.apply_single` resets the absorbed gate and any
+    crossed passthroughs to zero-phase identity spiders; `IdentityRule`
+    then removes the `(1,1)` ones (wide `(2,2)` ones stay, since they're
+    not identities). The composition is done here, in the test helper,
+    rather than inside `TerminalAbsorptionRule` -- a rule does not call
+    another rule. `rebuild_registry()` between them is required because
+    `apply_single` mutates node attrs without touching the registry.
+    """
+    rule.apply_rule(graph)
+    graph.rebuild_registry()
+    IdentityRule().apply_rule(graph)
+
+
+def _absorb_single_then_cleanup(graph: CVZXGraph, rule: TerminalAbsorptionRule, match: dict) -> None:
+    """Apply a single match with `rule`, rebuild the registry, then clean up."""
+    rule.apply_single(graph, match)
+    graph.rebuild_registry()
+    IdentityRule().apply_rule(graph)
 
 
 class TestTerminalAbsorptionRule(unittest.TestCase):
@@ -62,12 +94,17 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         self.rule = TerminalAbsorptionRule()
         self.rule_idealized = TerminalAbsorptionRule(assume_infinite_squeezing=True)
 
-    def _expected_rotation(self, k: float, theta: float):  # ruff: ignore[missing-return-type-private-function]
-        """Hand-computed rotation-fold coefficients: (linear, quadratic)."""
+    def _expected_rotation(self, k: float, theta: float) -> tuple[float, float]:
+        """Hand-computed rotation-fold coefficients: (linear, quadratic).
+
+        Return:
+        ------
+        tuple[float, float]
+        """
         return k / cos(theta), -tan(theta) / 2
 
     # -------------------------------------------------------------------------
-    # 1. Testing match()
+    # 1. Testing match()  (unchanged)
     # -------------------------------------------------------------------------
 
     def test_match_rotation_effect(self):
@@ -102,12 +139,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert len(self.rule.match(graph)) == 0
 
     def test_match_fourier2_effect(self):
-        """Fourier2 next to a QSpider effect absorbs as R(pi), same formula.
-
-        tan(pi) is exactly 0 (sympy computes it symbolically), so the
-        quadratic term drops out of the resulting phase entirely -- it's
-        not merely close to zero, it's absent as a dict key.
-        """
+        """Fourier2 next to a QSpider effect absorbs as R(pi), same formula."""
         comp = CompositionDiagram([Fourier2(), self.q_effect])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -155,7 +187,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         graph = to_graph(comp)
         matches = self.rule_idealized.match(graph)
         assert len(matches) == 1
-        assert isclose(matches[0]["result_phase"].coeffs[1], -3.0 / 2.0)
+        assert isclose(matches[0]["result_phase"].coeffs[1], -6.0)
         assert matches[0]["result_type"] == "QSpider"
 
     def test_match_squeezing_effect_pspider(self):
@@ -172,7 +204,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         graph = to_graph(comp)
         matches = self.rule_idealized.match(graph)
         assert len(matches) == 1
-        assert isclose(matches[0]["result_phase"].coeffs[1], 3.0 / 2.0)
+        assert isclose(matches[0]["result_phase"].coeffs[1], 6.0)
 
     def test_match_cross_color_discard_effect_q_terminal(self):
         """A raw PSpider(1,1,f) folds into an adjacent QSpider effect, unchanged."""
@@ -263,13 +295,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert len(self.rule.match(graph)) == 0
 
     def test_match_indices_and_node_ids(self):
-        """Match records correct container/indices/node_ids for a simple pair.
-
-        `node_ids` is always [terminal_id, gate_id] -- the terminal is
-        `apply_single`'s `keep_id` regardless of which side of the pair
-        it sits on, since folding only ever changes the terminal's phase,
-        never its arity (see `TerminalAbsorptionRule._check_pair`).
-        """
+        """Match records correct container/indices/node_ids for a simple pair."""
         comp = CompositionDiagram([self.r1, self.q_effect])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -318,11 +344,11 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_apply_single_rotation_effect(self):
-        """R folded into a QSpider effect leaves a single modified effect."""
+        """R folded into a QSpider effect: terminal updated, gate reset to identity."""
         comp = CompositionDiagram([self.r1, self.q_effect])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
-        self.rule.apply_single(graph, matches[0])
+        _absorb_single_then_cleanup(graph, self.rule, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
         lin, quad = self._expected_rotation(-3.0, self.theta1)
@@ -336,7 +362,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         comp = CompositionDiagram([Fourier2(), self.q_effect])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
-        self.rule.apply_single(graph, matches[0])
+        _absorb_single_then_cleanup(graph, self.rule, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
         lin, _ = self._expected_rotation(-3.0, pi)
@@ -346,14 +372,14 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert result.num_outputs == 0
 
     def test_apply_single_squeezing_state(self):
-        """Sq folded into a state leaves a single modified state."""
+        """Sq folded into a state: terminal updated, gate reset to identity."""
         comp = CompositionDiagram([self.q_state, self.sq1])
         graph = to_graph(comp)
         matches = self.rule_idealized.match(graph)
-        self.rule_idealized.apply_single(graph, matches[0])
+        _absorb_single_then_cleanup(graph, self.rule_idealized, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
-        assert isclose(result.phase.coeffs[1], 3.0 / 2.0)
+        assert isclose(result.phase.coeffs[1], 6.0)
         assert result.num_inputs == 0
         assert result.num_outputs == 1
 
@@ -362,7 +388,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         comp = CompositionDiagram([self.p_filler, self.q_effect])
         graph = to_graph(comp)
         matches = self.rule_idealized.match(graph)
-        self.rule_idealized.apply_single(graph, matches[0])
+        _absorb_single_then_cleanup(graph, self.rule_idealized, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == self.q_effect.phase
@@ -372,7 +398,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         comp = CompositionDiagram([DisplacementGate(0.5), self.q_effect])
         graph = to_graph(comp)
         matches = self.rule_idealized.match(graph)
-        self.rule_idealized.apply_single(graph, matches[0])
+        _absorb_single_then_cleanup(graph, self.rule_idealized, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == self.q_effect.phase
@@ -382,7 +408,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         comp = CompositionDiagram([self.q_state, self.r1, self.q_filler])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
-        self.rule.apply_single(graph, matches[0])
+        _absorb_single_then_cleanup(graph, self.rule, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
@@ -400,7 +426,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         tensor = TensorDiagram([self.swap, comp, self.bs])
         graph = to_graph(tensor)
         matches = self.rule.match(graph)
-        self.rule.apply_single(graph, matches[0])
+        _absorb_single_then_cleanup(graph, self.rule, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 3
@@ -414,7 +440,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         contracted = ContractedDiagram(comp, self.swap, [], [], [0], [0])
         graph = to_graph(contracted)
         matches = self.rule.match(graph)
-        self.rule.apply_single(graph, matches[0])
+        _absorb_single_then_cleanup(graph, self.rule, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)
         assert isinstance(result.first, QSpider)
@@ -427,7 +453,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     def test_apply_rule_rotation_effect(self):
         """Full rule application for R next to a QSpider effect."""
         comp = CompositionDiagram([self.r1, self.q_effect])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         lin, quad = self._expected_rotation(-3.0, self.theta1)
         assert isclose(result.phase.coeffs[1], lin)
@@ -436,7 +464,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     def test_apply_rule_rotation_state(self):
         """Full rule application for R next to a QSpider state."""
         comp = CompositionDiagram([self.q_state, self.r1])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         lin, quad = self._expected_rotation(3.0, self.theta1)
         assert isclose(result.phase.coeffs[1], lin)
@@ -445,7 +475,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     def test_apply_rule_fourier2_effect(self):
         """Full rule application for Fourier2 next to a QSpider effect."""
         comp = CompositionDiagram([Fourier2(), self.q_effect])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         lin, _ = self._expected_rotation(-3.0, pi)
         assert isclose(result.phase.coeffs[1], lin)
@@ -454,7 +486,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     def test_apply_rule_fourier2_state(self):
         """Full rule application for Fourier2 next to a QSpider state."""
         comp = CompositionDiagram([self.q_state, Fourier2()])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         lin, _ = self._expected_rotation(3.0, pi)
         assert isclose(result.phase.coeffs[1], lin)
@@ -463,61 +497,79 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     def test_apply_rule_fourier_and_fourier_inv_leave_terminal_unreduced(self):
         """Fourier/FourierInv touching a terminal -- the rule leaves the diagram unchanged."""
         comp = CompositionDiagram([Fourier(), self.q_effect])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
 
     def test_apply_rule_squeezing_effect(self):
         """Full rule application for Sq next to a QSpider effect."""
         comp = CompositionDiagram([self.sq1, self.q_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
-        assert isclose(result.phase.coeffs[1], -3.0 / 2.0)
+        assert isclose(result.phase.coeffs[1], -6.0)
 
     def test_apply_rule_squeezing_pspider_state(self):
         """Full rule application for Sq next to a PSpider state."""
         comp = CompositionDiagram([self.p_state, self.sq1])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, PSpider)
         assert isclose(result.phase.coeffs[1], 3.0 / 2.0)
 
     def test_apply_rule_cross_color_discard_effect(self):
         """Full rule application discarding a raw opposite-color spider (effect)."""
         comp = CompositionDiagram([self.p_filler, self.q_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == self.q_effect.phase
 
     def test_apply_rule_cross_color_discard_state(self):
         """Full rule application discarding a raw opposite-color spider (state)."""
         comp = CompositionDiagram([self.q_state, self.p_filler])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == self.q_state.phase
 
     def test_apply_rule_displacement_effect(self):
         """Full rule application collapsing a DisplacementGate into an effect."""
         comp = CompositionDiagram([DisplacementGate(0.5), self.q_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == self.q_effect.phase
 
     def test_apply_rule_displacement_state(self):
         """Full rule application collapsing a DisplacementGate into a state."""
         comp = CompositionDiagram([self.q_state, DisplacementGate(-1.0)])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == self.q_state.phase
 
     def test_apply_rule_no_match_returns_same_diagram(self):
         """If no pattern is present, apply_rule should return the original diagram."""
         comp = CompositionDiagram([self.swap, self.bs])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert result == comp
 
     def test_apply_rule_multiple_independent_matches(self):
         """State-end and effect-end absorptions both fold in one pass."""
         comp = CompositionDiagram([self.q_state, self.r1, self.sq1, self.q_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         lin_state, quad_state = self._expected_rotation(3.0, self.theta1)
@@ -526,25 +578,19 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert isinstance(folded_effect, QSpider)
         assert isclose(folded_state.phase.coeffs[1], lin_state)
         assert isclose(folded_state.phase.coeffs[2], quad_state)
-        assert isclose(folded_effect.phase.coeffs[1], -3.0 / 2.0)
+        assert isclose(folded_effect.phase.coeffs[1], -6.0)
 
     def test_apply_rule_four_element_chain_one_pass(self):
-        """[state, R1, R2, effect]: both boundary pairs fold in a single pass.
-
-        match()'s i += 2 skip-ahead lands exactly on indices 0 and 2 here,
-        so (state, R1) and (R2, effect) both match in one call -- the
-        middle (R1, R2) pair is never even examined, since it's consumed
-        from both sides. No second pass is needed, unlike the Fourier
-        rule's overlapping-chain case (there the overlap is on a shared
-        node; here it isn't).
-        """
+        """[state, R1, R2, effect]: both boundary pairs fold in a single pass."""
         comp = CompositionDiagram([
             self.q_state,
             PhaseRotationGate(self.theta1),
             PhaseRotationGate(self.theta2),
             self.q_effect,
         ])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         assert isinstance(result.diagrams[0], QSpider)
@@ -560,7 +606,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Full rule application to a pattern nested inside a tensor branch."""
         comp = CompositionDiagram([self.r1, self.q_effect])
         tensor = TensorDiagram([self.swap, comp, self.bs])
-        result = apply_rule_to_diagram(self.rule, tensor)
+        graph = to_graph(tensor)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, TensorDiagram)
         assert len(result.diagrams) == 3
         assert isinstance(result.diagrams[1], QSpider)
@@ -596,14 +644,18 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
     def test_apply_rule_default_leaves_squeezing_effect_unreduced(self):
         """Full rule application with the default flag leaves Sq/terminal untouched."""
         comp = CompositionDiagram([self.sq1, self.q_effect])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert result == comp
 
     def test_symbolic_theta_rotation(self):
         """Folding works with a symbolic rotation angle."""
         theta = Symbol("theta", real=True)
         comp = CompositionDiagram([PhaseRotationGate(theta, parametric=True), self.q_effect])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         expected = ZxPoly({1: -3.0 / sym_cos(theta), 2: -sym_tan(theta) / 2})
         assert simplify(result.phase.as_expr() - expected.as_expr()) == 0
@@ -625,7 +677,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """A constant term in the terminal's phase survives the rotation fold unchanged."""
         effect_with_const = QSpider(1, 0, ZxPoly({0: 2.0, 1: -3.0}))
         comp = CompositionDiagram([self.r1, effect_with_const])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert isclose(result.phase.coeffs[0], 2.0)
 
@@ -633,26 +687,32 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Squeezing absorption isn't restricted to linear phase."""
         cubic_effect = QSpider(1, 0, ZxPoly({3: 1.0, 1: -2.0}))
         comp = CompositionDiagram([self.sq1, cubic_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
-        assert isclose(result.phase.coeffs[3], 1.0 / 8.0)
-        assert isclose(result.phase.coeffs[1], -1.0)
+        assert isclose(result.phase.coeffs[3], 8.0)
+        assert isclose(result.phase.coeffs[1], -4.0)
 
     def test_squeezing_symbolic_tau(self):
         """Squeezing absorption works with a symbolic tau."""
         tau = Symbol("tau", real=True, nonzero=True)
         sq_sym = SqueezingGate(tau, parametric=True)
         comp = CompositionDiagram([sq_sym, self.q_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
-        expected = ZxPoly({1: -3.0 / tau})
+        expected = ZxPoly({1: -3.0 * tau})
         assert simplify(result.phase.as_expr() - expected.as_expr()) == 0
 
     def test_squeezing_constant_term_unchanged(self):
         """A constant term is untouched by x -> x/tau (it doesn't depend on x)."""
         effect_with_const = QSpider(1, 0, ZxPoly({0: 5.0, 1: -3.0}))
         comp = CompositionDiagram([self.sq1, effect_with_const])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert isclose(result.phase.coeffs[0], 5.0)
 
@@ -660,7 +720,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Cross-color discard has no degree restriction on the vanishing gate."""
         high_degree_filler = PSpider(1, 1, ZxPoly({5: 2.0, 3: -1.0, 0: 4.0}))
         comp = CompositionDiagram([high_degree_filler, self.q_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == self.q_effect.phase
 
@@ -668,42 +730,40 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         """Displacement absorption works for a constant-only (degree 0) terminal phase."""
         constant_effect = QSpider(1, 0, ZxPoly({0: 4.0}))
         comp = CompositionDiagram([DisplacementGate(0.5), constant_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
         assert result.phase == constant_effect.phase
 
     def test_displacement_high_degree_left_untouched(self):
-        """A DisplacementGate next to a degree > 1 (non-R1) terminal is left untouched.
-
-        Unlike squeezing (any degree) or cross-color discard (any
-        degree), displacement absorption requires the terminal's own
-        phase to be in R1[X] -- a higher-degree phase describes a
-        genuinely curved (squeezed) eigenstate, for which an adjacent
-        displacement is not simply irrelevant.
-        """
+        """A DisplacementGate next to a degree > 1 (non-R1) terminal is left untouched."""
         curved_effect = QSpider(1, 0, ZxPoly({2: 1.0, 1: -3.0}))
         comp = CompositionDiagram([DisplacementGate(0.5), curved_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert result == comp
 
     def test_same_color_left_for_fusion_rule(self):
         """A same-color (1,1) filler next to a terminal is left untouched."""
         comp = CompositionDiagram([self.q_filler, self.q_effect])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert result == comp
 
     def test_squeezing_negative_tau(self):
         """Negative tau divides the phase's coefficients as-is (no sign special-casing)."""
         comp = CompositionDiagram([self.sq2, self.q_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert isinstance(result, QSpider)
-        assert isclose(result.phase.coeffs[1], -3.0 / -3.0)
+        assert isclose(result.phase.coeffs[1], 9.0)
 
     # -------------------------------------------------------------------------
-    # 5. Chain-chasing through identity spiders AND `Swap`: `_chase_identity_chain`
-    #    (shared via `RewriteRule`, see its docstring) lets the terminal see
-    #    past a run of zero-phase identity spiders and a wire-crossing `Swap`
-    #    alike, in either direction, to reach the gate it absorbs.
+    # 5. Chain-chasing through identity spiders AND `Swap`
     # -------------------------------------------------------------------------
 
     def test_match_through_identity_effect_direction(self):
@@ -718,15 +778,13 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert matches[0]["node_ids"] == [self.q_effect.id, self.r1.id]
 
     def test_apply_rule_through_identity_effect_direction(self):
-        """Applying the rule folds the rotation and leaves no match.
-
-        This holds despite the identity sitting directly between the
-        gate and the terminal.
-        """
+        """Applying the rule folds the rotation and leaves no match."""
         zero_phase = ZxPoly({})
         id1 = QSpider(1, 1, zero_phase)
         comp = CompositionDiagram([self.r1, id1, self.q_effect])
-        result = apply_rule_to_diagram(self.rule, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         lin, quad = self._expected_rotation(-3.0, self.theta1)
         qspiders = [
             d
@@ -751,17 +809,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert matches[0]["node_ids"] == [self.q_state.id, self.r1.id]
 
     def test_match_swap_interleaved_with_identities(self):
-        """Chase forward through a `Swap` interleaved with an identity.
-
-        A terminal state chases forward through a `Swap` AND an
-        identity spider (interleaved on its own lane, with an unrelated
-        independent lane sharing the `Swap`'s other two ports) to reach
-        its gate.
-
-        Mirrors `CopyRule`'s own swap-interleaved chase test: the `Swap`'s
-        other port carries a completely unrelated wire, proving the chase
-        is genuinely port-aware.
-        """
+        """Chase forward through a `Swap` interleaved with an identity."""
         zero_phase = ZxPoly({})
         term_state = QSpider(0, 1, ZxPoly({1: 3.0}))
         filler_state = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
@@ -780,15 +828,10 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert len(matches) == 1
         assert matches[0]["node_ids"] == [term_state.id, self.r1.id]
         assert set(matches[0]["identity_chain"]) == {swap.id, id_term.id}
-        # The filler lane's own identity never gets crossed by this chase.
         assert id_filler.id not in matches[0]["identity_chain"]
 
     def test_apply_rule_swap_interleaved_with_identities(self):
-        """Applying the rule resolves the crossed pattern.
-
-        The unrelated filler lane is left untouched (no match left,
-        arity preserved).
-        """
+        """Applying the rule resolves the crossed pattern."""
         zero_phase = ZxPoly({})
         term_state = QSpider(0, 1, ZxPoly({1: 3.0}))
         filler_state = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
@@ -802,8 +845,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         final_stage = TensorDiagram([filler_terminal, self.r1])
         comp = CompositionDiagram([lhs, swap, mid, final_stage])
 
-        result = apply_rule_to_diagram(self.rule, comp)
-
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule)
+        result = to_diagram(graph)
         assert result.num_inputs == 0
         assert result.num_outputs == 2
         graph = to_graph(result)
@@ -823,17 +867,13 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert matches[0]["result_phase"] == self.q_effect.phase
 
     def test_apply_rule_displacement_through_identity_effect_direction(self):
-        """Applying the rule collapses the DisplacementGate, leaving the effect's phase unchanged.
-
-        `apply_rule` doesn't flatten leftover `VoidDiagram` placeholders
-        (that's `_elide_voids`'s job, for display only) -- the crossed
-        identity and the absorbed gate both become same-shape voids in
-        place, and the composition around them keeps its own shape.
-        """
+        """Applying the rule collapses the DisplacementGate, leaving the effect's phase unchanged."""
         zero_phase = ZxPoly({})
         id1 = QSpider(1, 1, zero_phase)
         comp = CompositionDiagram([DisplacementGate(0.5), id1, self.q_effect])
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         qspiders = [
             d
             for d in (result.diagrams if hasattr(result, "diagrams") else [result])
@@ -845,14 +885,7 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert len(self.rule_idealized.match(graph)) == 0
 
     def test_match_displacement_swap_interleaved_with_identities(self):
-        """Chase forward through a `Swap` interleaved with an identity, to a DisplacementGate.
-
-        Mirrors `test_match_swap_interleaved_with_identities`, with the
-        rotation gate on the terminal's own lane replaced by a
-        DisplacementGate -- proving the same cross-container,
-        swap-and-identity chase this rule already does for rotation
-        equally reaches a displacement absorption.
-        """
+        """Chase forward through a `Swap` interleaved with an identity, to a DisplacementGate."""
         zero_phase = ZxPoly({})
         term_state = QSpider(0, 1, ZxPoly({1: 3.0}))
         filler_state = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
@@ -873,16 +906,10 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert matches[0]["node_ids"] == [term_state.id, d.id]
         assert matches[0]["result_phase"] == term_state.phase
         assert set(matches[0]["identity_chain"]) == {swap.id, id_term.id}
-        # The filler lane's own identity never gets crossed by this chase.
         assert id_filler.id not in matches[0]["identity_chain"]
 
     def test_apply_rule_displacement_swap_interleaved_with_identities(self):
-        """Applying the rule resolves the crossed displacement pattern.
-
-        The unrelated filler lane is left untouched (no match left,
-        arity preserved) -- the terminal state's own lane collapses to
-        just the (unchanged) state.
-        """
+        """Applying the rule resolves the crossed displacement pattern."""
         zero_phase = ZxPoly({})
         term_state = QSpider(0, 1, ZxPoly({1: 3.0}))
         filler_state = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
@@ -896,8 +923,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         final_stage = TensorDiagram([filler_terminal, DisplacementGate(0.5)])
         comp = CompositionDiagram([lhs, swap, mid, final_stage])
 
-        result = apply_rule_to_diagram(self.rule_idealized, comp)
-
+        graph = to_graph(comp)
+        _apply_absorption_and_cleanup(graph, self.rule_idealized)
+        result = to_diagram(graph)
         assert result.num_inputs == 0
         assert result.num_outputs == 2
         graph = to_graph(result)
@@ -905,6 +933,8 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    from cvzx.base_gates import Diagram
+    from cvzx.nx_rewrite_rules import RewriteRule
     from cvzx.visualize_base_gates import visualize_before_after
 
     rule_name = "Terminal Absorption Rule"
@@ -919,29 +949,43 @@ if __name__ == "__main__":
     p_effect = PSpider(1, 0, ZxPoly({1: -3.0}))
     p_filler = PSpider(1, 1, ZxPoly({2: 4.0, 1: 1.0}))
 
+    # Helper: apply rule then IdentityRule (driven here, not inside the rule)
+    def _absorb_then_cleanup(diagram: Diagram, r: RewriteRule) -> Diagram:
+        """Apply the Terminal Absorption Rule then the Identity Rule.
+
+        Return:
+        ------
+        Diagram
+        """
+        g = to_graph(diagram)
+        r.apply_rule(g)
+        g.rebuild_registry()
+        IdentityRule().apply_rule(g)
+        return to_diagram(g)
+
     # Test 1: rotation folded into a QSpider effect
     comp1 = CompositionDiagram([PhaseRotationGate(theta), QSpider(1, 0, ZxPoly({1: -3.0}))])
-    comp1_after = apply_rule_to_diagram(rule, comp1)
+    comp1_after = _absorb_then_cleanup(comp1, rule)
     visualize_before_after(comp1, comp1_after, "Rotation into Effect", rule_name)
 
     # Test 2: rotation folded into a QSpider state
     comp2 = CompositionDiagram([QSpider(0, 1, ZxPoly({1: 3.0})), PhaseRotationGate(theta)])
-    comp2_after = apply_rule_to_diagram(rule, comp2)
+    comp2_after = _absorb_then_cleanup(comp2, rule)
     visualize_before_after(comp2, comp2_after, "Rotation into State", rule_name)
 
     # Test 3: squeezing folded into a QSpider effect
     comp3 = CompositionDiagram([SqueezingGate(2.0), QSpider(1, 0, ZxPoly({1: -3.0}))])
-    comp3_after = apply_rule_to_diagram(rule_idealized, comp3)
+    comp3_after = _absorb_then_cleanup(comp3, rule_idealized)
     visualize_before_after(comp3, comp3_after, "Squeezing into Effect", rule_name)
 
     # Test 4: squeezing folded into a PSpider effect
     comp4 = CompositionDiagram([SqueezingGate(2.0), PSpider(1, 0, ZxPoly({1: -3.0}))])
-    comp4_after = apply_rule_to_diagram(rule_idealized, comp4)
+    comp4_after = _absorb_then_cleanup(comp4, rule_idealized)
     visualize_before_after(comp4, comp4_after, "Squeezing into PSpider Effect", rule_name)
 
     # Test 5: cross-color discard into a QSpider effect
     comp5 = CompositionDiagram([PSpider(1, 1, ZxPoly({2: 4.0, 1: 1.0})), QSpider(1, 0, ZxPoly({1: -3.0}))])
-    comp5_after = apply_rule_to_diagram(rule_idealized, comp5)
+    comp5_after = _absorb_then_cleanup(comp5, rule_idealized)
     visualize_before_after(comp5, comp5_after, "Cross-Color Discard", rule_name)
 
     # Test 6: both ends of a composition fold in one pass
@@ -951,45 +995,44 @@ if __name__ == "__main__":
         SqueezingGate(2.0),
         QSpider(1, 0, ZxPoly({1: -3.0})),
     ])
-    comp6_after = apply_rule_to_diagram(rule_idealized, comp6)
+    comp6_after = _absorb_then_cleanup(comp6, rule_idealized)
     visualize_before_after(comp6, comp6_after, "Both Ends in One Pass", rule_name)
 
     # Test 7: pattern nested inside a tensor branch
     inner_comp = CompositionDiagram([PhaseRotationGate(theta), QSpider(1, 0, ZxPoly({1: -3.0}))])
     tensor = TensorDiagram([swap, inner_comp, bs])
-    tensor_after = apply_rule_to_diagram(rule, tensor)
+    tensor_after = _absorb_then_cleanup(tensor, rule)
     visualize_before_after(tensor, tensor_after, "Nested in Tensor", rule_name)
 
     # Test 8: diagram unchanged because the rule doesn't apply
     diagram = CompositionDiagram([swap, bs])
-    diagram_after = apply_rule_to_diagram(rule, diagram)
+    diagram_after = _absorb_then_cleanup(diagram, rule)
     visualize_before_after(diagram, diagram_after, "No reduction", rule_name)
 
-    # Test 9: Fourier2 folds into a QSpider effect,
+    # Test 9: Fourier2 folds into a QSpider effect
     comp9 = CompositionDiagram([Fourier2(), QSpider(1, 0, ZxPoly({1: -3.0}))])
-    comp9_after = apply_rule_to_diagram(rule, comp9)
+    comp9_after = _absorb_then_cleanup(comp9, rule)
     visualize_before_after(comp9, comp9_after, "Fourier2 into Effect", rule_name)
 
     # Test 10: Fourier/FourierInv (fixed rotations by -+pi/2) never absorb
     diagram_f = CompositionDiagram([Fourier(), QSpider(1, 0, ZxPoly({1: -3.0}))])
-    diagram_f_after = apply_rule_to_diagram(rule, diagram_f)
+    diagram_f_after = _absorb_then_cleanup(diagram_f, rule)
     visualize_before_after(diagram_f, diagram_f_after, "Fourier into Effect - No reduction", rule_name)
 
     # Test 11: effect chases backward through an identity spider to its gate
     id1 = QSpider(1, 1, ZxPoly({}))
     comp11 = CompositionDiagram([PhaseRotationGate(theta), id1, QSpider(1, 0, ZxPoly({1: -3.0}))])
-    comp11_after = apply_rule_to_diagram(rule, comp11)
+    comp11_after = _absorb_then_cleanup(comp11, rule)
     visualize_before_after(comp11, comp11_after, "Through Identity - Effect Direction", rule_name)
 
     # Test 12: state chases forward through an identity spider to its gate
     id2 = PSpider(1, 1, ZxPoly({}))
     comp12 = CompositionDiagram([QSpider(0, 1, ZxPoly({1: 3.0})), id2, PhaseRotationGate(theta)])
-    comp12_after = apply_rule_to_diagram(rule, comp12)
+    comp12_after = _absorb_then_cleanup(comp12, rule)
     visualize_before_after(comp12, comp12_after, "Through Identity - State Direction", rule_name)
 
     # Test 13: a Swap interleaved with an identity spider on the terminal
-    # state's own lane, with an unrelated wire sharing the Swap's other
-    # two ports.
+    # state's own lane, with an unrelated wire sharing the Swap's other two ports.
     term_state13 = QSpider(0, 1, ZxPoly({1: 3.0}))
     filler_state13 = PSpider(0, 1, ZxPoly({2: 9.0, 1: 1.0}))
     id_filler13 = PSpider(1, 1, ZxPoly({}))
@@ -1000,7 +1043,7 @@ if __name__ == "__main__":
     mid13 = TensorDiagram([id_filler13, id_term13])
     final_stage13 = TensorDiagram([filler_terminal13, PhaseRotationGate(theta)])
     comp13 = CompositionDiagram([lhs13, swap13, mid13, final_stage13])
-    comp13_after = apply_rule_to_diagram(rule, comp13)
+    comp13_after = _absorb_then_cleanup(comp13, rule)
     visualize_before_after(comp13, comp13_after, "Swap Interleaved With Identities", rule_name)
 
     # Test 14: Complex Swap Network
@@ -1020,7 +1063,7 @@ if __name__ == "__main__":
         CompositionDiagram([DisplacementGate(-1), QSpider(1, 0, zero_phase)]),
     ])
     comp14 = CompositionDiagram([bloc1, bloc2, bloc3, bloc4, bloc5, bloc6])
-    comp14_after = apply_rule_to_diagram(rule_idealized, comp14)
+    comp14_after = _absorb_then_cleanup(comp14, rule_idealized)
     visualize_before_after(
         comp14,
         comp14_after,
@@ -1028,7 +1071,7 @@ if __name__ == "__main__":
         rule_name,
     )
 
-    # Test 15: Complex Swap Network
+    # Test 15: Complex Swap Network 2
     zero_phase = ZxPoly({})
     bloc1 = TensorDiagram([
         CompositionDiagram([
@@ -1050,7 +1093,7 @@ if __name__ == "__main__":
         CompositionDiagram([DisplacementGate(-1), QSpider(1, 0, ZxPoly({1: 1}))]),
     ])
     comp15 = CompositionDiagram([bloc1, bloc2, bloc3, bloc4, bloc5, bloc6])
-    comp15_after = apply_rule_to_diagram(rule_idealized, comp14)
+    comp15_after = _absorb_then_cleanup(comp15, rule_idealized)
     visualize_before_after(
         comp15,
         comp15_after,

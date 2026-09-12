@@ -33,7 +33,7 @@ import math
 from typing import TYPE_CHECKING
 
 from cvzx.base_gates import CompositionDiagram, Diagram, QSpider, TensorDiagram, ZxPoly
-from cvzx.nx_graph import _reconstruct_proper_node, get_root_node, to_graph
+from cvzx.nx_graph import GateRegister, _reconstruct_proper_node, get_root_node, to_graph
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,7 +66,7 @@ def _make_identity_wire() -> Diagram:
     return QSpider(1, 1, _ZERO)
 
 
-def _leaf_diagram(graph: nx.DiGraph, leaf_id: int) -> Diagram:
+def _leaf_diagram(graph: nx.DiGraph, leaf_id: int, reg: GateRegister) -> Diagram:
     """Rebuild a leaf's `Diagram` object from its graph attributes.
 
     `to_graph()` deliberately strips the cached `"diagram"` object off
@@ -81,7 +81,7 @@ def _leaf_diagram(graph: nx.DiGraph, leaf_id: int) -> Diagram:
     Diagram
         The rebuilt leaf.
     """
-    return _reconstruct_proper_node(graph, leaf_id)
+    return _reconstruct_proper_node(graph, leaf_id, reg)
 
 
 def _resolve_input(graph: nx.DiGraph, node_id: int, port: int) -> tuple[int, int]:
@@ -481,7 +481,7 @@ class _Row:
         self.token = token
 
 
-def _finalize_row(graph: nx.DiGraph, row: _Row) -> Diagram:
+def _finalize_row(graph: nx.DiGraph, row: _Row, reg: GateRegister) -> Diagram:
     """Turn one row's accumulated leaf chain into a single `Diagram`.
 
     Returns
@@ -494,8 +494,8 @@ def _finalize_row(graph: nx.DiGraph, row: _Row) -> Diagram:
     if not row.content:
         return _make_identity_wire()
     if len(row.content) == 1:
-        return _leaf_diagram(graph, row.content[0])
-    return CompositionDiagram([_leaf_diagram(graph, leaf) for leaf in row.content])
+        return _leaf_diagram(graph, row.content[0], reg)
+    return CompositionDiagram([_leaf_diagram(graph, leaf, reg) for leaf in row.content])
 
 
 def _build_narrow_rows(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
@@ -703,6 +703,7 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
 
     cvzx_graph = to_graph(diagram)
     graph = cvzx_graph.graph
+    reg = cvzx_graph.registry
     root_id = get_root_node(cvzx_graph)
     if root_id is None:
         logger.debug("normalize_diagram: empty diagram, nothing to do")
@@ -774,7 +775,7 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
             return
         rows = _build_narrow_rows(graph, root_id, active, run_leaves, stage_of, pred_of)
 
-        elements = [_finalize_row(graph, row) for row in rows]
+        elements = [_finalize_row(graph, row, reg) for row in rows]
         input_tokens = [row.token_in for row in rows if row.token_in is not None]
         new_active = [row.token for row in rows if row.token is not None]
 
@@ -816,7 +817,7 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
             if contiguous:
                 for i, token in enumerate(active):
                     if i == first:
-                        elements.append(_leaf_diagram(graph, leaf))
+                        elements.append(_leaf_diagram(graph, leaf, reg))
                         input_tokens.extend(wide_input_tokens)
                         new_active.extend((leaf, p) for p in range(n_out))
                     elif i not in consumed_set:
@@ -831,7 +832,7 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
                 # Fall back to the simple "wide leaf first, then every
                 # untouched row" layout rather than producing a
                 # malformed one.
-                elements.append(_leaf_diagram(graph, leaf))
+                elements.append(_leaf_diagram(graph, leaf, reg))
                 input_tokens.extend(wide_input_tokens)
                 new_active.extend((leaf, p) for p in range(n_out))
                 for i, token in enumerate(active):
@@ -847,13 +848,13 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
             insert_at = _natural_insertion_index(graph, root_id, active, leaf)
             for i, token in enumerate(active):
                 if i == insert_at:
-                    elements.append(_leaf_diagram(graph, leaf))
+                    elements.append(_leaf_diagram(graph, leaf, reg))
                     new_active.extend((leaf, p) for p in range(n_out))
                 elements.append(_make_identity_wire())
                 input_tokens.append(token)
                 new_active.append(token)
             if insert_at == len(active):
-                elements.append(_leaf_diagram(graph, leaf))
+                elements.append(_leaf_diagram(graph, leaf, reg))
                 new_active.extend((leaf, p) for p in range(n_out))
 
         stage_records.append((elements, input_tokens, new_active))

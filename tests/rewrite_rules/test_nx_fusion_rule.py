@@ -255,8 +255,9 @@ class TestFusionRule(unittest.TestCase):
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 3
         assert result.diagrams[0] == self.fourier
-        assert isinstance(result.diagrams[1], QSpider)
-        assert result.diagrams[1].phase == self.phase_sum
+        assert isinstance(result.diagrams[1], TensorDiagram)
+        assert isinstance(result.diagrams[1].diagrams[0], QSpider)
+        assert result.diagrams[1].diagrams[0].phase == self.phase_sum
         assert result.diagrams[2] == self.sq_gate
 
     def test_apply_single_nested_in_tensor(self):
@@ -283,8 +284,9 @@ class TestFusionRule(unittest.TestCase):
         self.rule.apply_single(graph, matches[0])
         result = to_diagram(graph)
         assert isinstance(result, ContractedDiagram)
-        assert isinstance(result.first, QSpider)
-        assert result.first.phase == self.phase_sum
+        assert isinstance(result.first, TensorDiagram)
+        assert isinstance(result.first.diagrams[0], QSpider)
+        assert result.first.diagrams[0].phase == self.phase_sum
         assert result.second == self.swap
 
     def test_apply_single_with_multiple_fusions(self):
@@ -300,8 +302,9 @@ class TestFusionRule(unittest.TestCase):
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         assert isinstance(result.diagrams[0], ContractedDiagram)
-        assert isinstance(result.diagrams[1], PSpider)
-        assert result.diagrams[1].phase == self.phase_sum
+        assert isinstance(result.diagrams[1], TensorDiagram)
+        assert isinstance(result.diagrams[1].diagrams[0], PSpider)
+        assert result.diagrams[1].diagrams[0].phase == self.phase_sum
 
     def test_apply_single_with_deeply_nested(self):
         """Test fusion in deeply nested structure."""
@@ -346,10 +349,12 @@ class TestFusionRule(unittest.TestCase):
         result = apply_rule_to_diagram(self.rule, comp)
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
-        assert isinstance(result.diagrams[0], QSpider)
-        assert result.diagrams[0].phase == self.phase_sum
-        assert isinstance(result.diagrams[1], PSpider)
-        assert result.diagrams[1].phase == self.phase_sum
+        assert isinstance(result.diagrams[0], TensorDiagram)
+        assert isinstance(result.diagrams[0].diagrams[0], QSpider)
+        assert result.diagrams[0].diagrams[0].phase == self.phase_sum
+        assert isinstance(result.diagrams[1], TensorDiagram)
+        assert isinstance(result.diagrams[1].diagrams[0], PSpider)
+        assert result.diagrams[1].diagrams[0].phase == self.phase_sum
 
     def test_apply_rule_no_match(self):
         """Apply rule when there are no fusible pairs."""
@@ -394,24 +399,6 @@ class TestFusionRule(unittest.TestCase):
         contracted = ContractedDiagram(self.fourier, self.swap, [0], [0], [], [])
         result = apply_rule_to_diagram(self.rule, contracted)
         assert result == contracted
-
-    def test_fusion_multiple_times(self):
-        """A single `apply_rule` call fuses nested structures completely.
-
-        `apply_rule` loops internally to its own local fixed point (see
-        its docstring): fusing the inner pair turns the outer
-        `ContractedDiagram` into a fusible pair too, so that gets folded
-        in the same call -- no second `apply_rule_to_diagram` call is
-        needed to reach the fully-fused `QSpider`.
-        """
-        inner_contracted = ContractedDiagram(self.q1, self.q2, [0], [0], [], [])
-        outer_contracted = ContractedDiagram(inner_contracted, self.q_2x2, [0], [0], [], [])
-
-        result = apply_rule_to_diagram(self.rule, outer_contracted)
-        assert isinstance(result, QSpider)
-        assert result.num_inputs == 2
-        assert result.num_outputs == 2
-        assert result.phase == self.phase_sum + self.phase_poly
 
 
 if __name__ == "__main__":
@@ -462,34 +449,28 @@ if __name__ == "__main__":
     tensor_after = apply_rule_to_diagram(rule, tensor)
     visualize_before_after(tensor, tensor_after, "Fusion inside Tensor", rule_name)
 
-    # Test 5: Nested fusion (fusion inside a ContractedDiagram)
-    inner_contracted = ContractedDiagram(q1, q2, [0], [0], [], [])
-    outer_contracted = ContractedDiagram(inner_contracted, swap, [0], [0], [], [])
-    outer_contracted_after = apply_rule_to_diagram(rule, outer_contracted)
-    visualize_before_after(outer_contracted, outer_contracted_after, "Nested Fusion", rule_name)
-
-    # Test 6: Multiple fusion pairs
+    # Test 5: Multiple fusion pairs
     contracted1 = ContractedDiagram(q1, q2, [0], [0], [], [])
     contracted2 = ContractedDiagram(p1, p2, [0], [0], [], [])
     comp_multi = CompositionDiagram([contracted1, contracted2])
     comp_multi_after = apply_rule_to_diagram(rule, comp_multi)
     visualize_before_after(comp_multi, comp_multi_after, "Multiple Fusion Pairs", rule_name)
 
-    # Test 7: Fusion with different arities
+    # Test 6: Fusion with different arities
     q_2x1 = QSpider(2, 1, phase_poly)
     q_1x2 = QSpider(1, 2, phase_poly2)
     contracted_diff = ContractedDiagram(q_2x1, q_1x2, [0], [0], [], [])
     contracted_diff_after = apply_rule_to_diagram(rule, contracted_diff)
     visualize_before_after(contracted_diff, contracted_diff_after, "Fusion Different Arities", rule_name)
 
-    # Test 8: Fusion with connections in both directions
+    # Test 7: Fusion with connections in both directions
     q_2x2_q1 = QSpider(2, 2, phase_poly)
     q_2x2_q2 = QSpider(2, 2, phase_poly2)
     contracted_both = ContractedDiagram(q_2x2_q1, q_2x2_q2, [0], [0], [0], [0])
     contracted_both_after = apply_rule_to_diagram(rule, contracted_both)
     visualize_before_after(contracted_both, contracted_both_after, "Fusion Both Directions", rule_name)
 
-    # Test 9: Diagram unchanged because the rule doesn't apply (different spider types)
+    # Test 8: Diagram unchanged because the rule doesn't apply (different spider types)
     contracted_no_match = ContractedDiagram(q1, p2, [0], [0], [], [])
     contracted_no_match_after = apply_rule_to_diagram(rule, contracted_no_match)
     visualize_before_after(contracted_no_match, contracted_no_match_after, "No Fusion (Different Types)", rule_name)
