@@ -22,6 +22,7 @@ from typing import cast
 
 from sympy import pi, simplify
 
+from cvzx.backend import get_backend_modules
 from cvzx.base_gates import (
     CompositionDiagram,
     ContractedDiagram,
@@ -34,16 +35,23 @@ from cvzx.base_gates import (
     ZxPoly,
 )
 from cvzx.gates import BeamsplitterGate, ControlledSumGate, PhaseRotationGate, SqueezingGate
-from cvzx.nx_graph import CVZXGraph, to_diagram
-from cvzx.nx_rewrite_rules import (
-    ChainReductionRule,
-    CopyRule,
-    FourierNormalizationRule,
-    FusionRule,
-    IdentityRule,
-    TerminalAbsorptionRule,
-)
 from cvzx.optimize import optimize
+
+# `optimize()` picks its own backend (see `cvzx.config.DEFAULT_BACKEND`) when
+# no `backend=` is passed, as every call in this file does -- so the graph
+# it hands back, and the rule classes used to double-check it's a genuine
+# fixed point, must come from that SAME backend's modules rather than being
+# hardcoded to one, or `to_diagram`/`CVZXGraph` below would choke on a graph
+# object from the other backend.
+_, _graph_mod, _rules_mod = get_backend_modules()
+CVZXGraph = _graph_mod.CVZXGraph
+to_diagram = _graph_mod.to_diagram
+ChainReductionRule = _rules_mod.ChainReductionRule
+CopyRule = _rules_mod.CopyRule
+FourierNormalizationRule = _rules_mod.FourierNormalizationRule
+FusionRule = _rules_mod.FusionRule
+IdentityRule = _rules_mod.IdentityRule
+TerminalAbsorptionRule = _rules_mod.TerminalAbsorptionRule
 
 
 def _no_matches_left(graph, *, assume_infinite_squeezing):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
@@ -65,9 +73,22 @@ def _no_matches_left(graph, *, assume_infinite_squeezing):  # ruff: ignore[missi
     return all(len(rule.match(graph)) == 0 for rule in rules)
 
 
+def _iter_node_attrs(cvzx_graph):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Yield every node's attribute payload, independent of graph backend.
+
+    Returns
+    -------
+    Iterator[dict]
+    """
+    raw = cvzx_graph.graph
+    if hasattr(raw, "node_indices"):  # rustworkx PyDiGraph
+        return (raw[idx] for idx in raw.node_indices())
+    return (attrs for _, attrs in raw.nodes(data=True))  # networkx DiGraph
+
+
 def _count_node_type(graph, type_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Count graph nodes whose `type` attribute equals `type_name`."""
-    return sum(1 for _, attrs in graph.graph.nodes(data=True) if attrs.get("type") == type_name)
+    return sum(1 for attrs in _iter_node_attrs(graph) if attrs.get("type") == type_name)
 
 
 def _build_four_mode_circuit():  # ruff: ignore[missing-return-type-private-function]
@@ -313,14 +334,22 @@ class TestOptimizeInfiniteSqueezing(unittest.TestCase):
     """
 
     def test_squeezing_absorption_folds_tau_into_terminal_phase(self):
-        """State . Sq(tau) folds into a single terminal with phase f(x/tau)."""
+        """State . Sq(tau) folds into a single terminal with phase f(tau*x).
+
+        Matches `TerminalAbsorptionRule`'s own established, independently
+        tested convention for a `QSpider` state (see e.g.
+        `test_apply_single_squeezing_state` in
+        `test_nx_terminal_absorption_rule.py`, which folds `Sq(2.0)` into
+        `QSpider(0, 1, 3.0*x)` and expects `6.0*x` -- multiplied by tau,
+        not divided).
+        """
         tau = 2.0
         state = QSpider(0, 1, ZxPoly({0: 1, 1: 3, 2: 2}))
         comp = CompositionDiagram([state, SqueezingGate(tau=tau)])
         graph, _ = optimize(comp, assume_infinite_squeezing=True)
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
-        expected_phase = ZxPoly({degree: coeff / tau**degree for degree, coeff in state.phase.coeffs.items()})
+        expected_phase = ZxPoly({degree: coeff * tau**degree for degree, coeff in state.phase.coeffs.items()})
         assert result.phase == expected_phase
         assert _no_matches_left(graph, assume_infinite_squeezing=True)
 
@@ -353,7 +382,7 @@ class TestOptimizeInfiniteSqueezing(unittest.TestCase):
 
         assert result.num_inputs == 0
         assert result.num_outputs == 2
-        types_present = {attrs.get("type") for _, attrs in graph.graph.nodes(data=True)}
+        types_present = {attrs.get("type") for attrs in _iter_node_attrs(graph)}
         assert "ControlledSumGate" not in types_present
         assert _no_matches_left(graph, assume_infinite_squeezing=True)
 
@@ -375,7 +404,7 @@ class TestOptimizeInfiniteSqueezing(unittest.TestCase):
 
         assert result.num_inputs == 0
         assert result.num_outputs == 2
-        types_present = {attrs.get("type") for _, attrs in graph.graph.nodes(data=True)}
+        types_present = {attrs.get("type") for attrs in _iter_node_attrs(graph)}
         assert "BeamsplitterGate" not in types_present
         assert "ControlledSumGate" not in types_present
         assert _no_matches_left(graph, assume_infinite_squeezing=True)

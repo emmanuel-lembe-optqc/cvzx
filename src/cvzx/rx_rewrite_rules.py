@@ -1672,6 +1672,12 @@ class FusionRule(RewriteRule):
         if special_case:
             if second_type != "TensorDiagram":
                 first_id, second_id = second_id, first_id
+                # `first_attrs` was captured against the pre-swap
+                # `first_id` (the `TensorDiagram`, whose own `phase` is
+                # always None) -- refresh it against the real spider now
+                # bound to `first_id`, or `first_phase` below is always
+                # None and this match silently no-ops forever.
+                first_attrs = graph[id_map[first_id]]
 
             node_to_contract_id = graph[id_map[second_id]]["sub_diagram_ids"][-1]
             first_phase = first_attrs.get("phase")
@@ -2349,15 +2355,23 @@ class ChainReductionRule(RewriteRule):
         """Reduce a chain of same-type gates in place.
 
         The chain's first member keeps its own node ID and slot; its type and
-        phase are overwritten with the reduced result. Every other member of
-        the chain is overwritten in place with a zero-phase identity spider
-        of its own color and arity. Nothing is contracted, spliced, or
-        voided, and no other rule is invoked.
+        phase are overwritten with the reduced result. When the chain is a
+        run of bare `(1, 1)` `QSpider`/`PSpider`s, every other member is
+        cheaply overwritten in place with a zero-phase `(1, 1)` identity
+        spider instead -- a bare zero-phase spider genuinely IS the identity
+        only at that one arity (see `IdentityRule`'s own docstring), so this
+        shortcut relies on `IdentityRule` to prune it on a later pass, and
+        nothing here is contracted, spliced, or voided.
 
-        Exception: a `QSpider`/`PSpider` chain whose reduced arity differs
-        from its first member's own arity falls back to the splice-and-
-        propagate path, since that arity change is genuine and the
-        composition above has to see it.
+        Every other case -- multi-wire gates (`ControlledSumGate`,
+        `ControlledZGate`, `BeamsplitterGate`, ...) whose "extra" chain
+        members have no such prunable identity representation, and any
+        `QSpider`/`PSpider` chain whose reduced arity differs from its
+        first member's own -- falls back to the general splice-and-
+        propagate path, which actually removes the extra nodes from the
+        graph and rewires the container around them (flattening it if only
+        the survivor remains), so no leftover node is ever left standing in
+        for "nothing happens here".
 
         Parameters
         ----------
@@ -2391,10 +2405,18 @@ class ChainReductionRule(RewriteRule):
         reduced_num_inputs = reduced_gate.get("num_inputs", first_num_inputs)
         reduced_num_outputs = reduced_gate.get("num_outputs", first_num_outputs)
 
-        if reduced_num_inputs != first_num_inputs or reduced_num_outputs != first_num_outputs:
+        # Arity-changing chains, and any chain whose members aren't bare
+        # (1, 1) spiders (so "reset the extras to a same-arity zero-phase
+        # spider" wouldn't actually be a prunable identity), fall back to
+        # the general splice-and-propagate path.
+        stays_1_1 = first_num_inputs == 1 and first_num_outputs == 1
+        if reduced_num_inputs != first_num_inputs or reduced_num_outputs != first_num_outputs or not stays_1_1:
             self._apply_single_splice(cvzx_graph, match, reduced_gate)
             return
 
+        # Common case: overwrite the survivor, replace the rest with
+        # zero-phase (1, 1) identity spiders -- a genuine identity at that
+        # one arity, safe to leave for IdentityRule to prune later.
         self._overwrite_node_for_reduced_gate(graph, id_map, first_id, reduced_gate)
         for extra_id in node_ids[1:]:
             self._reset_to_identity(graph, id_map, extra_id)
@@ -3202,9 +3224,12 @@ class TerminalAbsorptionRule(RewriteRule):
     def _squeeze_absorb(phase: ZxPoly, tau: float | Expr, is_q_spider: bool) -> ZxPoly:  # ruff: ignore[boolean-type-hint-positional-argument]
         """Fold a squeezing Sq(tau) into a terminal's phase (any degree).
 
-        x -> x/tau leaves each x**d term's degree unchanged and divides
-        its coefficient by tau**d (built via the dict form -- ZxPoly's
-        expr+gen constructor path has a latent bug, see base_gates.py).
+        Substituting x -> factor*x leaves each x**d term's degree
+        unchanged and multiplies its coefficient by factor**d (built via
+        the dict form -- ZxPoly's expr+gen constructor path has a latent
+        bug, see base_gates.py). `factor` is `tau` for a `QSpider`
+        terminal and `1/tau` for a `PSpider` one -- squeezing scales the
+        conjugate Q/P quadratures reciprocally, per the cited reference.
 
         Returns
         -------

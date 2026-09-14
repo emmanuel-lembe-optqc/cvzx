@@ -1118,7 +1118,20 @@ class TestChainReductionRule(unittest.TestCase):
         assert result.diagrams[1].theta == -theta
 
     def test_apply_single_bs(self):
-        """Beamsplitter chain: survivor keeps the slot, second member becomes a wide identity."""
+        """Beamsplitter chain: survivor keeps the slot, second member is spliced away entirely.
+
+        Unlike a `(1, 1)` `QSpider`/`PSpider` chain, a wide gate's "extra"
+        chain member has no same-arity zero-phase-spider identity
+        representation `IdentityRule` knows how to prune (only a bare
+        `(1, 1)` spider does -- see `apply_single`'s own docstring), so
+        it's removed from the graph outright via the general splice-and-
+        propagate path. This holds even when the reduced gate itself
+        collapses to a `(2, 2)` zero-phase `QSpider` (a fully-cancelled
+        `theta + (-theta) = 0` chain): that canonical zero-BS-as-identity
+        representation still isn't something `IdentityRule` prunes, but it
+        no longer needs to be pruned -- there's nothing else left to
+        splice away.
+        """
         comp = CompositionDiagram([self.swap, self.bs1, self.bs2])
         match = {
             "container_id": comp.id,
@@ -1135,14 +1148,10 @@ class TestChainReductionRule(unittest.TestCase):
         IdentityRule().apply_rule(graph)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
-        assert len(result.diagrams) == 3
+        assert len(result.diagrams) == 2
         assert result.diagrams[0] == self.swap
         assert isinstance(result.diagrams[1], BeamsplitterGate)
         assert isclose(cast("float", result.diagrams[1].theta), cast("float", self.bs_sum.theta))
-        assert isinstance(result.diagrams[2], QSpider)
-        assert result.diagrams[2].num_inputs == 2
-        assert result.diagrams[2].num_outputs == 2
-        assert result.diagrams[2].phase == ZxPoly({})
 
         theta = symbols("theta", real=True)
         comp = CompositionDiagram([self.swap, self.bs1, self.bs2])
@@ -1161,13 +1170,9 @@ class TestChainReductionRule(unittest.TestCase):
         IdentityRule().apply_rule(graph)
         result = to_diagram(graph)
         assert isinstance(result, CompositionDiagram)
-        assert len(result.diagrams) == 3
+        assert len(result.diagrams) == 2
         assert isinstance(result.diagrams[1], BeamsplitterGate)
         assert result.diagrams[1].theta == 3 * theta
-        assert isinstance(result.diagrams[2], QSpider)
-        assert result.diagrams[2].num_inputs == 2
-        assert result.diagrams[2].num_outputs == 2
-        assert result.diagrams[2].phase == ZxPoly({})
 
         comp = CompositionDiagram([self.bs1, self.bs2])
         match = {
@@ -1184,20 +1189,13 @@ class TestChainReductionRule(unittest.TestCase):
         graph.rebuild_registry()
         IdentityRule().apply_rule(graph)
         result = to_diagram(graph)
-        # `BS(θ) ∘ BS(-θ)` reduces to `BS(0)`, a `(2,2)` zero-phase QSpider.
-        # The reset second member is also a `(2,2)` zero-phase QSpider. Neither
-        # is a `(1,1)` identity, so `IdentityRule` leaves the composition with
-        # both slots intact.
-        assert isinstance(result, CompositionDiagram)
-        assert len(result.diagrams) == 2
-        assert isinstance(result.diagrams[0], QSpider)
-        assert result.diagrams[0].num_inputs == 2
-        assert result.diagrams[0].num_outputs == 2
-        assert result.diagrams[0].phase == ZxPoly({})
-        assert isinstance(result.diagrams[1], QSpider)
-        assert result.diagrams[1].num_inputs == 2
-        assert result.diagrams[1].num_outputs == 2
-        assert result.diagrams[1].phase == ZxPoly({})
+        # Only the (now-canonical) zero-phase (2, 2) survivor is left --
+        # the composition itself flattens away since a single element
+        # doesn't need one.
+        assert isinstance(result, QSpider)
+        assert result.num_inputs == 2
+        assert result.num_outputs == 2
+        assert result.phase == ZxPoly({})
 
     def test_apply_single_sq(self):
         """Squeezing chain: survivor + identity, then IdentityRule collapses."""
@@ -1440,18 +1438,14 @@ class TestChainReductionRule(unittest.TestCase):
         assert comp3_red.diagrams[:2] == [self.q_x2_3_n23, self.p_x2_3_n34]
         bs_tensor = _sub(comp3_red, 2)
         assert isinstance(bs_tensor, TensorDiagram)
-        # The BS chain's reset member is a `(2,2)` zero-phase QSpider, which
-        # `IdentityRule` leaves in place -- so the surviving BeamsplitterGate
-        # and its wide identity sit together in a small composition.
+        # The BS chain's "extra" member has no same-arity zero-phase-spider
+        # identity representation (only a bare `(1, 1)` spider does -- see
+        # `apply_single`'s own docstring), so it's spliced out of the graph
+        # entirely rather than left for `IdentityRule` to prune: the slot
+        # holds just the surviving, reduced BeamsplitterGate.
         bs_slot = bs_tensor.diagrams[0]
-        assert isinstance(bs_slot, CompositionDiagram)
-        assert len(bs_slot.diagrams) == 2
-        assert isinstance(bs_slot.diagrams[0], BeamsplitterGate)
-        assert isclose(cast("float", bs_slot.diagrams[0].theta), theta)
-        assert isinstance(bs_slot.diagrams[1], QSpider)
-        assert bs_slot.diagrams[1].num_inputs == 2
-        assert bs_slot.diagrams[1].num_outputs == 2
-        assert bs_slot.diagrams[1].phase == ZxPoly({})
+        assert isinstance(bs_slot, BeamsplitterGate)
+        assert isclose(cast("float", bs_slot.theta), theta)
         # The remaining lanes are untouched.
         assert bs_tensor.diagrams[1] == CompositionDiagram([
             self.p_x3_2,
