@@ -168,17 +168,21 @@ development on `main` to date, grouped by area rather than by commit.
   `DependencyDAG` constructor. Verified to produce a `DependencyDAG`
   isomorphic to the `"mqc3"` reference backend's output across both graph
   backends.
-- **Vertical phase-text overflow handling** (`cvzx.visualization.overflow`):
-  a node's phase text was already wrapped horizontally to fit its box, but
-  nothing checked whether the resulting wrapped text was too *tall* for it
-  — a long/complex symbolic phase could visually spill out of its square.
-  `DiagramVisualizer` now measures each phase `Text` artist's actual
-  rendered pixel height against its own box's pixel height (both via real
-  matplotlib measurement — `Text.get_window_extent()` and an affine
-  `ax.transData.transform()` — once the figure's layout is final, not a
-  guessed line-height heuristic) and replaces an overflowing one with a
-  generic `"D<n>"` label, relocating the real (still length-capped) phase
-  into a legend appended below the diagram instead of losing it. The
+- **Phase-text overflow handling** (`cvzx.visualization.overflow`): nothing
+  previously checked whether a node's wrapped phase text still fit its own
+  box — a long/complex symbolic phase could visually spill out of its
+  square. `DiagramVisualizer` now measures each phase `Text` artist's
+  actual rendered pixel width *and* height against its own box's pixel
+  width/height (all four via real matplotlib measurement —
+  `Text.get_window_extent()` and an affine `ax.transData.transform()` —
+  once the figure's layout is final, not a guessed character-to-pixel
+  heuristic) and replaces an overflowing one with a generic `"D<n>"`
+  label, relocating the real (still length-capped) phase into a legend
+  appended below the diagram instead of losing it. Overflowing the box
+  horizontally, not vertically, turns out to be the common case in
+  practice: `textwrap.fill`'s wrap width comes from the box's data-unit
+  radius, which has no fixed relationship to how many pixels a line
+  actually renders to once a busy diagram autoscales every box down. The
   legend itself stays a small, bounded addition regardless of diagram
   size: entries wrap into multiple columns, cap at 20 shown, and any
   remainder collapses into one final "... and N more" line rather than

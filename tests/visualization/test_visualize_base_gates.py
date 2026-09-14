@@ -539,7 +539,7 @@ def run_graphical_tests():  # ruff: ignore[too-many-locals, too-many-statements]
     print("Please inspect the generated images manually.")
 
 
-def test_phase_overflow_triggers_generic_label():
+def test_phase_overflow_tall_triggers_generic_label():
     """A phase whose wrapped text is taller than its box gets a `D<n>` label + legend entry."""
     d0, d2, d4, d6, d8, d10, d12, d14, d16, d18, d20, d22, d24, d26, d28 = symbols(
         "d0 d2 d4 d6 d8 d10 d12 d14 d16 d18 d20 d22 d24 d26 d28", real=True
@@ -572,6 +572,33 @@ def test_phase_overflow_triggers_generic_label():
         assert visualizer._overflow_counter == 1
         assert set(visualizer._overflow_legend) == {"D1"}
         assert len(visualizer._overflow_legend["D1"]) <= LEGEND_MAX_LEN
+        axes_texts = [t.get_text() for t in fig.axes[0].texts]
+        assert "D1" in axes_texts
+        legend_texts = [t.get_text() for t in fig.texts]
+        assert any(t.startswith("D1:") for t in legend_texts)
+    finally:
+        plt.close(fig)
+
+
+def test_phase_overflow_wide_triggers_generic_label():
+    """A phase whose wrapped text is wider than its box gets a `D<n>` label + legend entry.
+
+    This is the common case in practice: `textwrap.fill`'s wrap width comes
+    from the box's *data-unit* radius, which has no fixed relationship to
+    how many pixels a line renders to once a busy diagram autoscales every
+    box down -- so a single long symbol name, not a phase with many terms,
+    is enough to trigger this (contrast with the "tall" case above, which
+    needs many terms to force many wrapped lines).
+    """
+    long_name = symbols("a_very_long_symbolic_coefficient_name_here", real=True)
+    overflowing = QSpider(1, 1, ZxPoly({1: long_name}), parametric=True)
+    diagram = TensorDiagram([overflowing, *(Fourier() for _ in range(30))])
+
+    visualizer = DiagramVisualizer()
+    fig = visualizer.visualize(diagram)
+    try:
+        assert visualizer._overflow_counter == 1
+        assert set(visualizer._overflow_legend) == {"D1"}
         axes_texts = [t.get_text() for t in fig.axes[0].texts]
         assert "D1" in axes_texts
         legend_texts = [t.get_text() for t in fig.texts]

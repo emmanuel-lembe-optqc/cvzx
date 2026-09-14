@@ -1,8 +1,17 @@
-"""Vertical phase-text overflow handling: generic labels + a bounded legend.
+"""Phase-text overflow handling: generic labels + a bounded legend.
 
-A node whose wrapped phase text is taller than its own box gets a generic
-`"D<n>"` label instead, with the real phase relocated into a legend appended
-below the diagram -- see `_PhaseOverflowMixin._resolve_phase_overflow`.
+A node whose wrapped phase text no longer fits its own box -- in either
+direction -- gets a generic `"D<n>"` label instead, with the real phase
+relocated into a legend appended below the diagram -- see
+`_PhaseOverflowMixin._resolve_phase_overflow`. Horizontal overflow is the
+common case in practice: `textwrap.fill`'s wrap width is set from the box's
+*data-unit* radius, but that has no fixed relationship to how many pixels a
+line actually renders to -- a diagram with many nodes autoscales every box
+down to a small on-screen size without textwrap ever being told, so the same
+"20-characters-wide" line that fit comfortably in an isolated render can
+easily spill past a shrunk box's real width. Vertical overflow (too many
+wrapped lines) is rarer but checked the same way, for the same reason: real
+measurement, not a guessed relationship between characters and pixels.
 """
 
 from __future__ import annotations
@@ -28,10 +37,10 @@ _LEGEND_TOP_MARGIN_IN = 0.15
 
 
 class _PhaseOverflowMixin:
-    """Vertical phase-overflow detection, generic-label substitution, and legend rendering."""
+    """Phase-overflow detection (either axis), generic-label substitution, and legend rendering."""
 
     def _register_phase_candidate(self: Visualizer, text_obj: Text, radius: float, legend_str: str) -> None:
-        """Record a drawn phase `Text` as a candidate to check for vertical overflow.
+        """Record a drawn phase `Text` as a candidate to check for overflow.
 
         Nothing is decided here -- `ax`'s data-to-pixel mapping isn't final
         until `visualize()`'s own `relim`/`autoscale_view`/`tight_layout`
@@ -51,19 +60,27 @@ class _PhaseOverflowMixin:
         self._phase_overflow_candidates.append((text_obj, radius, legend_str))
 
     def _resolve_phase_overflow(self: Visualizer, fig: plt.Figure, ax: plt.Axes) -> None:
-        """Replace any vertically-overflowing phase `Text` with a generic `D<n>` label.
+        """Replace any overflowing phase `Text` (either axis) with a generic `D<n>` label.
 
         Runs once, after `visualize()`'s own layout calls, so the axes'
         data-to-pixel mapping is final: forces one render pass
         (`fig.canvas.draw()`), then for each candidate registered by
         `_register_phase_candidate` compares the phase text's actual
-        rendered pixel height against its own box's pixel height (both via
-        real matplotlib measurement -- `Text.get_window_extent()` and an
-        affine `ax.transData.transform()` -- not a guessed line-height
-        heuristic). An overflowing candidate's `Text` is replaced in place
-        with `f"D{n}"` (a per-render counter) and the real phase is recorded
-        in `self._overflow_legend` instead; `_draw_overflow_legend` then
-        renders that mapping onto the figure, if anything overflowed.
+        rendered pixel width *and* height against its own box's pixel
+        width/height (all four via real matplotlib measurement --
+        `Text.get_window_extent()` and an affine `ax.transData.transform()`
+        -- not a guessed character-to-pixel heuristic). The box is a
+        `2 * radius` square in data units, but that doesn't mean its
+        rendered width and height are checked redundantly: `get_window_extent()`
+        measures the actual wrapped string (which can be wider than it is
+        tall, or vice versa) against each axis independently, so a line
+        that's merely long (common) is caught exactly like one that's
+        merely tall (rarer) -- see the module docstring for why the two
+        aren't equally likely in practice. An overflowing candidate's
+        `Text` is replaced in place with `f"D{n}"` (a per-render counter)
+        and the real phase is recorded in `self._overflow_legend` instead;
+        `_draw_overflow_legend` then renders that mapping onto the figure,
+        if anything overflowed.
 
         Parameters
         ----------
@@ -76,11 +93,14 @@ class _PhaseOverflowMixin:
             return
         fig.canvas.draw()
         for text_obj, radius, legend_str in self._phase_overflow_candidates:
-            text_px_height = text_obj.get_window_extent().height
+            text_bbox = text_obj.get_window_extent()
+            left = ax.transData.transform((-radius, 0.0))
+            right = ax.transData.transform((radius, 0.0))
             top = ax.transData.transform((0.0, radius))
             bottom = ax.transData.transform((0.0, -radius))
+            box_px_width = abs(right[0] - left[0])
             box_px_height = abs(top[1] - bottom[1])
-            if text_px_height > box_px_height:
+            if text_bbox.width > box_px_width or text_bbox.height > box_px_height:
                 self._overflow_counter += 1
                 label = f"D{self._overflow_counter}"
                 text_obj.set_text(label)
