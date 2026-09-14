@@ -21,6 +21,7 @@ from mqc3.graph.embed.dep_dag import DependencyDAG
 from cvzx.base_gates import CompositionDiagram, ContractedDiagram, QSpider, TensorDiagram, ZxPoly
 from cvzx.circuit_to_diagram import from_circuit_repr
 from cvzx.diagram_to_circuit import to_circuit_repr
+from cvzx.exceptions import UnboundMeasurementError
 from cvzx.gates import ControlledSumGate, CubicPhaseGate, PhaseRotationGate
 
 
@@ -152,14 +153,21 @@ def test_nonzero_phase_state_leaf_raises():
 
 
 def test_symbolic_parameter_raises():
+    """A symbolic parameter not bound to any upstream measurement effect is rejected.
+
+    `theta` here isn't the special `-m*x`-phase measurement-effect
+    pattern `cvzx.completion.complete_diagram()` produces, so there's no
+    measurement for it to feed forward from -- `UnboundMeasurementError`
+    (a `cvzx.exceptions.CvzxError`), not a bare `NotImplementedError`.
+    """
     vac = QSpider(0, 1, ZxPoly({}))
     theta = sympy.symbols("theta")
     sym_diagram = CompositionDiagram([vac, PhaseRotationGate(theta, parametric=True)])
     try:
         to_circuit_repr(sym_diagram)
-    except NotImplementedError:
+    except UnboundMeasurementError:
         return
-    msg = "expected NotImplementedError for a symbolic gate parameter"
+    msg = "expected UnboundMeasurementError for an unbound symbolic gate parameter"
     raise AssertionError(msg)
 
 

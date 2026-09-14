@@ -82,25 +82,41 @@ superposition, a displaced state, or a mixed covariance) raises
 
 Feedforward
 -----------
-mqc3 feedforward (`FeedForward[MeasuredVariable]`, an arbitrary Python
-function of a measurement outcome) is not yet wired through to cvzx's
-`measurement_ids`/symbolic-parameter mechanism -- converting an
-operation with a feedforward parameter raises `NotImplementedError`.
-Both sides already have the structural support needed for this
-(`feedforward`/`measurement_ids` on every parametrized cvzx gate; a
-resolvable `from_operation` on every mqc3 `FeedForward`), so this is a
-natural follow-up, not a dead end.
+An `intrinsic.Measurement` operation that some later operation's
+`FeedForward[MeasuredVariable]` parameter references is reconstructed as
+`QSpider`/`PSpider(1, 0, ZxPoly({1: -m}))` (the same leaf shape
+`cvzx.completion.complete_diagram()` produces) for a fresh symbol `m`,
+chosen by the measured quadrature (`theta` close to `pi/2` -> `QSpider`,
+close to `0` -> `PSpider`); any other angle falls back to a plain
+`MeasurementGate(theta)` -- only the two canonical angles have a
+Q/P-spider representation to reconstruct into. The referencing
+operation's own parameter is recovered as `slope*m + intercept`
+(evaluating the `FeedForwardFunction` numerically at `0.0` and `1.0` to
+recover that affine relationship) and threaded into the corresponding
+cvzx gate as a symbolic (`parametric=True`) parameter -- the exact
+algebraic inverse of `cvzx.diagram_to_circuit`'s own feedforward
+resolution (`_resolve_scalar`). A `FeedForward` depending on more than
+one measurement symbol, or a nonlinear function of one (mqc3's
+`FeedForwardFunction` supports arbitrary Python callables; only the
+affine case is inverted here), is not supported and raises
+`NotImplementedError`. `param_measurement_map` is deliberately left
+unset on the reconstructed gates (they carry the symbol in their own
+phase/parameters, which is enough for `cvzx.diagram_to_circuit` to
+round-trip them; declaring the `GateRegister`-traceable binding too is a
+natural but separate follow-up).
 """
 
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
+from itertools import count
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import numpy.typing as npt
+from sympy import Expr, I, Symbol, acos, sqrt, tan
 
-from cvzx.base_gates import CompositionDiagram, Diagram, Fourier, FourierInv, QSpider, TensorDiagram, ZxPoly
+from cvzx.base_gates import CompositionDiagram, Diagram, Fourier, FourierInv, PSpider, QSpider, TensorDiagram, ZxPoly
 from cvzx.gates import (
     ArbitraryGate,
     BeamsplitterGate,
@@ -124,6 +140,8 @@ if TYPE_CHECKING:
 
 __all__ = ["from_circuit_repr"]
 
+_symbol_counter = count(1)
+
 
 # --------------------------------------------------------------------------
 # Small building blocks
@@ -141,7 +159,17 @@ def _identity_wire() -> Diagram:
     return QSpider(1, 1, ZxPoly({}))
 
 
-def _phase_rotation(theta: float) -> Diagram:
+def _is_symbolic(value: float | Expr) -> bool:
+    """True if `value` is a genuinely symbolic (unresolved) sympy `Expr`.
+
+    Returns
+    -------
+    bool
+    """
+    return isinstance(value, Expr) and bool(value.free_symbols)
+
+
+def _phase_rotation(theta: float | Expr) -> Diagram:
     """`PhaseRotationGate(theta)`, routing around its odd-multiple-of-pi/2 restriction.
 
     `PhaseRotationGate` refuses any angle that is an odd multiple of
@@ -156,12 +184,20 @@ def _phase_rotation(theta: float) -> Diagram:
     docstring for the `Fourier() = mqc3 R(pi/2)`, `FourierInv() = mqc3
     R(-pi/2)` derivation this relies on).
 
+    A symbolic (feedforward-derived) `theta` skips the fold entirely --
+    it's a numeric-only optimization for landing exactly on the two
+    problem angles, not a correctness requirement, and there's no way to
+    tell whether an unresolved symbolic angle will land there.
+
     Returns
     -------
     Diagram
-        `Fourier()`/`FourierInv()` at the two problem angles, otherwise
-        `PhaseRotationGate(folded)`.
+        `PhaseRotationGate(-theta, parametric=True)` if `theta` is
+        symbolic; otherwise `Fourier()`/`FourierInv()` at the two problem
+        angles, else `PhaseRotationGate(folded)`.
     """
+    if _is_symbolic(theta):
+        return PhaseRotationGate(theta, parametric=True)
     folded = ((theta + np.pi) % (2 * np.pi)) - np.pi
     if np.isclose(folded, np.pi / 2):
         return FourierInv()
@@ -268,7 +304,7 @@ def _translate_initial_state(state: InitialState, mode_index: int) -> Diagram:
 
 
 def _as_float(value: CircOpParam, op_name: str, param_index: int) -> float:
-    """Reject feedforward parameters (not yet supported) and coerce to `float`.
+    """Reject feedforward parameters (not resolvable here) and coerce to `float`.
 
     Returns
     -------
@@ -278,20 +314,66 @@ def _as_float(value: CircOpParam, op_name: str, param_index: int) -> float:
     Raises
     ------
     NotImplementedError
-        If `value` is a `FeedForward` (not yet supported).
+        If `value` is a `FeedForward`.
     """
     # ruff: ignore[import-outside-top-level]
     from mqc3.feedforward import FeedForward
 
     if isinstance(value, FeedForward):
-        msg = (
-            f"Cannot convert `{op_name}`: feedforward on parameter #{param_index} is "
-            "not yet supported by the CircuitRepr -> Diagram converter (both sides "
-            "already have the structural support for it -- see this module's "
-            "docstring -- but the wiring itself is not implemented yet)."
-        )
+        msg = f"Cannot convert `{op_name}`: feedforward on parameter #{param_index} is not a plain float."
         raise NotImplementedError(msg)
     return float(value)
+
+
+def _resolve_param(
+    value: CircOpParam, op_name: str, param_index: int, measurement_symbols: dict[int, Symbol]
+) -> float | Expr:
+    """Coerce a `CircOpParam` to `float`, or to a symbolic `slope*symbol + intercept` `Expr`.
+
+    A plain float coerces exactly as `_as_float` does. A `FeedForward`
+    referencing a measurement operation that `_measurements_needing_symbols`
+    assigned a symbol to resolves to that affine relationship (the
+    `FeedForwardFunction`'s slope/intercept are recovered by evaluating it
+    numerically at `0.0` and `1.0`, mirroring `cvzx.diagram_to_circuit`'s
+    own `_resolve_scalar` in reverse); the resulting `Expr` is meant to be
+    threaded into `param_measurement_map={symbol: {measurement_leaf.id}}`
+    on the cvzx gate that ends up carrying it (see `_naive_translate`).
+
+    Returns
+    -------
+    float | Expr
+
+    Raises
+    ------
+    NotImplementedError
+        If `value` is a `FeedForward` referencing an operation that
+        wasn't recognized as a measurement needing a symbol (should not
+        occur for a `value` produced by iterating `circuit`, since
+        `_measurements_needing_symbols` scans every `FeedForward` in the
+        same circuit up front).
+    """
+    # ruff: ignore[import-outside-top-level]
+    from mqc3.feedforward import FeedForward
+
+    if not isinstance(value, FeedForward):
+        return _as_float(value, op_name, param_index)
+
+    source_id = id(value.variable.get_from_operation())
+    symbol = measurement_symbols.get(source_id)
+    if symbol is None:
+        msg = (
+            f"Cannot convert `{op_name}`: feedforward on parameter #{param_index} references "
+            "an operation that wasn't recognized as a measurement (should not occur)."
+        )
+        raise NotImplementedError(msg)
+
+    # `FeedForwardFunction.__call__` returns a plain `float` when called
+    # with a `float` (its own documented behavior); the `float | FeedForward`
+    # return annotation only matters for its other (Variable/FeedForward)
+    # input cases.
+    intercept = cast("float", value.func(0.0))
+    slope = cast("float", value.func(1.0)) - intercept
+    return slope * symbol + intercept
 
 
 # --------------------------------------------------------------------------
@@ -304,65 +386,92 @@ def _as_float(value: CircOpParam, op_name: str, param_index: int) -> float:
 # mode order as `Operation.opnd().get_ids()`).
 
 
-def _translate_measurement(params: list[float]) -> Diagram:
+def _translate_measurement(params: list[float], symbol: Symbol | None = None) -> Diagram:
+    """Translate `intrinsic.Measurement(theta)`, or the measurement-effect leaf a symbol needs.
+
+    If `symbol` is given (a later operation's `FeedForward` references
+    this measurement -- see `_naive_translate`), and `theta` is (close
+    to) the canonical x- or p-homodyne angle, reconstructs the exact leaf
+    shape `cvzx.completion.complete_diagram()` produces --
+    `QSpider`/`PSpider(1, 0, ZxPoly({1: -symbol}))` -- instead of a plain
+    `MeasurementGate(theta)`, so the symbol is available for
+    `param_measurement_map` bindings on whatever downstream gate feeds
+    forward from it. Any other angle falls back to `MeasurementGate`
+    unconditionally: only the two canonical angles have a Q/P-spider
+    representation to reconstruct.
+
+    Returns
+    -------
+    Diagram
+    """
     (theta,) = params
+    if symbol is not None:
+        if np.isclose(theta, np.pi / 2):
+            return QSpider(1, 0, ZxPoly({1: -symbol}), parametric=True)
+        if np.isclose(theta, 0.0):
+            return PSpider(1, 0, ZxPoly({1: -symbol}), parametric=True)
     return MeasurementGate(theta)
 
 
-def _translate_displacement(params: list[float]) -> Diagram:
+def _translate_displacement(params: list[float | Expr]) -> Diagram:
     x, p = params
+    if _is_symbolic(x) or _is_symbolic(p):
+        alpha_expr = (x + I * p) / sqrt(2)
+        return DisplacementGate(alpha_expr, parametric=True)
     alpha = complex(x, p) / np.sqrt(2)
     return DisplacementGate(alpha)
 
 
-def _translate_phase_rotation(params: list[float]) -> Diagram:
+def _translate_phase_rotation(params: list[float | Expr]) -> Diagram:
     (phi,) = params
     return _phase_rotation(-phi)
 
 
-def _translate_shear_x_invariant(params: list[float]) -> Diagram:
+def _translate_shear_x_invariant(params: list[float | Expr]) -> Diagram:
     (kappa,) = params
-    return ShearXInvariantGate(kappa)
+    return ShearXInvariantGate(kappa, parametric=_is_symbolic(kappa))
 
 
-def _translate_shear_p_invariant(params: list[float]) -> Diagram:
+def _translate_shear_p_invariant(params: list[float | Expr]) -> Diagram:
     (eta,) = params
-    return ShearPInvariantGate(eta)
+    return ShearPInvariantGate(eta, parametric=_is_symbolic(eta))
 
 
-def _translate_squeezing(params: list[float]) -> Diagram:
+def _translate_squeezing(params: list[float | Expr]) -> Diagram:
     (theta,) = params
-    return CompositionDiagram([SqueezingGate(np.tan(theta)), _phase_rotation(np.pi / 2)])
+    tau = tan(theta) if _is_symbolic(theta) else np.tan(theta)
+    return CompositionDiagram([SqueezingGate(tau, parametric=_is_symbolic(theta)), _phase_rotation(np.pi / 2)])
 
 
-def _translate_squeezing45(params: list[float]) -> Diagram:
+def _translate_squeezing45(params: list[float | Expr]) -> Diagram:
     (theta,) = params
-    return Squeezing45Gate(theta)
+    return Squeezing45Gate(theta, parametric=_is_symbolic(theta))
 
 
-def _translate_arbitrary(params: list[float]) -> Diagram:
+def _translate_arbitrary(params: list[float | Expr]) -> Diagram:
     alpha, beta, lam = params
-    return ArbitraryGate(alpha, beta, lam)
+    parametric = _is_symbolic(alpha) or _is_symbolic(beta) or _is_symbolic(lam)
+    return ArbitraryGate(alpha, beta, lam, parametric=parametric)
 
 
-def _translate_controlled_z(params: list[float]) -> Diagram:
+def _translate_controlled_z(params: list[float | Expr]) -> Diagram:
     (g,) = params
-    return ControlledZGate(gain=-g)
+    return ControlledZGate(gain=-g, parametric=_is_symbolic(g))
 
 
-def _translate_beam_splitter(params: list[float]) -> Diagram:
+def _translate_beam_splitter(params: list[float | Expr]) -> Diagram:
     sqrt_r, theta_rel = params
-    eta = np.arccos(sqrt_r)
+    eta = acos(sqrt_r) if _is_symbolic(sqrt_r) else np.arccos(sqrt_r)
     return CompositionDiagram([
         TensorDiagram([_identity_wire(), _phase_rotation(-np.pi / 2)]),
-        BeamsplitterGate(eta),
+        BeamsplitterGate(eta, parametric=_is_symbolic(eta)),
         TensorDiagram([_phase_rotation(-theta_rel), _phase_rotation(np.pi / 2 - theta_rel)]),
     ])
 
 
-def _translate_two_mode_shear(params: list[float]) -> Diagram:
+def _translate_two_mode_shear(params: list[float | Expr]) -> Diagram:
     a, b = params
-    return TwoModeShearGate(a, b)
+    return TwoModeShearGate(a, b, parametric=_is_symbolic(a) or _is_symbolic(b))
 
 
 def _translate_manual(_params: list[float]) -> Diagram:
@@ -396,13 +505,44 @@ _TRANSLATORS = {
 # --------------------------------------------------------------------------
 
 
-def _translate_operation(op: Operation) -> Diagram:
+def _measurements_needing_symbols(circuit: CircuitRepr) -> dict[int, Symbol]:
+    """Find every `intrinsic.measurement` operation some later operation feeds forward from.
+
+    A fresh `Symbol` is assigned to each such measurement's `id(operation)`
+    (identity, not equality -- mqc3 `Operation`s aren't meaningfully
+    comparable by value) -- see `_translate_measurement`, which uses it to
+    reconstruct the measurement as a `QSpider`/`PSpider(1, 0,
+    ZxPoly({1: -symbol}))` leaf instead of a plain `MeasurementGate`.
+
+    Returns
+    -------
+    dict[int, Symbol]
+    """
+    # ruff: ignore[import-outside-top-level]
+    from mqc3.feedforward import FeedForward
+
+    referenced_ids: set[int] = set()
+    for op in circuit:
+        for param in op.parameters():
+            if isinstance(param, FeedForward):
+                referenced_ids.add(id(param.variable.get_from_operation()))
+
+    symbols: dict[int, Symbol] = {}
+    for op in circuit:
+        if op.name() == "intrinsic.measurement" and id(op) in referenced_ids:
+            symbols[id(op)] = Symbol(f"m_{next(_symbol_counter)}", real=True)
+    return symbols
+
+
+def _translate_operation(op: Operation, measurement_symbols: dict[int, Symbol]) -> Diagram:
     name = op.name()
     translator = _TRANSLATORS.get(name)
     if translator is None:
         msg = f"Cannot convert operation `{name}`: no CircuitRepr -> Diagram translation is registered for it."
         raise NotImplementedError(msg)
-    params = [_as_float(p, name, i) for i, p in enumerate(op.parameters())]
+    params = [_resolve_param(p, name, i, measurement_symbols) for i, p in enumerate(op.parameters())]
+    if name == "intrinsic.measurement":
+        return _translate_measurement(params, measurement_symbols.get(id(op)))
     return translator(params)
 
 
@@ -434,9 +574,10 @@ def _naive_translate(circuit: CircuitRepr) -> Diagram:
     diagrams: list[Diagram] = [TensorDiagram(state_leaves) if n_modes > 1 else state_leaves[0]]
     connectivity: dict[int, dict[int, int]] = {}
     open_modes: list[int] = list(range(n_modes))
+    measurement_symbols = _measurements_needing_symbols(circuit)
 
     for op in circuit:
-        gate_diagram = _translate_operation(op)
+        gate_diagram = _translate_operation(op, measurement_symbols)
         touched = list(op.opnd().get_ids())
         other = [m for m in open_modes if m not in touched]
         new_row_order = [*touched, *other]

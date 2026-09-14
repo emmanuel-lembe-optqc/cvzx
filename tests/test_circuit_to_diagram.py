@@ -6,9 +6,11 @@ succeeds and produces a well-formed `Diagram` (right input/output arity,
 survives `to_graph`/`to_diagram`/`optimize`) for circuits exercising
 every supported gate -- including a 2-mode gate on non-adjacent rows,
 which exercises the `connectivity`-based layer-reordering path rather
-than the simple adjacent-row case -- and that every documented
-unsupported case (`Manual`, feedforward, unsupported initial states, an
-empty circuit) raises rather than silently mistranslating.
+than the simple adjacent-row case -- that an affine feedforward
+parameter round-trips into a symbolic gate parameter bound to a
+reconstructed measurement-effect leaf, and that every documented
+unsupported case (`Manual`, unsupported initial states, an empty
+circuit) raises rather than silently mistranslating.
 """
 
 from __future__ import annotations
@@ -162,12 +164,41 @@ def test_std_beam_splitter_lowers_to_manual_and_raises():
         from_circuit_repr(circuit)
 
 
-def test_feedforward_parameter_raises():
+def test_feedforward_parameter_reconstructs_measurement_symbol():
+    """A `FeedForward`-driven parameter reconstructs its source measurement symbolically.
+
+    `intrinsic.Measurement(0.0)` (p-homodyne) feeding forward into a
+    `PhaseRotation` is reconstructed as a `PSpider(1, 0, ZxPoly({1: -m}))`
+    effect (not a plain `MeasurementGate`) for a fresh symbol `m`, and the
+    downstream `PhaseRotationGate` carries that same symbol.
+    """
+    from cvzx.base_gates import PSpider  # ruff: ignore[import-outside-top-level]
+    from cvzx.gates import PhaseRotationGate  # ruff: ignore[import-outside-top-level]
+
     circuit = CircuitRepr("feedforward")
     measured: MeasuredVariable = circuit.Q(0) | intrinsic.Measurement(0.0)
     circuit.Q(1) | intrinsic.PhaseRotation(FeedForward(measured))
-    with pytest.raises(NotImplementedError, match="feedforward"):
-        from_circuit_repr(circuit)
+
+    diagram = from_circuit_repr(circuit)
+
+    leaves = []
+
+    def _collect(d):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        if hasattr(d, "diagrams"):
+            for child in d.diagrams:
+                _collect(child)
+        else:
+            leaves.append(d)
+
+    _collect(diagram)
+
+    p_effects = [leaf for leaf in leaves if isinstance(leaf, PSpider) and leaf.num_inputs == 1 and leaf.num_outputs == 0]
+    rotations = [leaf for leaf in leaves if isinstance(leaf, PhaseRotationGate)]
+    assert len(p_effects) == 1
+    assert len(rotations) == 1
+    (symbol,) = p_effects[0].phase.get_parameters()
+    assert rotations[0].parametric
+    assert rotations[0].theta.free_symbols == {symbol}
 
 
 def test_empty_circuit_raises():

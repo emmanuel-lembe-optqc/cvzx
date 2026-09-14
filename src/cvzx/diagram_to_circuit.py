@@ -55,13 +55,36 @@ Each of these is the algebraic inverse of the corresponding formula in
   ed `MeasurementGate`/state rather than the compact form, which is
   otherwise handled directly.
 
+Feedforward
+-----------
+A `(1, 0)` `QSpider`/`PSpider` effect with phase *exactly* `ZxPoly({1: -m})`
+for a single symbol `m` -- the leaf shape `cvzx.completion.
+complete_diagram()` produces to close an open output port -- is
+recognized specially: it becomes a plain `intrinsic.Measurement`
+(`pi/2`/`0` for `QSpider`/`PSpider`, same as the bare zero-phase case
+above), and the resulting mqc3 `Operation` is tracked against `m` for the
+rest of the walk. Any later leaf whose own parameter is affine
+(`slope*m + intercept`, for that same single symbol `m`) in a tracked
+symbol has that parameter translated into an mqc3
+`FeedForward[MeasuredVariable]` (via `mqc3.feedforward.
+ff_to_mul_constant`/`ff_to_add_constant`, composed to match the affine
+relationship) instead of a plain float -- the exact algebraic inverse of
+`cvzx.circuit_to_diagram`'s own feedforward reconstruction. A parameter
+depending on more than one symbol, on a symbol with no tracked
+measurement, or nonlinearly on its symbol, raises (`NotImplementedError`
+for the first and third cases; `cvzx.exceptions.UnboundMeasurementError`
+for the second).
+
 Not (yet) supported -- raises `NotImplementedError`
 -----------------------------------------------------
 - `ControlledSumGate` and `CubicPhaseGate` (the latter is a genuinely
   non-Gaussian gate; mqc3's intrinsic set is Gaussian-only).
-- Any state/effect leaf with a nonzero phase polynomial (only the bare
-  idealized state/effect is recognized -- see above).
-- Symbolic (parametric, unresolved) gate parameters.
+- Any state/effect leaf with a nonzero phase polynomial, other than the
+  single measurement-effect shape described above.
+- A symbolic (parametric, unresolved) gate parameter that isn't a
+  tracked feedforward symbol as described above (a genuinely free,
+  measurement-unrelated symbol; more than one symbol at once; a
+  nonlinear function of one symbol).
 - A `Diagram` with `num_inputs != 0`: mqc3 `CircuitRepr` has no concept
   of an externally supplied input mode -- every mode must originate
   from a state leaf.
@@ -71,10 +94,10 @@ Not (yet) supported -- raises `NotImplementedError`
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
-from sympy import Expr
+from sympy import Expr, Symbol, im, re, sqrt
 
 from cvzx.base_gates import (
     CompositionDiagram,
@@ -88,6 +111,7 @@ from cvzx.base_gates import (
     TensorDiagram,
     VoidDiagram,
 )
+from cvzx.exceptions import UnboundMeasurementError
 from cvzx.gates import (
     ArbitraryGate,
     BeamsplitterGate,
@@ -105,9 +129,19 @@ from cvzx.normalize_diagram import normalize_diagram
 
 if TYPE_CHECKING:
     from mqc3.circuit import CircuitRepr
+    from mqc3.circuit.ops._base import MeasuredVariable, Operation
     from mqc3.circuit.state import InitialState
+    from mqc3.feedforward import FeedForward
 
 __all__ = ["to_circuit_repr"]
+
+# Every open output port `completion.complete_diagram()` closes is a
+# (1, 0) Q/P-spider effect with phase exactly `-m*x` for a fresh symbol
+# `m`: a `MeasurementOps` dict tracks, while walking a diagram, which
+# mqc3 `Operation` each such symbol's measurement turned into, so a later
+# leaf whose own parameter mentions that same symbol can be translated
+# into an mqc3 `FeedForward` referencing it instead of being rejected.
+MeasurementOps = dict[Symbol, "Operation"]
 
 
 # --------------------------------------------------------------------------
@@ -163,6 +197,90 @@ def _as_complex(value: complex | Expr, leaf_name: str) -> complex:
     return complex(value)
 
 
+def _affine_coeffs(expr: Expr, symbol: Symbol) -> tuple[float, float] | None:
+    """Return `(slope, intercept)` if `expr` is affine (degree <= 1) in `symbol` alone.
+
+    Returns
+    -------
+    tuple[float, float] | None
+        `None` if `expr` isn't affine in exactly `symbol` (it mentions
+        other free symbols, or has degree > 1 in `symbol`).
+    """
+    if expr.free_symbols != {symbol}:
+        return None
+    poly = expr.as_poly(symbol)
+    if poly is None or poly.degree() > 1:
+        return None
+    intercept = float(poly.eval(0))
+    slope = float(poly.eval(1)) - intercept
+    return slope, intercept
+
+
+def _resolve_scalar(
+    value: float | Expr, leaf_name: str, measurement_ops: MeasurementOps
+) -> float | FeedForward[MeasuredVariable]:
+    """Coerce a gate parameter to `float`, or to an mqc3 `FeedForward` if measurement-dependent.
+
+    A plain numeric value (or a symbol-free `Expr`) is coerced exactly as
+    `_as_real` does. A value that's affine in exactly one symbol bound in
+    `measurement_ops` (see `MeasurementOps`) becomes
+    `FeedForward(MeasuredVariable(op))`, scaled/shifted via
+    `mqc3.feedforward.ff_to_mul_constant`/`ff_to_add_constant` to match
+    that affine relationship -- mqc3 has no arithmetic operators on
+    `FeedForward` itself, so the scaling has to be baked in this way
+    rather than applied to the returned value afterward.
+
+    Returns
+    -------
+    float | FeedForward[MeasuredVariable]
+
+    Raises
+    ------
+    NotImplementedError
+        If `value` depends on more than one symbol, or isn't affine in
+        its single symbol.
+    UnboundMeasurementError
+        If `value`'s symbol isn't bound to any measurement encountered so
+        far while walking this diagram (no matching completion effect --
+        a `QSpider`/`PSpider(1, 0, ZxPoly({1: -symbol}))` leaf -- was
+        found upstream of this one).
+    """
+    if not (isinstance(value, Expr) and value.free_symbols):
+        return _as_real(value, leaf_name)
+
+    free = value.free_symbols
+    if len(free) != 1:
+        msg = (
+            f"Cannot convert `{leaf_name}`: feedforward depending on more than one "
+            "measurement symbol at once is not supported."
+        )
+        raise NotImplementedError(msg)
+    (symbol,) = free
+    if symbol not in measurement_ops:
+        msg = (
+            f"Cannot convert `{leaf_name}`: symbol {symbol!r} is not bound to any "
+            "measurement encountered so far in this diagram (no matching completion "
+            "effect -- QSpider/PSpider(1, 0, ZxPoly({1: -symbol})) -- found upstream)."
+        )
+        raise UnboundMeasurementError(msg)
+    affine = _affine_coeffs(value, symbol)
+    if affine is None:
+        msg = (
+            f"Cannot convert `{leaf_name}`: feedforward parameter {value} is not affine "
+            f"(degree <= 1) in its measurement symbol {symbol!r}."
+        )
+        raise NotImplementedError(msg)
+    slope, intercept = affine
+
+    from mqc3.circuit.ops._base import MeasuredVariable  # ruff: ignore[import-outside-top-level, import-private-name]
+    from mqc3.feedforward import ff_to_add_constant, ff_to_mul_constant  # ruff: ignore[import-outside-top-level]
+
+    result = ff_to_mul_constant(slope)(MeasuredVariable(measurement_ops[symbol]))
+    if intercept != 0:
+        result = ff_to_add_constant(intercept)(result)
+    return result
+
+
 # --------------------------------------------------------------------------
 # Leaf recognition
 # --------------------------------------------------------------------------
@@ -196,6 +314,33 @@ def _is_zero_phase_leaf(elt: Diagram, num_inputs: int, num_outputs: int) -> bool
         and elt.num_outputs == num_outputs
         and elt.phase.is_zero
     )
+
+
+def _measurement_symbol(elt: Diagram) -> Symbol | None:
+    """Return `m` if `elt` is a `(1, 0)` Q/P-spider effect with phase exactly `-m*x`.
+
+    This is the exact leaf shape `cvzx.completion.complete_diagram()`
+    appends to close an open output port: the standard CV-ZX notation for
+    "the idealized homodyne effect whose own outcome is `m`" (see that
+    module's docstring). Recognized purely structurally -- no
+    `param_measurement_map` entry is expected on this leaf itself, since
+    it's the symbol's *origin*, not something depending on it.
+
+    Returns
+    -------
+    Symbol | None
+        `m`, or `None` if `elt` isn't exactly this shape.
+    """
+    if not (isinstance(elt, (QSpider, PSpider)) and elt.num_inputs == 1 and elt.num_outputs == 0):
+        return None
+    coeffs = elt.phase.coeffs
+    if set(coeffs) != {1}:
+        return None
+    coeff = coeffs[1]
+    if not (isinstance(coeff, Expr) and len(coeff.free_symbols) == 1):
+        return None
+    (symbol,) = coeff.free_symbols
+    return symbol if coeff == -symbol else None
 
 
 # --------------------------------------------------------------------------
@@ -233,8 +378,14 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
     circuit: CircuitRepr,
     mode_id: int,
     elt: Diagram,
+    measurement_ops: MeasurementOps,
 ) -> bool:
     """Apply the mqc3 op for one already-open mode's 1-in leaf.
+
+    `measurement_ops` is updated in place whenever `elt` is a
+    `_measurement_symbol()`-shaped effect (see `MeasurementOps`), so any
+    later leaf mentioning that same symbol can be translated as a
+    `FeedForward` instead of being rejected.
 
     Returns
     -------
@@ -256,15 +407,24 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
         return False
 
     if isinstance(elt, MeasurementGate):
-        circuit.Q(mode_id) | intrinsic.Measurement(_as_real(elt.theta, "MeasurementGate"))
+        circuit.Q(mode_id) | intrinsic.Measurement(_resolve_scalar(elt.theta, "MeasurementGate", measurement_ops))
         return False
     if _is_zero_phase_leaf(elt, 1, 0):
         theta = np.pi / 2 if isinstance(elt, QSpider) else 0.0
         circuit.Q(mode_id) | intrinsic.Measurement(theta)
         return False
+    symbol = _measurement_symbol(elt)
+    if symbol is not None:
+        theta = np.pi / 2 if isinstance(elt, QSpider) else 0.0
+        op = intrinsic.Measurement(theta)
+        circuit.Q(mode_id) | op
+        measurement_ops[symbol] = op
+        return False
 
     if isinstance(elt, PhaseRotationGate):
-        circuit.Q(mode_id) | intrinsic.PhaseRotation(-_as_real(elt.theta, "PhaseRotationGate"))
+        raw_theta = _resolve_scalar(elt.theta, "PhaseRotationGate", measurement_ops)
+        neg_theta = -raw_theta if isinstance(raw_theta, float) else _negate_feedforward(raw_theta)
+        circuit.Q(mode_id) | intrinsic.PhaseRotation(neg_theta)
         return True
     if isinstance(elt, Fourier):
         circuit.Q(mode_id) | intrinsic.PhaseRotation(np.pi / 2)
@@ -276,10 +436,12 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
         circuit.Q(mode_id) | intrinsic.PhaseRotation(np.pi)
         return True
     if isinstance(elt, ShearXInvariantGate):
-        circuit.Q(mode_id) | intrinsic.ShearXInvariant(_as_real(elt.kappa, "ShearXInvariantGate"))
+        kappa = _resolve_scalar(elt.kappa, "ShearXInvariantGate", measurement_ops)
+        circuit.Q(mode_id) | intrinsic.ShearXInvariant(kappa)
         return True
     if isinstance(elt, ShearPInvariantGate):
-        circuit.Q(mode_id) | intrinsic.ShearPInvariant(_as_real(elt.eta, "ShearPInvariantGate"))
+        eta = _resolve_scalar(elt.eta, "ShearPInvariantGate", measurement_ops)
+        circuit.Q(mode_id) | intrinsic.ShearPInvariant(eta)
         return True
     if isinstance(elt, SqueezingGate):
         tau = _as_real(elt.tau, "SqueezingGate")
@@ -287,30 +449,50 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
         return True
     if isinstance(elt, ArbitraryGate):
         circuit.Q(mode_id) | intrinsic.Arbitrary(
-            _as_real(elt.alpha, "ArbitraryGate"),
-            _as_real(elt.beta, "ArbitraryGate"),
-            _as_real(elt.lam, "ArbitraryGate"),
+            _resolve_scalar(elt.alpha, "ArbitraryGate", measurement_ops),
+            _resolve_scalar(elt.beta, "ArbitraryGate", measurement_ops),
+            _resolve_scalar(elt.lam, "ArbitraryGate", measurement_ops),
         )
         return True
     if isinstance(elt, Squeezing45Gate):
-        circuit.Q(mode_id) | intrinsic.Squeezing45(_as_real(elt.theta, "Squeezing45Gate"))
+        circuit.Q(mode_id) | intrinsic.Squeezing45(_resolve_scalar(elt.theta, "Squeezing45Gate", measurement_ops))
         return True
     if isinstance(elt, DisplacementGate):
-        alpha = _as_complex(elt.alpha, "DisplacementGate")
-        circuit.Q(mode_id) | intrinsic.Displacement(alpha.real * np.sqrt(2), alpha.imag * np.sqrt(2))
+        x_expr = sqrt(2) * re(elt.alpha) if isinstance(elt.alpha, Expr) else sqrt(2) * elt.alpha.real
+        p_expr = sqrt(2) * im(elt.alpha) if isinstance(elt.alpha, Expr) else sqrt(2) * elt.alpha.imag
+        circuit.Q(mode_id) | intrinsic.Displacement(
+            _resolve_scalar(x_expr, "DisplacementGate", measurement_ops),
+            _resolve_scalar(p_expr, "DisplacementGate", measurement_ops),
+        )
         return True
 
     msg = f"Cannot convert 1-mode leaf `{type(elt).__name__}`: no CircuitRepr translation is registered for it."
     raise NotImplementedError(msg)
 
 
-def _apply_2mode_leaf(circuit: CircuitRepr, mode_a: int, mode_b: int, elt: Diagram) -> None:
+def _negate_feedforward(value: FeedForward[MeasuredVariable]) -> FeedForward[MeasuredVariable]:
+    """Negate a `FeedForward` value (no arithmetic operators exist on it directly).
+
+    Returns
+    -------
+    FeedForward[MeasuredVariable]
+    """
+    from mqc3.feedforward import ff_to_mul_constant  # ruff: ignore[import-outside-top-level]
+
+    return cast("FeedForward[MeasuredVariable]", ff_to_mul_constant(-1.0)(value))
+
+
+def _apply_2mode_leaf(
+    circuit: CircuitRepr, mode_a: int, mode_b: int, elt: Diagram, measurement_ops: MeasurementOps
+) -> None:
     """Apply the mqc3 op for a wide (2-mode) leaf touching `mode_a`, `mode_b`."""
     # ruff: ignore[import-outside-top-level]
     from mqc3.circuit.ops import intrinsic
 
     if isinstance(elt, ControlledZGate):
-        circuit.Q(mode_a, mode_b) | intrinsic.ControlledZ(-_as_real(elt.gain, "ControlledZGate"))
+        gain = _resolve_scalar(elt.gain, "ControlledZGate", measurement_ops)
+        gain = -gain if isinstance(gain, float) else _negate_feedforward(gain)
+        circuit.Q(mode_a, mode_b) | intrinsic.ControlledZ(gain)
         return
     if isinstance(elt, BeamsplitterGate):
         theta = _as_real(elt.theta, "BeamsplitterGate")
@@ -318,8 +500,8 @@ def _apply_2mode_leaf(circuit: CircuitRepr, mode_a: int, mode_b: int, elt: Diagr
         return
     if isinstance(elt, TwoModeShearGate):
         circuit.Q(mode_a, mode_b) | intrinsic.TwoModeShear(
-            _as_real(elt.a, "TwoModeShearGate"),
-            _as_real(elt.b, "TwoModeShearGate"),
+            _resolve_scalar(elt.a, "TwoModeShearGate", measurement_ops),
+            _resolve_scalar(elt.b, "TwoModeShearGate", measurement_ops),
         )
         return
 
@@ -349,6 +531,7 @@ def _walk_row(
     row: Diagram,
     input_modes: list[int],
     mode_counter: _ModeCounter,
+    measurement_ops: MeasurementOps,
 ) -> list[int]:
     """Apply one row's content and return its surviving output mode id(s).
 
@@ -367,7 +550,7 @@ def _walk_row(
     if row.num_inputs > 1 or row.num_outputs > 1:
         # A standalone wide (2-mode) leaf.
         mode_a, mode_b = input_modes
-        _apply_2mode_leaf(circuit, mode_a, mode_b, row)
+        _apply_2mode_leaf(circuit, mode_a, mode_b, row, measurement_ops)
         return [mode_a, mode_b]
 
     elements = row.diagrams if isinstance(row, CompositionDiagram) else [row]
@@ -390,7 +573,7 @@ def _walk_row(
             # `mode_id` was already set either from `input_modes` or by a
             # prior iteration of this same loop.
             assert mode_id is not None  # ruff: ignore[assert]
-            survives = _apply_1mode_leaf(circuit, mode_id, elt)
+            survives = _apply_1mode_leaf(circuit, mode_id, elt, measurement_ops)
             if not survives:
                 mode_id = None
 
@@ -458,6 +641,7 @@ def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr
     connectivity = diagram.connectivity if isinstance(diagram, CompositionDiagram) else {}
 
     mode_counter = _ModeCounter()
+    measurement_ops: MeasurementOps = {}
     prev_output_modes: list[int] = []
 
     for stage_index, stage in enumerate(stages):
@@ -475,7 +659,7 @@ def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr
             n_in = row.num_inputs
             row_inputs = active_modes[pos : pos + n_in]
             pos += n_in
-            new_outputs.extend(_walk_row(circuit, row, row_inputs, mode_counter))
+            new_outputs.extend(_walk_row(circuit, row, row_inputs, mode_counter, measurement_ops))
 
         prev_output_modes = new_outputs
 

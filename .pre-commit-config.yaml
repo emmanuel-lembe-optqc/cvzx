@@ -21,5 +21,6 @@ repos:
           - "scipy>=1.10"
           - "matplotlib>=3.7"
           - "Pillow>=9.0"
+          - "mqc3 @ git+https://github.com/HidehiroYonezawa/mqc3.git"
         files: ^src/
         args: [--config-file=./pyproject.toml]

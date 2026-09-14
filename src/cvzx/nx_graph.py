@@ -555,22 +555,30 @@ class CVZXGraph:
     def _symbol_conflict_violations(self) -> list[str]:
         """Find symbols bound to conflicting measurement-id sets across nodes.
 
+        Only nodes that actually *declare* a binding for the symbol (a
+        non-empty `param_measurement_map[symbol]`) participate in the
+        comparison -- a node that merely carries the symbol in its own
+        parameters without binding it (e.g. the measurement leaf that
+        *originates* a feedforward symbol, or any other node with a
+        legitimately unbound symbolic parameter) has nothing to agree or
+        disagree with, so it's excluded rather than treated as an
+        implicit "bound to nothing" conflict against every real binding.
+
         Returns
         -------
         list[str]
         """
         violations: list[str] = []
         for symbol, node_ids in self.registry.symbol_registry.items():
-            if len(node_ids) < 2:  # ruff: ignore[magic-value-comparison]
-                continue
             bindings = {
-                node_id: frozenset(self.graph.nodes[node_id].get("param_measurement_map", {}).get(symbol, ()))
+                node_id: frozenset(binding)
                 for node_id in node_ids
+                if (binding := self.graph.nodes[node_id].get("param_measurement_map", {}).get(symbol))
             }
             if len(set(bindings.values())) > 1:
                 violations.append(
                     f"Symbol {symbol!r} is bound to conflicting measurement sets across nodes "
-                    f"{sorted(node_ids)}: {bindings}."
+                    f"{sorted(bindings)}: {bindings}."
                 )
         return violations
 
