@@ -145,7 +145,7 @@ def expand_two_mode_gates(diagram: Diagram) -> Diagram:
     squeezing assumption the modes involved are idealized eigenstates, for
     which CSUM(g) and CSUM(1) act identically, so the bias can simply be
     dropped instead of being carried through as an explicit pair of
-    `SqueezingGate`s. Doing it this way also sidesteps a real limitation of
+    `SqueezingGate` instances. Doing it this way also sidesteps a real limitation of
     `.expand()`'s biased decomposition: the squeeze gates it introduces land
     in a different container than whatever state feeds the CSUM, so
     `TerminalAbsorptionRule`/`CopyRule` (which only match within a single
@@ -199,7 +199,7 @@ def flatten_expanded_composition(
     from `sub_diagram_ids`/`connectivity` directly, see `_add_composition_node`).
     Left un-flattened, any wire crossing such a nested boundary is silently
     dropped -- exactly what `BeamsplitterGate.expand()`'s balanced case
-    produces (a `CompositionDiagram` of two expanded `ControlledSumGate`s and
+    produces (a `CompositionDiagram` of two expanded `ControlledSumGate` instances and
     a `TensorDiagram` of squeezing gates), so expanding a two-mode gate that
     sits alongside other elements in a composition must flatten the result
     back into one flat list rather than nesting it.

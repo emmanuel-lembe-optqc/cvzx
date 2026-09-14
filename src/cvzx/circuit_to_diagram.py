@@ -80,8 +80,8 @@ Any other initial state (a genuine multi-peak/non-Gaussian
 superposition, a displaced state, or a mixed covariance) raises
 `NotImplementedError` rather than being silently approximated.
 
-Feedforward
------------
+Feedforward on ingestion
+------------------------
 An `intrinsic.Measurement` operation that some later operation's
 `FeedForward[MeasuredVariable]` parameter references is reconstructed as
 `QSpider`/`PSpider(1, 0, ZxPoly({1: -m}))` (the same leaf shape
@@ -509,7 +509,7 @@ def _measurements_needing_symbols(circuit: CircuitRepr) -> dict[int, Symbol]:
     """Find every `intrinsic.measurement` operation some later operation feeds forward from.
 
     A fresh `Symbol` is assigned to each such measurement's `id(operation)`
-    (identity, not equality -- mqc3 `Operation`s aren't meaningfully
+    (identity, not equality -- mqc3 `Operation` objects aren't meaningfully
     comparable by value) -- see `_translate_measurement`, which uses it to
     reconstruct the measurement as a `QSpider`/`PSpider(1, 0,
     ZxPoly({1: -symbol}))` leaf instead of a plain `MeasurementGate`.

@@ -387,8 +387,9 @@ class DisplacementGate(CompactDiagram):
 
         # Calculate coefficients with √2 factor
         sqrt2 = np.sqrt(2)
-        q_coeff = sqrt2 * imag_part
-        p_coeff = sqrt2 * real_part
+        sympy_sqrt2 = sqrt(2)
+        q_coeff = sympy_sqrt2 * imag_part if isinstance(imag_part, Expr) else sqrt2 * imag_part
+        p_coeff = sympy_sqrt2 * real_part if isinstance(imag_part, Expr) else sqrt2 * real_part
 
         # Create phase polynomials
         q_phase = self._create_phase_poly(q_coeff, degree=1)

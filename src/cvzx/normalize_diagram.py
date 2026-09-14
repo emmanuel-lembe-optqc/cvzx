@@ -685,7 +685,7 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
     -------
     Diagram
         A `CompositionDiagram` of alternating type-1 (`TensorDiagram`
-        of per-row `CompositionDiagram`s of 1-mode gates/wiring) and
+        of per-row `CompositionDiagram` rows of 1-mode gates/wiring) and
         type-2 (`TensorDiagram` of exactly one multi-mode gate plus
         identity wiring) stages, semantically equal to `diagram`. If
         `diagram` contains no leaves at all, or contains a

@@ -1,15 +1,17 @@
 # Optimizing a diagram
 
-`cvzx.optimize.optimize(diagram, *, assume_infinite_squeezing=False, max_rounds=100)` is the
-main entry point: it repeatedly applies every rewrite rule (see {doc}`rewrite_rules`) until
-none of them match, then runs the end-of-pipeline cleanup once.
+`cvzx.optimize.optimize(diagram, *, backend=None, assume_infinite_squeezing=False, max_rounds=100)`
+is the main entry point: it repeatedly applies every rewrite rule (see {doc}`rewrite_rules`)
+until none of them match, then runs the end-of-pipeline cleanup once. `backend` picks which
+`CVZXGraph` implementation does the work (see "Choosing a backend" below) — leave it
+unset unless you have a specific reason to override the default.
 
 ```python
 from sympy import pi, simplify
 
+from cvzx.backend import get_backend_modules
 from cvzx.base_gates import CompositionDiagram
 from cvzx.gates import PhaseRotationGate
-from cvzx.nx_graph import to_diagram
 from cvzx.optimize import optimize
 
 theta1, theta2, theta3 = pi / 6, pi / 5, pi / 7
@@ -20,7 +22,11 @@ comp = CompositionDiagram([
 ])
 
 graph, diagram = optimize(comp)
-result = to_diagram(graph)
+
+# `graph` is backed by whichever backend `optimize()` picked (see below) --
+# `to_diagram` must come from that same backend's graph module.
+_, graph_mod, _ = get_backend_modules()
+result = graph_mod.to_diagram(graph)
 assert isinstance(result, PhaseRotationGate)
 assert simplify(result.theta - (theta1 + theta2 + theta3)) == 0
 ```
@@ -33,9 +39,10 @@ assert simplify(result.theta - (theta1 + theta2 + theta3)) == 0
 `graph, diagram = optimize(...)` unpacking and `result.graph`/`result.diagram` attribute
 access work:
 
-- **`.graph`** — the simplified `networkx.DiGraph`, *after* the final cleanup pass. This is
-  what you want to keep computing with (feed to another `RewriteRule`, inspect with
-  `cvzx.nx_graph`'s `get_*` helpers, or convert with `to_diagram` for a fresh snapshot).
+- **`.graph`** — the simplified `CVZXGraph`, *after* the final cleanup pass, backed by
+  whichever graph backend was used (see "Choosing a backend" below). This is what you
+  want to keep computing with (feed to another `RewriteRule`, inspect with the matching
+  backend module's `get_*` helpers, or convert with its `to_diagram` for a fresh snapshot).
 - **`.diagram`** — the simplified `Diagram`, converted from the graph *right before* that
   cleanup pass ran. Use this one for visualization: the cleanup pass can restructure the
   graph in ways a nested `Diagram` tree can no longer losslessly represent, so `.diagram` is
@@ -65,7 +72,6 @@ and {doc}`../theory` for exactly which identities each setting corresponds to.
 ```python
 from cvzx.base_gates import CompositionDiagram, PSpider, QSpider, TensorDiagram, ZxPoly
 from cvzx.gates import ControlledSumGate
-from cvzx.nx_graph import to_diagram
 from cvzx.optimize import optimize
 
 control_state = PSpider(0, 1, ZxPoly({1: 2}))
@@ -91,6 +97,53 @@ re-expanding to expose further copy patterns (e.g. `ChainReductionRule` merging 
 actually matching is discarded rather than committed, and `max_rounds` is a safety cap
 against a diagram that never reaches a fixed point (it should not be hit in practice —
 raise an issue if you find a circuit that does; `optimize()` logs a warning if it is).
+
+## Choosing a backend
+
+`optimize()` — and every other entry point that builds a `CVZXGraph` (`complete_boundaries`,
+`extract_dependency_dag`, `to_graph`/`to_diagram`) — accepts an optional `backend` keyword:
+`cvzx.config.Backend.NETWORKX`, `Backend.RUSTWORKX`, the equivalent strings
+`"networkx"`/`"rustworkx"`, or `None` (the default) to defer to `cvzx.config.DEFAULT_BACKEND`.
+`DEFAULT_BACKEND` resolves to `rustworkx` automatically whenever the package is importable
+(it's a core dependency of `cvzx`, so in practice this is almost always true) and falls back
+to `networkx` otherwise.
+
+```python
+from cvzx.config import Backend
+
+optimize(comp, backend=Backend.RUSTWORKX)   # or backend="rustworkx"
+optimize(comp, backend="networkx")          # force networkx explicitly
+```
+
+Both backends run the *exact same* rewrite rules and produce identical results —
+`nx_graph.py`/`rx_graph.py` and `nx_rewrite_rules.py`/`rx_rewrite_rules.py` are maintained as
+parallel implementations of one schema, checked by a mirrored parity test suite (see
+{doc}`../dev_guide/architecture`) — so switching backends is purely a performance choice,
+never a correctness one. An unknown or uninstalled backend name raises
+`cvzx.exceptions.UnsupportedBackendError` rather than silently falling back to the other one.
+
+### Why rustworkx is the default
+
+`rustworkx.PyDiGraph` is a Rust-native graph structure (built by the Qiskit team
+specifically to replace `networkx` where it's a bottleneck): topology — nodes, edges,
+adjacency — is stored as contiguous typed arrays, instead of `networkx`'s nested Python
+dicts (`_succ`/`_pred`, each a `node -> {neighbor: edge_attr_dict}` mapping, kept in both
+directions). That makes it both faster to traverse — every rewrite rule's `match()` scans a
+`GateRegister`-indexed candidate set or walks a node's neighbors, so this is on the hot path
+of every `optimize()` round — and lighter on memory for that topology/bookkeeping layer.
+
+It's worth being precise about what this does *not* speed up or shrink: each node's own gate
+payload (`kind`, `phase`, `param_measurement_map`, and the rest of the attrs dict
+`nx_graph.py`/`rx_graph.py` populate identically) is the same plain Python `dict` object on
+both backends — `rustworkx`'s node weight can be any Python object, so it just holds a
+reference to that dict rather than compacting it — and every `GateRegister` index
+(`identity_spiders`, `parametric_nodes`, `symbol_registry`, ...) is a plain Python
+`set`/`dict` on both backends too. So the win is real but specific: a faster, leaner graph
+*structure*, not smaller gate metadata.
+
+In practice, leave `backend` unset: `DEFAULT_BACKEND` already picks the faster option when
+it's available. The main reasons to override it are benchmarking the two against each other,
+or running in an environment where `rustworkx` genuinely isn't installed.
 
 ## Performance
 

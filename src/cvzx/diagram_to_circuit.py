@@ -55,8 +55,8 @@ Each of these is the algebraic inverse of the corresponding formula in
   ed `MeasurementGate`/state rather than the compact form, which is
   otherwise handled directly.
 
-Feedforward
------------
+Feedforward on emission
+------------------------
 A `(1, 0)` `QSpider`/`PSpider` effect with phase *exactly* `ZxPoly({1: -m})`
 for a single symbol `m` -- the leaf shape `cvzx.completion.
 complete_diagram()` produces to close an open output port -- is

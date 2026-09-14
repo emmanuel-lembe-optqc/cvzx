@@ -1392,7 +1392,7 @@ class FusionRule(RewriteRule):
         through its `I1`/`I2`/`J1`/`J2` wiring. Handled by
         `match_contracted` / `_apply_contracted`.
     - **Composition**: two same-color spiders joined by a wire through a
-        composition, possibly with identities or `Swap`s in between.
+        composition, possibly with identities or `Swap` nodes in between.
         Handled by `match_terminal` / `_apply_terminal`.
 
     Match-level guards:
@@ -1443,7 +1443,7 @@ class FusionRule(RewriteRule):
         """Find ContractedDiagram containers whose halves are fusible.
 
         A contract is fusible when both halves are same-color
-        `QSpider`s or same-color `PSpider`s, at least one I/J coupling
+        `QSpider` nodes or same-color `PSpider` nodes, at least one I/J coupling
         exists between them, and either the two are plain spiders or the
         contract has the tensor-shaped form `CopyRule` leaves behind
         (the `special_case`).
@@ -1854,7 +1854,7 @@ class ChainReductionRule(RewriteRule):
         CompositionDiagram -- so this also finds chains that cross a
         TensorDiagram/ContractedDiagram boundary. `_find_full_neighbor`
         additionally chases through any run of identity spiders or
-        `Swap`s sitting directly in the path, so a passthrough there
+        `Swap` nodes sitting directly in the path, so a passthrough there
         never blocks an otherwise-reducible chain either.
 
         Each maximal chain is discovered exactly once, starting from its
@@ -2357,7 +2357,7 @@ class ChainReductionRule(RewriteRule):
 
         The chain's first member keeps its own node ID and slot; its type and
         phase are overwritten with the reduced result. When the chain is a
-        run of bare `(1, 1)` `QSpider`/`PSpider`s, every other member is
+        run of bare `(1, 1)` `QSpider`/`PSpider` nodes, every other member is
         cheaply overwritten in place with a zero-phase `(1, 1)` identity
         spider instead -- a bare zero-phase spider genuinely IS the identity
         only at that one arity (see `IdentityRule`'s own docstring), so this

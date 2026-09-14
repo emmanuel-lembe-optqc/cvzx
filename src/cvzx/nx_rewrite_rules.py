@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # changed anything, and keeps doing so until a whole pass changes nothing.
 # So whatever this call doesn't finish is picked up there at no extra total
 # cost, while a rule whose own match can chase through an arbitrarily long
-# run of passthrough structure (a permutation of `Swap`s, say) never has to
+# run of passthrough structure (a permutation of `Swap` nodes, say) never has to
 # pay for verifying/resolving all of it inside one `apply_rule` call. See
 # `RewriteRule.apply_rule` for why more than one round is ever useful.
 _APPLY_RULE_MAX_ROUNDS = 100
@@ -139,7 +139,7 @@ class RewriteRule(ABC):
         call can do chasing through a single pathological match -- e.g. a
         `ChainReductionRule` closure that would otherwise try to
         verify/resolve its way through an arbitrarily long run of chained
-        `Swap`s in one round (see `_trace_closure_leftovers`, which caps
+        `Swap` nodes in one round (see `_trace_closure_leftovers`, which caps
         that at one `Swap`-like bundle per match for the same reason).
 
         Parameters
@@ -361,7 +361,7 @@ class RewriteRule(ABC):
         entirely -- silently corrupting anything that later resolves a
         port through it (`find_node_by_external_output`/`_input`, used
         by several rules' own `match()` to chase a chain of identities/
-        `Swap`s across container boundaries), even though `to_diagram`
+        `Swap` nodes across container boundaries), even though `to_diagram`
         itself never notices, since reconstruction only reads
         `sub_diagram_ids`/`connectivity`, not this mapping.
 
@@ -1447,15 +1447,15 @@ class RewriteRule(ABC):
         > 1`) leftover -- one Swap-like bundle -- per call. A second one
         refuses the whole trace (`None`), exactly like hitting a real,
         un-absorbed gate, rather than being crossed too: a *succession*
-        of `Swap`s chained together (a small permutation network) would
+        of `Swap` nodes chained together (a small permutation network) would
         otherwise make both this walk and the caller's own bookkeeping
         scale with however many are chained, and nothing else in this
-        codebase currently shrinks a run of `Swap`s on its own between
+        codebase currently shrinks a run of `Swap` nodes on its own between
         rounds -- so once `match()` backs a chain off past the point
         where a second bundle would need crossing, there's no later
         round that ever gets a *shorter* span to retry. The chosen
         behavior is therefore to leave a state/effect pair connected by
-        two or more `Swap`s exactly as it is -- unreduced, indefinitely
+        two or more `Swap` nodes exactly as it is -- unreduced, indefinitely
         -- rather than forcing the full closure through every bundle in
         one match. A single-wire (`1, 1`) leftover carries no other wire
         to protect and costs only one hop to cross, so it's never
@@ -1557,6 +1557,7 @@ class IdentityRule(RewriteRule):
         -------
         list[dict]
             List of matches, each containing:
+
             - 'node_id': the node ID of the identity spider
             - 'container_id': its immediate container (grouping key for
               `RewriteRule.apply_rule`)
@@ -1704,7 +1705,7 @@ class FusionRule(RewriteRule):
       through its `I1`/`I2`/`J1`/`J2` wiring. Handled by
       `match_contracted` / `_apply_contracted`.
     - **Composition**: two same-color spiders joined by a wire through a
-      composition, possibly with identities or `Swap`s in between.
+      composition, possibly with identities or `Swap` nodes in between.
       Handled by `match_terminal` / `_apply_terminal`.
 
     Match-level guards:
@@ -1759,7 +1760,7 @@ class FusionRule(RewriteRule):
         """Find ContractedDiagram containers whose halves are fusible.
 
         A contract is fusible when both halves are same-color
-        `QSpider`s or same-color `PSpider`s, at least one I/J coupling
+        `QSpider` nodes or same-color `PSpider` nodes, at least one I/J coupling
         exists between them, and either the two are plain spiders or the
         contract has the tensor-shaped form `CopyRule` leaves behind
         (the `special_case`).
@@ -2165,7 +2166,7 @@ class ChainReductionRule(RewriteRule):
         CompositionDiagram -- so this also finds chains that cross a
         TensorDiagram/ContractedDiagram boundary. `_find_full_neighbor`
         additionally chases through any run of identity spiders or
-        `Swap`s sitting directly in the path, so a passthrough there
+        `Swap` nodes sitting directly in the path, so a passthrough there
         never blocks an otherwise-reducible chain either.
 
         Each maximal chain is discovered exactly once, starting from its
@@ -2181,6 +2182,7 @@ class ChainReductionRule(RewriteRule):
         -------
         list[dict]
             List of matches, each containing:
+
             - 'container_id': grouping key for `RewriteRule.apply_rule`
               (the chain's shared immediate parent when it's a
               contiguous run in one flat CompositionDiagram, else a
@@ -2718,7 +2720,7 @@ class ChainReductionRule(RewriteRule):
 
         The chain's first member keeps its own node ID and slot; its type and
         phase are overwritten with the reduced result. When the chain is a
-        run of bare `(1, 1)` `QSpider`/`PSpider`s, every other member is
+        run of bare `(1, 1)` `QSpider`/`PSpider` nodes, every other member is
         cheaply overwritten in place with a zero-phase `(1, 1)` identity
         spider instead -- a bare zero-phase spider genuinely IS the identity
         only at that one arity (see `IdentityRule`'s own docstring), so this
@@ -3192,6 +3194,7 @@ class FourierNormalizationRule(RewriteRule):
         -------
         list[dict]
             List of matches, each containing:
+
             - 'container_id': the node ID of the CompositionDiagram
             - 'node_ids': [keep_id, absorb_id] in list order (keep_id survives)
             - 'result_type': 'PhaseRotationGate' or 'SqueezingGate'
@@ -3414,7 +3417,7 @@ class TerminalAbsorptionRule(RewriteRule):
         the same universe `CopyRule` scans -- restricted to QSpider/PSpider,
         since only those can ever be `_check_pair`'s terminal side. From
         each one, `_chase_identity_chain` follows its single wire,
-        stepping over any run of identity spiders or `Swap`s directly in
+        stepping over any run of identity spiders or `Swap` nodes directly in
         the path, to find the real neighboring gate to check -- exactly
         mirroring `CopyRule`'s own candidate-and-chase scan, rather than
         only checking pairs directly joined by one composition edge.
@@ -3440,6 +3443,7 @@ class TerminalAbsorptionRule(RewriteRule):
         -------
         list[dict]
             List of matches, each containing:
+
             - 'container_id': grouping key for `RewriteRule.apply_rule`
               (the pair's shared immediate parent when they have one and
               no identity/`Swap` sits between them, else a synthetic
@@ -3881,6 +3885,7 @@ class CopyRule(RewriteRule):
         -------
         list[dict]
             List of matches, each containing:
+
             - 'copy_spider_id': the node ID of the spider to copy (Q or P with 0→1 or 1→0)
             - 'disappearing_spider_id': the node ID of the spider that disappears (P or Q with 1→n or n→1)
             - 'copy_spider_phase': the phase of the copied spider (g ∈ R₁[X])
@@ -4339,7 +4344,7 @@ class CopyRule(RewriteRule):
         #     instances, not a placeholder standing in for nothing (a
         #     `VoidDiagram` there is silently dropping a real copied
         #     state/effect, and the end-of-pipeline cleanup pass sweeps
-        #     `VoidDiagram`s away regardless of whether their slot is
+        #     `VoidDiagram` leaves away regardless of whether their slot is
         #     still load-bearing -- corrupting `I1`/`I2`/`J1`/`J2`'s
         #     pairing once it does).
         consumed_output_placeholders = []
