@@ -14,4 +14,5 @@ before you go looking for them).
 architecture
 rewrite_engine
 normalization
+benchmarks
 ```

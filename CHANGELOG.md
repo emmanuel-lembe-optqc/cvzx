@@ -187,6 +187,17 @@ development on `main` to date, grouped by area rather than by commit.
   size: entries wrap into multiple columns, cap at 20 shown, and any
   remainder collapses into one final "... and N more" line rather than
   growing the figure unboundedly.
+- **Optimization-quality metrics** (`cvzx/utils/metrics.py`):
+  `compute_metrics`/`compare_metrics` measure how much `optimize()` shrinks
+  a diagram -- spider/gate/generator counts (excluding `normalize_diagram`'s
+  identity-wire filler and `CopyRule`'s `VoidDiagram` placeholders, both of
+  which otherwise inflate "after" counts enough to make a genuinely
+  simplified diagram look larger), a non-Clifford ("T-count"-analogue)
+  phase count via `ZxPoly` degree, and stage depth via `normalize_diagram`.
+  Backed by a `benchmarks/` suite (`python -m benchmarks.run_benchmarks`,
+  dev-invoked only, not wired into CI) and a new dev-guide page
+  (`docs/source/dev_guide/benchmarks.md`) walking through the metric
+  definitions and a worked before/after example.
 
 ### Changed
 
