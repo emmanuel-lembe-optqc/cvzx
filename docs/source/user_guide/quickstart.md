@@ -65,7 +65,7 @@ Putting it together — build a circuit, simplify it, and look at the result:
 
 ```python
 from cvzx.passes.optimize import optimize
-from cvzx.utils.visualization_base_gates import visualize
+from cvzx.visualization.core import visualize
 
 graph, diagram = optimize(comp)
 fig = visualize(diagram, title="R(θ1)·R(θ2)·R(θ3)")

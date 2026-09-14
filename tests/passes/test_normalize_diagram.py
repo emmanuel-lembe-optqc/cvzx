@@ -37,7 +37,7 @@ from cvzx.ir.base import (
 from cvzx.ir.gates import ControlledSumGate, PhaseRotationGate, SqueezingGate
 from cvzx.passes.normalize import normalize_diagram
 from cvzx.backends.nx.graph import to_graph
-from cvzx.utils.visualization_base_gates import visualize_before_after
+from cvzx.visualization.debug import visualize_before_after
 
 _ZERO = ZxPoly({})
 

@@ -1,7 +1,10 @@
-"""Graphical tests for visualize_base_gates.py - human verification required.
+"""Graphical tests for `cvzx.visualization` - most require human verification.
 
 Run this script directly to generate all test images for visual inspection.
-Images are saved in the 'test_images' directory.
+Images are saved in the 'test_images' directory. The vertical phase-overflow
+tests below are the exception -- they assert real, automated properties
+(see `cvzx.visualization.overflow`) rather than only producing an image to
+eyeball.
 """
 
 from pathlib import Path
@@ -25,7 +28,8 @@ from cvzx.ir.base import (
     flatten_composition,
 )
 from cvzx.exceptions import ArityMismatchError
-from cvzx.utils.visualization_base_gates import visualize
+from cvzx.visualization.core import DiagramVisualizer, visualize
+from cvzx.visualization.overflow import LEGEND_MAX_LEN, _MAX_LEGEND_ENTRIES
 
 # Create output directory using Path
 OUTPUT_DIR = Path("test_images")
@@ -533,6 +537,84 @@ def run_graphical_tests():  # ruff: ignore[too-many-locals, too-many-statements]
 
     print(f"\nAll graphical test images generated successfully in '{OUTPUT_DIR}/'!")
     print("Please inspect the generated images manually.")
+
+
+def test_phase_overflow_triggers_generic_label():
+    """A phase whose wrapped text is taller than its box gets a `D<n>` label + legend entry."""
+    d0, d2, d4, d6, d8, d10, d12, d14, d16, d18, d20, d22, d24, d26, d28 = symbols(
+        "d0 d2 d4 d6 d8 d10 d12 d14 d16 d18 d20 d22 d24 d26 d28", real=True
+    )
+    huge_phase = ZxPoly(
+        {
+            0: d0,
+            2: d2,
+            4: d4,
+            6: d6,
+            8: d8,
+            10: d10,
+            12: d12,
+            14: d14,
+            16: d16,
+            18: d18,
+            20: d20,
+            22: d22,
+            24: d24,
+            26: d26,
+            28: d28,
+        }
+    )
+    overflowing = QSpider(1, 1, huge_phase, parametric=True)
+    diagram = TensorDiagram([overflowing, *(Fourier() for _ in range(15))])
+
+    visualizer = DiagramVisualizer()
+    fig = visualizer.visualize(diagram)
+    try:
+        assert visualizer._overflow_counter == 1
+        assert set(visualizer._overflow_legend) == {"D1"}
+        assert len(visualizer._overflow_legend["D1"]) <= LEGEND_MAX_LEN
+        axes_texts = [t.get_text() for t in fig.axes[0].texts]
+        assert "D1" in axes_texts
+        legend_texts = [t.get_text() for t in fig.texts]
+        assert any(t.startswith("D1:") for t in legend_texts)
+    finally:
+        plt.close(fig)
+
+
+def test_phase_overflow_many_nodes_caps_legend():
+    """With many overflowing phases, the legend is capped and the rest collapse to one line."""
+    nodes = [
+        QSpider(1, 1, ZxPoly({d: symbols(f"z{i}_{d}", real=True) for d in range(0, 20, 2)}), parametric=True)
+        for i in range(25)
+    ]
+    diagram = TensorDiagram(nodes)
+
+    visualizer = DiagramVisualizer()
+    fig = visualizer.visualize(diagram)
+    try:
+        assert visualizer._overflow_counter == 25
+        # Nothing silently dropped from the data itself.
+        assert len(visualizer._overflow_legend) == visualizer._overflow_counter
+        legend_texts = [t.get_text() for t in fig.texts]
+        shown = [t for t in legend_texts if t.startswith("D")]
+        assert len(shown) <= _MAX_LEGEND_ENTRIES
+        more_lines = [t for t in legend_texts if t.startswith("...")]
+        assert more_lines == [f"... and {visualizer._overflow_counter - _MAX_LEGEND_ENTRIES} more"]
+    finally:
+        plt.close(fig)
+
+
+def test_phase_no_overflow_unchanged():
+    """An ordinary, non-overflowing diagram gets no generic label and no legend."""
+    diagram = QSpider(1, 1, ZxPoly({1: 2}), parametric=False)
+
+    visualizer = DiagramVisualizer()
+    fig = visualizer.visualize(diagram)
+    try:
+        assert visualizer._overflow_legend == {}
+        assert visualizer._overflow_counter == 0
+        assert fig.texts == []
+    finally:
+        plt.close(fig)
 
 
 if __name__ == "__main__":

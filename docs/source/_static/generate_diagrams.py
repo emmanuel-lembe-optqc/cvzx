@@ -232,7 +232,7 @@ def generate_module_map() -> None:
             ("nx_rewrite_rules", "backends/nx/rules.py", "Rewrite rules over\na networkx graph.", _BLUE),
             ("rx_rewrite_rules", "backends/rx/rules.py", "Rewrite rules over\na rustworkx graph.", _BLUE),
             ("normalize_diagram", "passes/normalize.py", "Canonicalization pass\n(type-1/type-2 stages).", _BLUE),
-            ("visualize_base_gates", "utils/visualization_base_gates.py", "matplotlib rendering\nof a Diagram.", _TEAL),
+            ("visualize_base_gates", "visualization/core.py", "matplotlib rendering\nof a Diagram.", _TEAL),
         ],
         h=box_h,
         title_size=11.3,
@@ -425,7 +425,7 @@ def generate_pipeline_overview() -> None:
     _elbow(ax, (opt_x + opt_w / 2, opt_y - opt_h), _center_top(result_b), color=_GRAY)
 
     y_branch = opt_y - opt_h - 1.9
-    vis_b = _box(ax, 0.8, y_branch, 5.6, 1.05, "visualize(diagram, title=...)", "cvzx.utils.visualization_base_gates -- renders the diagram\nas a matplotlib figure for interactive inspection.", edgecolor=_TEAL)
+    vis_b = _box(ax, 0.8, y_branch, 5.6, 1.05, "visualize(diagram, title=...)", "cvzx.visualization.core -- renders the diagram\nas a matplotlib figure for interactive inspection.", edgecolor=_TEAL)
     complete_b = _box(
         ax,
         7.0,

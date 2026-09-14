@@ -627,7 +627,7 @@ class TestIdentityRule(unittest.TestCase):
 
 if __name__ == "__main__":
     # Create output directory for visualizations
-    from cvzx.utils.visualization_base_gates import visualize_before_after
+    from cvzx.visualization.debug import visualize_before_after
 
     # Create rule instance and test objects
     rule_name = "Identity Rule"

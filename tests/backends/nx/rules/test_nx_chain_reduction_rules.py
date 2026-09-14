@@ -1688,7 +1688,7 @@ if __name__ == "__main__":
 
     from cvzx.ir.base import Diagram
     from cvzx.backends.nx.graph import to_diagram, to_graph
-    from cvzx.utils.visualization_base_gates import visualize_before_after
+    from cvzx.visualization.debug import visualize_before_after
 
     # Create rule instance and test objects
     rule_name = "Chain Reduction Rule"

@@ -394,7 +394,7 @@ class TestFourierNormalizationRule(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    from cvzx.utils.visualization_base_gates import visualize_before_after
+    from cvzx.visualization.debug import visualize_before_after
 
     rule_name = "Fourier Normalization Rule"
     rule = FourierNormalizationRule()

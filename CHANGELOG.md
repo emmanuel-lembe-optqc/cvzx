@@ -168,6 +168,21 @@ development on `main` to date, grouped by area rather than by commit.
   `DependencyDAG` constructor. Verified to produce a `DependencyDAG`
   isomorphic to the `"mqc3"` reference backend's output across both graph
   backends.
+- **Vertical phase-text overflow handling** (`cvzx.visualization.overflow`):
+  a node's phase text was already wrapped horizontally to fit its box, but
+  nothing checked whether the resulting wrapped text was too *tall* for it
+  — a long/complex symbolic phase could visually spill out of its square.
+  `DiagramVisualizer` now measures each phase `Text` artist's actual
+  rendered pixel height against its own box's pixel height (both via real
+  matplotlib measurement — `Text.get_window_extent()` and an affine
+  `ax.transData.transform()` — once the figure's layout is final, not a
+  guessed line-height heuristic) and replaces an overflowing one with a
+  generic `"D<n>"` label, relocating the real (still length-capped) phase
+  into a legend appended below the diagram instead of losing it. The
+  legend itself stays a small, bounded addition regardless of diagram
+  size: entries wrap into multiple columns, cap at 20 shown, and any
+  remainder collapses into one final "... and N more" line rather than
+  growing the figure unboundedly.
 
 ### Changed
 
@@ -205,8 +220,17 @@ development on `main` to date, grouped by area rather than by commit.
   `lowering/` (`dag.py` — was `dag_extraction.py`; `lowering.py`, unchanged
   in content; `bridges/mqc3.py` — merges the former `circuit_to_diagram.py`
   and `diagram_to_circuit.py`, the two directions of the same mqc3 bridge,
-  into one module), and `utils/` (`helpers.py` — was `utils.py`;
-  `visualization_base_gates.py` — was `visualize_base_gates.py`);
+  into one module), `utils/` (`helpers.py` — was `utils.py`), and a
+  dedicated `visualization/` package (`core.py` — `VisualizerConfig`,
+  `DiagramVisualizer`, and the module-level `visualize()`; `proper.py`,
+  `composition.py`, `contracted.py`, `swap_fourier.py`, `overflow.py` — one
+  private mixin each, split by diagram-type/concern out of the former
+  single ~2100-line `visualize_base_gates.py`; `geometry.py` for the
+  diagram-agnostic helpers all of them share; `protocol.py` for the
+  structural `Visualizer` type every mixin method types `self` as, since
+  mypy requires an explicit `self` type to be a *nominal* supertype of a
+  bare mixin's own class, which a `Protocol` sidesteps via structural
+  typing instead; `debug.py` for the `visualize_before_after` test helper).
   `config.py`/`exceptions.py`/`logging_config.py`/`backend.py` stay at the
   package root. A clean rename with no compatibility shims (nothing has
   been tagged/released yet, so the old flat `cvzx.<module>` import paths

@@ -49,7 +49,7 @@ access work:
   captured beforehand rather than re-derived from the cleaned graph afterward.
 
 ```python
-from cvzx.utils.visualization_base_gates import visualize
+from cvzx.visualization.core import visualize
 
 fig = visualize(result.diagram, title="optimized circuit")
 ```

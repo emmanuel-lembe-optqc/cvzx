@@ -959,7 +959,7 @@ class TestTerminalAbsorptionResetToIdentityClearsParamMeasurementMap(unittest.Te
 if __name__ == "__main__":
     from cvzx.ir.base import Diagram
     from cvzx.backends.nx.rules import RewriteRule
-    from cvzx.utils.visualization_base_gates import visualize_before_after
+    from cvzx.visualization.debug import visualize_before_after
 
     rule_name = "Terminal Absorption Rule"
     rule = TerminalAbsorptionRule()

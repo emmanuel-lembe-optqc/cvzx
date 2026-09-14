@@ -47,7 +47,7 @@ from cvzx.ir.gates import (
     expand_all,
 )
 from cvzx.backends.nx.graph import to_diagram, to_graph
-from cvzx.utils.visualization_base_gates import DiagramVisualizer, VisualizerConfig, visualize
+from cvzx.visualization.core import DiagramVisualizer, VisualizerConfig, visualize
 
 OUTPUT_DIR = Path("test_images_gates")
 
