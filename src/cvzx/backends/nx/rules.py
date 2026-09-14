@@ -24,7 +24,12 @@ from cvzx.backends.nx.graph import (
 )
 from cvzx.exceptions import RuleApplicationError
 from cvzx.ir.base import Diagram, ZxPoly
-from cvzx.utils.helpers import is_chase_passthrough, is_wiring_node_from_attrs, passthrough_exit_port
+from cvzx.utils.helpers import (
+    is_chase_passthrough,
+    is_wiring_node_from_attrs,
+    passthrough_exit_port,
+    simplify_reduced_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2929,7 +2934,7 @@ class ChainReductionRule(RewriteRule):
 
         return False
 
-    def reduce_chain(self, gate_type: str, values: list, gate_info: dict | None = None) -> dict | None:  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches]
+    def reduce_chain(self, gate_type: str, values: list, gate_info: dict | None = None) -> dict | None:  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches, too-many-statements]
         """Reduce a chain of gates to a single gate.
 
         Parameters
@@ -2974,6 +2979,14 @@ class ChainReductionRule(RewriteRule):
             total_phase = zero_phase
             for v in values:
                 total_phase += v
+            # Only round-trip through .coeffs (which normalizes numeric
+            # coefficients to plain float/complex) when something is actually
+            # symbolic -- for an already fully-numeric phase, that round-trip
+            # is pure downside: it can change the underlying sympy.Poly's
+            # domain (e.g. exact integers -> floats), which breaks equality
+            # against a phase built directly, for zero simplification benefit.
+            if total_phase.is_parametric():
+                total_phase = ZxPoly({d: simplify_reduced_value(c) for d, c in total_phase.coeffs.items()})
             return {
                 "type": "QSpider",
                 "phase": total_phase,
@@ -2989,6 +3002,14 @@ class ChainReductionRule(RewriteRule):
             total_phase = ZxPoly({})
             for v in values:
                 total_phase += v
+            # Only round-trip through .coeffs (which normalizes numeric
+            # coefficients to plain float/complex) when something is actually
+            # symbolic -- for an already fully-numeric phase, that round-trip
+            # is pure downside: it can change the underlying sympy.Poly's
+            # domain (e.g. exact integers -> floats), which breaks equality
+            # against a phase built directly, for zero simplification benefit.
+            if total_phase.is_parametric():
+                total_phase = ZxPoly({d: simplify_reduced_value(c) for d, c in total_phase.coeffs.items()})
             return {
                 "type": "PSpider",
                 "phase": total_phase,
@@ -2998,14 +3019,14 @@ class ChainReductionRule(RewriteRule):
 
         # R: sum angles
         if gate_type == "R":
-            total = sum(values)
+            total = simplify_reduced_value(sum(values))
             if total == 0:
                 return id_q
             return {"type": "PhaseRotationGate", "theta": total}
 
         # BS: sum angles
         if gate_type == "BS":
-            total = sum(values)
+            total = simplify_reduced_value(sum(values))
             if total == 0:
                 return id_q2
             return {"type": "BeamsplitterGate", "theta": total}
@@ -3015,13 +3036,14 @@ class ChainReductionRule(RewriteRule):
             total = 1.0
             for v in values:
                 total *= v
+            total = simplify_reduced_value(total)
             if total == 1.0:  # ruff: ignore[float-equality-comparison]
                 return id_q
             return {"type": "SqueezingGate", "tau": total}
 
         # D: sum
         if gate_type == "D":
-            total = sum(values)
+            total = simplify_reduced_value(sum(values))
             if total == 0:
                 return id_q
             return {"type": "DisplacementGate", "alpha": total}
@@ -3051,7 +3073,7 @@ class ChainReductionRule(RewriteRule):
 
         # ControlledZGate: sum gains
         if gate_type == "CZ":
-            total = sum(values)
+            total = simplify_reduced_value(sum(values))
             if total == 0:
                 return id_q2
             return {"type": "ControlledZGate", "gain": total}
@@ -3063,7 +3085,7 @@ class ChainReductionRule(RewriteRule):
                 raise RuleApplicationError(msg)
             # Check that all ControlledSumGate gates have same control and target
             # We need to get this from the graph
-            total = sum(values)
+            total = simplify_reduced_value(sum(values))
             if total == 0:
                 return id_q2
             # Control/target info will be preserved from the first gate

@@ -17,7 +17,8 @@ import unittest
 from math import isclose, pi
 from typing import cast
 
-from sympy import I, cos, exp, symbols
+from sympy import I, cos, exp, sin, symbols
+from sympy import pi as sympy_pi
 
 from cvzx.ir.base import (
     CompositionDiagram,
@@ -861,6 +862,25 @@ class TestChainReductionRule(unittest.TestCase):
         assert result["num_inputs"] == 4
         assert result["num_outputs"] == 6
 
+    def test_reduce_q_chain_simplifies_trig_identity(self):
+        """Q(sin(θ)²) ∘ Q(cos(θ)²) → Q(1), not the unreduced sum."""
+        theta = symbols("theta", real=True)
+        values = [ZxPoly({0: sin(theta) ** 2}), ZxPoly({0: cos(theta) ** 2})]
+        result = self.rule.reduce_chain("Q", values, {"num_inputs": 1, "num_outputs": 1})
+        assert result is not None
+        assert result["phase"] == ZxPoly({0: 1})
+
+    def test_reduce_q_chain_to_identity_via_trig_identity(self):
+        """Q(sin(θ)² + cos(θ)² - 1) → identity, even though it's not structurally 0."""
+        theta = symbols("theta", real=True)
+        values = [ZxPoly({0: sin(theta) ** 2 + cos(theta) ** 2 - 1})]
+        result = self.rule.reduce_chain("Q", values, {"num_inputs": 2, "num_outputs": 3})
+        assert result is not None
+        assert result["type"] == "QSpider"
+        assert result["phase"] == ZxPoly({})
+        assert result["num_inputs"] == 2
+        assert result["num_outputs"] == 3
+
     def test_reduce_p_chain(self):
         """Reduce P(a) ∘ P(b) → P(a+b)."""
         values = [self.phase_x2, self.phase_x2_3]
@@ -886,6 +906,27 @@ class TestChainReductionRule(unittest.TestCase):
         assert result is not None
         assert result["type"] == "PhaseRotationGate"
         assert isclose(result["theta"], cast("float", self.ph_rot_sum.theta))
+
+    def test_reduce_r_chain_keeps_exact_pi_multiples(self):
+        """R(π/6) ∘ R(π/5) ∘ R(π/7) stays an exact sympy expression, not a lossy float.
+
+        `Expr.is_number` is true for any exact irrational constant (a `pi`
+        multiple included), not just literal numbers -- simplification must
+        not mistake that for "safe to round-trip through a Python float".
+        """
+        values = [sympy_pi / 6, sympy_pi / 5, sympy_pi / 7]
+        result = self.rule.reduce_chain("R", values)
+        assert result is not None
+        assert result["theta"] == sympy_pi / 6 + sympy_pi / 5 + sympy_pi / 7
+
+    def test_reduce_r_chain_to_identity_via_trig_identity(self):
+        """R(sin(θ)²) ∘ R(cos(θ)²) ∘ R(-1) → identity, via simplify, not structural equality."""
+        theta = symbols("theta", real=True)
+        values = [sin(theta) ** 2, cos(theta) ** 2, -1]
+        result = self.rule.reduce_chain("R", values)
+        assert result is not None
+        assert result["type"] == "QSpider"
+        assert result["phase"] == ZxPoly({})
 
     def test_reduce_bs_chain(self):
         """Reduce BS(θ) ∘ BS(φ) → BS(θ+φ)."""

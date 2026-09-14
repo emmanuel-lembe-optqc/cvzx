@@ -8,6 +8,8 @@ to be backend-agnostic, supporting both NetworkX and Rustworkx execution flows.
 
 from __future__ import annotations
 
+from sympy import Expr, simplify
+
 from cvzx.ir.base import (
     CompositionDiagram,
     ContractedDiagram,
@@ -15,6 +17,43 @@ from cvzx.ir.base import (
     TensorDiagram,
 )
 from cvzx.ir.gates import BeamsplitterGate, ControlledSumGate
+
+
+def simplify_reduced_value(value: Expr | complex) -> Expr | complex:
+    """Run a chain-reduction-combined algebraic value through `sympy.simplify`.
+
+    `ChainReductionRule` (`nx.rules`/`rx.rules`) combines a chain's phases
+    and gate parameters with plain `+`/`*`, which never algebraically
+    reduces the result -- e.g. `sin(x)**2 + cos(x)**2` stays exactly that,
+    rather than collapsing to `1`, and two chained gates whose parameters
+    are exact negatives of each other (`x` then `-x`) may not compare
+    equal to the identity's `0` by structural equality alone. Running the
+    combined value through `simplify()` first catches both.
+
+    Parameters
+    ----------
+    value : Expr | complex
+        The chain-reduction-combined value to simplify.
+
+    Returns
+    -------
+    Expr | complex
+        The simplified value. A plain Python number is returned unchanged
+        (nothing to simplify -- and nothing to lose precision on: this
+        function only ever calls `simplify()` on a value that was already
+        a sympy `Expr`, since a value built purely from plain Python
+        numbers never becomes one via `+`/`*` alone). Deliberately does
+        *not* coerce a simplified `Expr` back to a plain Python number
+        even when it collapses to one with no free symbols left (e.g. a
+        chain of exact multiples of `pi` staying an exact `Expr` rather
+        than an approximate `float` -- `Expr.is_number` is true for any
+        such exact irrational constant, not just literal numbers, so
+        doing that coercion would silently lose exactness for phases like
+        `pi/6 + pi/5 + pi/7`).
+    """
+    if not isinstance(value, Expr):
+        return value
+    return simplify(value)
 
 
 def is_wiring_node_from_attrs(attrs: dict) -> bool:

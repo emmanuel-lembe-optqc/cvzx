@@ -198,6 +198,28 @@ development on `main` to date, grouped by area rather than by commit.
   dev-invoked only, not wired into CI) and a new dev-guide page
   (`docs/source/dev_guide/benchmarks.md`) walking through the metric
   definitions and a worked before/after example.
+- **`ChainReductionRule` now runs combined phases/parameters through
+  `sympy.simplify`** (`cvzx.utils.helpers.simplify_reduced_value`, used by
+  both `nx.rules`/`rx.rules`): the chain's values were previously combined
+  with plain `+`/`*` and left exactly as produced, so an algebraic identity
+  spanning the chain (e.g. `sin(θ)² + cos(θ)²` folding to `1`, or a
+  trig-identity combination that's exactly the identity's `0` without being
+  *structurally* `0`) was never recognized — the chain stayed unreduced, or
+  worse, wasn't collapsed to the identity spider it actually was. Applies to
+  `QSpider`/`PSpider` phases (each `ZxPoly` coefficient) and every
+  arithmetic-combination gate parameter (`PhaseRotationGate`,
+  `BeamsplitterGate`, `SqueezingGate`, `DisplacementGate`,
+  `ControlledZGate`, `ControlledSumGate`'s gain) — not the `Fourier`
+  family's count-based table lookups, which have nothing to simplify.
+  Deliberately does *not* coerce a simplified value back to a plain Python
+  number just because it has no free symbols left: `Expr.is_number` is true
+  for any exact irrational constant too (a `pi` multiple included), so doing
+  that would have silently turned an exact phase like `π/6 + π/5 + π/7` into
+  a lossy decimal approximation. Symmetrically, a `ZxPoly` is only
+  round-tripped through this simplification at all when
+  `is_parametric()` — for an already fully-numeric phase there is nothing
+  to simplify, and the round-trip risks changing the underlying
+  `sympy.Poly`'s domain (exact integers becoming floats) for zero benefit.
 
 ### Changed
 
