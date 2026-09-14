@@ -3,82 +3,136 @@
 Full, auto-generated reference for every public class and function, grouped by module in
 the order described in {doc}`dev_guide/architecture`.
 
-## `cvzx.base_gates`
+## `cvzx.exceptions`
 
 ```{eval-rst}
-.. automodule:: cvzx.base_gates
+.. automodule:: cvzx.exceptions
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## `cvzx.gates`
+## `cvzx.config`
 
 ```{eval-rst}
-.. automodule:: cvzx.gates
+.. automodule:: cvzx.config
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## `cvzx.nx_graph`
+## `cvzx.backend`
 
 ```{eval-rst}
-.. automodule:: cvzx.nx_graph
+.. automodule:: cvzx.backend
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## `cvzx.normalize_diagram`
+## `cvzx.ir.base`
 
 ```{eval-rst}
-.. automodule:: cvzx.normalize_diagram
+.. automodule:: cvzx.ir.base
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## `cvzx.nx_rewrite_rules`
+## `cvzx.ir.gates`
 
 ```{eval-rst}
-.. automodule:: cvzx.nx_rewrite_rules
+.. automodule:: cvzx.ir.gates
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## `cvzx.optimize`
+## `cvzx.backends.nx.graph`
 
 ```{eval-rst}
-.. automodule:: cvzx.optimize
+.. automodule:: cvzx.backends.nx.graph
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## `cvzx.circuit_to_diagram`
+## `cvzx.backends.rx.graph`
 
 ```{eval-rst}
-.. automodule:: cvzx.circuit_to_diagram
+.. automodule:: cvzx.backends.rx.graph
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## `cvzx.diagram_to_circuit`
+## `cvzx.passes.normalize`
 
 ```{eval-rst}
-.. automodule:: cvzx.diagram_to_circuit
+.. automodule:: cvzx.passes.normalize
    :members:
    :undoc-members:
    :show-inheritance:
 ```
 
-## `cvzx.lowering`
+## `cvzx.backends.nx.rules`
 
 ```{eval-rst}
-.. automodule:: cvzx.lowering
+.. automodule:: cvzx.backends.nx.rules
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## `cvzx.backends.rx.rules`
+
+```{eval-rst}
+.. automodule:: cvzx.backends.rx.rules
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## `cvzx.passes.optimize`
+
+```{eval-rst}
+.. automodule:: cvzx.passes.optimize
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## `cvzx.passes.completion`
+
+```{eval-rst}
+.. automodule:: cvzx.passes.completion
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## `cvzx.lowering.bridges.mqc3`
+
+```{eval-rst}
+.. automodule:: cvzx.lowering.bridges.mqc3
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## `cvzx.lowering.dag`
+
+```{eval-rst}
+.. automodule:: cvzx.lowering.dag
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## `cvzx.lowering.lowering`
+
+```{eval-rst}
+.. automodule:: cvzx.lowering.lowering
    :members:
    :undoc-members:
    :show-inheritance:
@@ -93,10 +147,19 @@ the order described in {doc}`dev_guide/architecture`.
    :show-inheritance:
 ```
 
-## `cvzx.visualize_base_gates`
+## `cvzx.utils.helpers`
 
 ```{eval-rst}
-.. automodule:: cvzx.visualize_base_gates
+.. automodule:: cvzx.utils.helpers
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+## `cvzx.utils.visualization_base_gates`
+
+```{eval-rst}
+.. automodule:: cvzx.utils.visualization_base_gates
    :members:
    :undoc-members:
    :show-inheritance:

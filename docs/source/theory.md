@@ -18,7 +18,7 @@ A CV ZX diagram is built from two "spiders" (Table II of the paper):
 together with four fixed generators: `Swap`, `Fourier` ($\hat F$), `FourierInv` ($\hat
 F^\dagger$), and `Fourier2` ($\hat F^2$).
 
-| Paper | `cvzx.base_gates` |
+| Paper | `cvzx.ir.base` |
 |---|---|
 | $q$-spider $f(x)$, arity $m \leftarrow n$ | `QSpider(num_inputs, num_outputs, phase)` |
 | $p$-spider $f(x)$, arity $m \leftarrow n$ | `PSpider(num_inputs, num_outputs, phase)` |
@@ -38,21 +38,21 @@ identical; only the list order convention differs.
 
 The Diagram contraction (Eq. 51) reads as follows $ \int ds_{\bar{i}} ds_{\bar{j}} {}_{q_{\bar{i}}}\langle s_{\bar{i}} | [D_1] | s_{\bar{j}} \rangle_{q_{\bar{j}}} \otimes {}_{q_{\bar{j}}}  \langle s_{\bar{j}} | [D_2] | s_{\bar{i}} \rangle_{q_{\bar{i}}}$
 
-Here, $\bar{i} = i_1, ..., i_n$ and $\bar{j} = j_1, ..., j_m$ are variables representing multiple copies of the symbol being subscripted, one for each item in the respective list. Therefore in `cvzx.base_gates`, it is represented using `ContractedDiagram(first, second, I1, I2, J1, J2)` where `first` and `second` represents $D1$ and $D2$. Notice that we have 4 sets of indices ($I1, I2, J1, J2$). This allows to specify which inputs of $D1$ are contracted with outputs of $D2$ and the other way around. This diagram contraction can also be performed using the `partial_trace` method of a `TensorDiagram` by specifying which diagrams of the tensor product and which indices will be traced out. For visualization purposes we restricted this method for successive diagrams in a tensor product.
+Here, $\bar{i} = i_1, ..., i_n$ and $\bar{j} = j_1, ..., j_m$ are variables representing multiple copies of the symbol being subscripted, one for each item in the respective list. Therefore in `cvzx.ir.base`, it is represented using `ContractedDiagram(first, second, I1, I2, J1, J2)` where `first` and `second` represents $D1$ and $D2$. Notice that we have 4 sets of indices ($I1, I2, J1, J2$). This allows to specify which inputs of $D1$ are contracted with outputs of $D2$ and the other way around. This diagram contraction can also be performed using the `partial_trace` method of a `TensorDiagram` by specifying which diagrams of the tensor product and which indices will be traced out. For visualization purposes we restricted this method for successive diagrams in a tensor product.
 
-`cvzx.gates.CompactDiagram` (and every gate class built on it: `DisplacementGate`,
+`cvzx.ir.gates.CompactDiagram` (and every gate class built on it: `DisplacementGate`,
 `PhaseRotationGate`, ...) is not a paper concept — it is an engineering layer that stores a
 gate as a single opaque leaf plus a lazily-attached `decomposition` into the generators
 above, so that a circuit can be built and manipulated at the gate level and only expanded
 into spiders when a rewrite rule actually needs to see inside it (`CompactDiagram.expand()`,
-`cvzx.gates.expand_all`). This can help to wrap a sub-circuit into a single object.
+`cvzx.ir.gates.expand_all`). This can help to wrap a sub-circuit into a single object.
 
 ## Gate decompositions (Table I / Section III C)
 
-Every gate in the paper's Table I has a corresponding `cvzx.gates` class, whose
+Every gate in the paper's Table I has a corresponding `cvzx.ir.gates` class, whose
 `.expand()` builds exactly the spider decomposition given in Section III C:
 
-| Paper gate | Decomposition (paper Eq.) | `cvzx.gates` class |
+| Paper gate | Decomposition (paper Eq.) | `cvzx.ir.gates` class |
 |---|---|---|
 | $\hat D(\alpha)$ displacement | Eq. (57): $q$-spider $\otimes$ $p$-spider | `DisplacementGate(alpha)` |
 | $\hat R(\theta)$ phase rotation | Eq. (58): three quadratic spiders (or `Fourier2` at $\theta = (2n{+}1)\pi$) | `PhaseRotationGate(theta)` |
@@ -62,7 +62,7 @@ Every gate in the paper's Table I has a corresponding `cvzx.gates` class, whose
 | $\widehat{BS}(\theta)$ beamsplitter | Eq. (65)/(66): five squeezing/CSUM factors | `BeamsplitterGate(theta)` |
 | $\widehat{CPG}(\gamma)$ cubic phase | Eq. (68): a single cubic-phase $q$-spider | `CubicPhaseGate(gamma)` |
 
-`cvzx.gates` also defines a few gates that are convenient building blocks in the codebase
+`cvzx.ir.gates` also defines a few gates that are convenient building blocks in the codebase
 but are not named directly in the paper's Table I — `ShearXInvariantGate`/`ShearPInvariantGate`
 (the individual quadratic shears the phase-rotation/squeezing decompositions are built
 from), `Squeezing45Gate` (squeezing at a $45°$ angle, Eq. (67)'s balanced-beamsplitter
@@ -74,12 +74,12 @@ compile onto that machinery.
 
 ## Rewrite rules (Section IV A)
 
-`cvzx.nx_rewrite_rules` implements a `RewriteRule` per paper rule (or per closely-related
+`cvzx.backends.nx.rules` implements a `RewriteRule` per paper rule (or per closely-related
 group of rules), operating on the `networkx` graph form rather than the `Diagram` tree
-directly — see {doc}`../dev_guide/rewrite_engine` for why. `cvzx.optimize.optimize` runs
+directly — see {doc}`../dev_guide/rewrite_engine` for why. `cvzx.passes.optimize.optimize` runs
 them to a fixed point (see {doc}`../user_guide/optimization`).
 
-| Paper rule | `cvzx.nx_rewrite_rules` class | Notes |
+| Paper rule | `cvzx.backends.nx.rules` class | Notes |
 |---|---|---|
 | Identity ($id$), Eq. (69) | `IdentityRule` | Removes a bare $QSpider(1,1,0)$/$PSpider(1,1,0)$ splice. |
 | Fusion ($f$), Eq. (70)–(71) | `FusionRule` | Merges two directly-adjacent same-color spiders into one, summing phases. |

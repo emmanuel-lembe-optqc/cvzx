@@ -1,7 +1,7 @@
 """Opt-in file logging for the diagram-rewriting/optimization pipeline.
 
-Every module in the rewriting pipeline (`cvzx.normalize_diagram`,
-`cvzx.nx_rewrite_rules`, `cvzx.optimize`) only ever calls
+Every module in the rewriting pipeline (`cvzx.passes.normalize`,
+`cvzx.backends.nx.rules`, `cvzx.passes.optimize`) only ever calls
 `logging.getLogger(__name__)` and emits records -- library code must never
 configure handlers itself, since that decision belongs to whatever
 application imports it (see the standard library's own logging guidance
@@ -19,7 +19,7 @@ from pathlib import Path
 # One file per concern: dumping every module's logs into a single file
 # makes it hard to tell, e.g., "did FusionRule ever match" apart from "did
 # the round loop converge" at a glance.
-_PIPELINE_LOGGERS = ("cvzx.normalize_diagram", "cvzx.nx_rewrite_rules", "cvzx.optimize")
+_PIPELINE_LOGGERS = ("cvzx.passes.normalize", "cvzx.backends.nx.rules", "cvzx.passes.optimize")
 
 __all__ = ["setup_file_logging"]
 

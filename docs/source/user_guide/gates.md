@@ -1,8 +1,8 @@
 # Gate catalog
 
-Every gate lives in `cvzx.gates` and is a `CompactDiagram` subclass: it behaves as an
+Every gate lives in `cvzx.ir.gates` and is a `CompactDiagram` subclass: it behaves as an
 opaque, 1- or 2-mode leaf until something calls `.expand()` on it (or
-`cvzx.gates.expand_all`, or `cvzx.nx_rewrite_rules.expand_two_mode_gates` for the two-mode
+`cvzx.ir.gates.expand_all`, or `cvzx.backends.nx.rules.expand_two_mode_gates` for the two-mode
 gates specifically), at which point it produces its spider decomposition (see
 {doc}`../theory`). All gates share the same four extra fields:
 
@@ -15,7 +15,7 @@ gates specifically), at which point it produces its spider decomposition (see
 
 ```python
 from sympy import symbols
-from cvzx.gates import DisplacementGate, PhaseRotationGate
+from cvzx.ir.gates import DisplacementGate, PhaseRotationGate
 
 D = DisplacementGate(alpha=1.0 + 0.5j)                       # numeric
 theta = symbols("theta", real=True)
@@ -76,7 +76,7 @@ exposes `.get_parameters()` (the free symbols involved) and `.substitute_paramet
 
 ```python
 from sympy import symbols
-from cvzx.gates import DisplacementGate
+from cvzx.ir.gates import DisplacementGate
 
 a, b = symbols("a b")
 D_sym = DisplacementGate(alpha=a + 1j * b, parametric=True)
@@ -91,8 +91,8 @@ A gate whose parameter depends on an earlier measurement outcome is marked
 
 ```python
 from sympy import symbols
-from cvzx.base_gates import QSpider, ZxPoly
-from cvzx.gates import PhaseRotationGate
+from cvzx.ir.base import QSpider, ZxPoly
+from cvzx.ir.gates import PhaseRotationGate
 
 m = symbols("m", real=True)
 meas_leaf = QSpider(1, 0, ZxPoly({1: m}))  # a measurement effect producing outcome m
@@ -105,5 +105,5 @@ R = PhaseRotationGate(
 ```
 
 Constructing a `feedforward=True` gate with no `measurement_ids` (or an empty set) raises
-`ValueError` — see `tests/test_visualize_gates.py::feedforward_params_all_gates_test` for a
+`ValueError` — see `tests/utils/test_visualize_gates.py::feedforward_params_all_gates_test` for a
 sweep over every gate class checking exactly this.

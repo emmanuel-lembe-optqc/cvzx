@@ -1,6 +1,6 @@
 # Rewrite rules
 
-Every rewrite rule in `cvzx.nx_rewrite_rules` implements the same `RewriteRule` interface
+Every rewrite rule in `cvzx.backends.nx.rules` implements the same `RewriteRule` interface
 (see {doc}`../dev_guide/rewrite_engine` for why the contract looks the way it does):
 
 - `rule.match(graph, registry) -> list[dict]` finds every independent match in the graph and
@@ -9,21 +9,21 @@ Every rewrite rule in `cvzx.nx_rewrite_rules` implements the same `RewriteRule` 
 - `rule.apply_rule(graph, registry) -> nx.DiGraph` (inherited, not overridden) applies every
   match `match()` found, once, and returns the graph for chaining.
 
-You will normally just call `cvzx.optimize.optimize` (see {doc}`optimization`), which drives
+You will normally just call `cvzx.passes.optimize.optimize` (see {doc}`optimization`), which drives
 every rule to a fixed point for you. This page is for when you want to apply one rule
 directly — e.g. in a test, or to inspect what a single rule does in isolation.
 
 ## Applying one rule to a whole diagram
 
-`cvzx.nx_rewrite_rules.apply_rule_to_diagram(rule, diagram)` is the simplest entry point: it
+`cvzx.backends.nx.rules.apply_rule_to_diagram(rule, diagram)` is the simplest entry point: it
 converts to a graph, calls `rule.apply_rule`, and converts back.
 
 ```python
 from sympy import pi
 
-from cvzx.base_gates import CompositionDiagram, Fourier2
-from cvzx.gates import PhaseRotationGate
-from cvzx.nx_rewrite_rules import FourierNormalizationRule, apply_rule_to_diagram
+from cvzx.ir.base import CompositionDiagram, Fourier2
+from cvzx.ir.gates import PhaseRotationGate
+from cvzx.backends.nx.rules import FourierNormalizationRule, apply_rule_to_diagram
 
 comp = CompositionDiagram([PhaseRotationGate(pi / 6), Fourier2()])
 result = apply_rule_to_diagram(FourierNormalizationRule(), comp)
@@ -36,19 +36,17 @@ For finer control — e.g. to apply only *one* of several matches, or to inspect
 fields before deciding whether to apply it — build the graph and registry yourself:
 
 ```python
-from cvzx.base_gates import CompositionDiagram, Fourier, QSpider, ZxPoly
-from cvzx.nx_graph import GateRegister, to_diagram, to_graph
-from cvzx.nx_rewrite_rules import IdentityRule
+from cvzx.ir.base import CompositionDiagram, Fourier, QSpider, ZxPoly
+from cvzx.backends.nx.graph import to_diagram, to_graph
+from cvzx.backends.nx.rules import IdentityRule
 
 id_wire = QSpider(1, 1, ZxPoly({}))  # a blank spider is an identity wire
 comp = CompositionDiagram([id_wire, Fourier()])
 
-graph = to_graph(comp)
-registry = GateRegister()
-registry.build_from_graph(graph)
+graph = to_graph(comp)  # a CVZXGraph, with its GateRegister already built
 
 rule = IdentityRule()
-matches = rule.match(graph, registry)
+matches = rule.match(graph)
 assert len(matches) == 1
 assert matches[0]["node_id"] == id_wire.id
 
@@ -56,8 +54,8 @@ rule.apply_single(graph, matches[0])
 result = to_diagram(graph)   # -> Fourier()
 ```
 
-This pattern — build the graph, get a `GateRegister`, call `match`, inspect/apply
-`matches[0]` — is used throughout `tests/rewrite_rules/`; every rule's test file is a good
+This pattern — build the `CVZXGraph`, call `match`, inspect/apply `matches[0]` — is used
+throughout `tests/backends/nx/rules/`; every rule's test file is a good
 source of further worked examples for that specific rule's match fields.
 
 ## Rule-by-rule notes

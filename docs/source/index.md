@@ -2,15 +2,16 @@
 
 **cvzx** is a diagram-rewriting compiler for continuous-variable (CV) quantum circuits, built
 around the CV ZX calculus of {cite}`nagayoshi2024zx`. It represents a circuit as a `Diagram`
-of q-/p-spiders and gate leaves, converts it to a `networkx` graph, and simplifies it by
-repeatedly applying a fixed set of graph-rewrite rules (fusion, chain reduction, terminal
-absorption, Fourier normalization, the copy rule, ...) until nothing more matches.
+of q-/p-spiders and gate leaves, converts it to a graph (`networkx` or `rustworkx`, see
+{doc}`user_guide/optimization`), and simplifies it by repeatedly applying a fixed set of
+graph-rewrite rules (fusion, chain reduction, terminal absorption, Fourier normalization, the
+copy rule, ...) until nothing more matches.
 
-The gate set and naming conventions follow MQC3's `graph`/`circuit` operations, so a `cvzx` diagram optimized with `cvzx.optimize.optimize` is meant to
-compile down cleanly onto that machinery's measurement-angle model. `cvzx.circuit_to_diagram`
-and `cvzx.diagram_to_circuit` convert to and from an actual mqc3 `CircuitRepr`, and
-`cvzx.lowering` carries a diagram the rest of the way to a concrete mqc3 `MachineryRepr`
-via a pluggable per-QPU backend.
+The gate set and naming conventions follow MQC3's `graph`/`circuit` operations, so a `cvzx`
+diagram optimized with `cvzx.passes.optimize.optimize` is meant to compile down cleanly onto
+that machinery's measurement-angle model. `cvzx.lowering.bridges.mqc3` converts to and from an
+actual mqc3 `CircuitRepr`, and `cvzx.lowering.lowering` carries a closed diagram the rest of
+the way to a concrete mqc3 `DependencyDAG` via a pluggable per-QPU backend.
 
 This documentation has three parts:
 

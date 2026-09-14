@@ -1,6 +1,6 @@
 # Optimizing a diagram
 
-`cvzx.optimize.optimize(diagram, *, backend=None, assume_infinite_squeezing=False, max_rounds=100)`
+`cvzx.passes.optimize.optimize(diagram, *, backend=None, assume_infinite_squeezing=False, max_rounds=100)`
 is the main entry point: it repeatedly applies every rewrite rule (see {doc}`rewrite_rules`)
 until none of them match, then runs the end-of-pipeline cleanup once. `backend` picks which
 `CVZXGraph` implementation does the work (see "Choosing a backend" below) — leave it
@@ -10,9 +10,9 @@ unset unless you have a specific reason to override the default.
 from sympy import pi, simplify
 
 from cvzx.backend import get_backend_modules
-from cvzx.base_gates import CompositionDiagram
-from cvzx.gates import PhaseRotationGate
-from cvzx.optimize import optimize
+from cvzx.ir.base import CompositionDiagram
+from cvzx.ir.gates import PhaseRotationGate
+from cvzx.passes.optimize import optimize
 
 theta1, theta2, theta3 = pi / 6, pi / 5, pi / 7
 comp = CompositionDiagram([
@@ -31,7 +31,7 @@ assert isinstance(result, PhaseRotationGate)
 assert simplify(result.theta - (theta1 + theta2 + theta3)) == 0
 ```
 
-(adapted from `tests/test_optimize.py::test_chain_reduction_combines_three_rotations`.)
+(adapted from `tests/passes/test_optimize.py::TestOptimizeExactOnly::test_chain_reduction_combines_three_rotations`.)
 
 ## What you get back
 
@@ -49,7 +49,7 @@ access work:
   captured beforehand rather than re-derived from the cleaned graph afterward.
 
 ```python
-from cvzx.visualize_base_gates import visualize
+from cvzx.utils.visualization_base_gates import visualize
 
 fig = visualize(result.diagram, title="optimized circuit")
 ```
@@ -70,9 +70,9 @@ and {doc}`../theory` for exactly which identities each setting corresponds to.
   `ControlledSumGate` disappear entirely instead of staying as an explicit gate:
 
 ```python
-from cvzx.base_gates import CompositionDiagram, PSpider, QSpider, TensorDiagram, ZxPoly
-from cvzx.gates import ControlledSumGate
-from cvzx.optimize import optimize
+from cvzx.ir.base import CompositionDiagram, PSpider, QSpider, TensorDiagram, ZxPoly
+from cvzx.ir.gates import ControlledSumGate
+from cvzx.passes.optimize import optimize
 
 control_state = PSpider(0, 1, ZxPoly({1: 2}))
 target_state = QSpider(0, 1, ZxPoly({1: 3}))
@@ -83,12 +83,12 @@ graph, _ = optimize(comp, assume_infinite_squeezing=True)
 ```
 
 Without `assume_infinite_squeezing=True`, this same diagram is left with the `CSUM` gate
-intact (see `tests/test_optimize.py::TestOptimizeExact::test_controlled_sum_gate_untouched_without_squeezing`
+intact (see `tests/passes/test_optimize.py::TestOptimizeExactOnly::test_controlled_sum_gate_untouched_without_squeezing`
 for the contrasting case).
 
 ## Convergence
 
-Each round: normalize (`cvzx.normalize_diagram.normalize_diagram` — see
+Each round: normalize (`cvzx.passes.normalize.normalize_diagram` — see
 {doc}`../dev_guide/normalization`), optionally expand two-mode gates, then run every rule to
 a fixed point over the graph, then convert back to a `Diagram` to feed the next round.
 Rounds repeat because folding can combine adjacent two-mode gates that themselves need
@@ -116,7 +116,7 @@ optimize(comp, backend="networkx")          # force networkx explicitly
 ```
 
 Both backends run the *exact same* rewrite rules and produce identical results —
-`nx_graph.py`/`rx_graph.py` and `nx_rewrite_rules.py`/`rx_rewrite_rules.py` are maintained as
+`backends/nx/graph.py`/`backends/rx/graph.py` and `backends/nx/rules.py`/`backends/rx/rules.py` are maintained as
 parallel implementations of one schema, checked by a mirrored parity test suite (see
 {doc}`../dev_guide/architecture`) — so switching backends is purely a performance choice,
 never a correctness one. An unknown or uninstalled backend name raises
@@ -134,7 +134,7 @@ of every `optimize()` round — and lighter on memory for that topology/bookkeep
 
 It's worth being precise about what this does *not* speed up or shrink: each node's own gate
 payload (`kind`, `phase`, `param_measurement_map`, and the rest of the attrs dict
-`nx_graph.py`/`rx_graph.py` populate identically) is the same plain Python `dict` object on
+`backends/nx/graph.py`/`backends/rx/graph.py` populate identically) is the same plain Python `dict` object on
 both backends — `rustworkx`'s node weight can be any Python object, so it just holds a
 reference to that dict rather than compacting it — and every `GateRegister` index
 (`identity_spiders`, `parametric_nodes`, `symbol_registry`, ...) is a plain Python
@@ -156,14 +156,14 @@ therefore every category the registry indexes, untouched, so rebuilding in that 
 pure wasted work; as a round approaches the fixed point and fewer rules still match, this
 saves more and more rebuilds. `to_graph`/`to_diagram` also no longer carry a defensive
 `deepcopy` of the diagram they convert — nothing in that conversion walk mutates its input
-(pinned down by `tests/nx_graph/test_nx_graph.py::TestToGraphDoesNotMutateInput`), so the copy
+(pinned down by `tests/backends/nx/graph/test_nx_graph.py::TestToGraphDoesNotMutateInput`), so the copy
 was pure overhead, on the order of a third of `to_graph`'s own cost on a realistic circuit.
 Neither change affects what `optimize()` computes, only how much work it takes to get there —
 see {doc}`../dev_guide/rewrite_engine` for the registry-sync rationale in more detail.
 
 ## Debugging with logs
 
-`cvzx.normalize_diagram`, `cvzx.nx_rewrite_rules`, and `cvzx.optimize` each log through the
+`cvzx.passes.normalize`, `cvzx.backends.nx.rules`, and `cvzx.passes.optimize` each log through the
 standard `logging` module (which rule matched, how many rounds/passes ran, and a warning if
 `max_rounds` is hit) — useful when a diagram isn't simplifying the way you expect. They only
 ever emit records; nothing is written anywhere until you configure logging yourself. The

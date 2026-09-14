@@ -1,6 +1,6 @@
 # Type-1/type-2 stage normalization
 
-`cvzx.normalize_diagram.normalize_diagram(diagram)` rewrites an arbitrary compact-form
+`cvzx.passes.normalize.normalize_diagram(diagram)` rewrites an arbitrary compact-form
 `Diagram` into a canonical `CompositionDiagram` of alternating stages:
 
 - a **type-2** stage is a `TensorDiagram` containing exactly one "wide" leaf (any generator
@@ -36,20 +36,27 @@ several rewrite rules rely on.
 
 ## Why this exists
 
-`ChainReductionRule` and `TerminalAbsorptionRule` only ever look for two matchable leaves
-that are *directly adjacent elements of one flat `CompositionDiagram`* (same immediate
-parent, consecutive `sub_diagram_ids`) — the simple case, deliberately, so that adding a new
-rule of this kind never has to reimplement cross-container matching. But a diagram built the
-natural way (e.g. an ancilla prepared mid-circuit via a width-changing sub-`CompositionDiagram`
-nested inside one row of a wider `TensorDiagram`) can easily produce two same-row,
-back-to-back 1-mode gates that are *not* siblings of one flat composition purely because of
-how the tree happens to be nested — so those two rules would never see them. Normalizing
-first makes "same immediate parent" matching sufficient everywhere it's used, instead of
-requiring every rule to grow the general cross-container matching logic `CopyRule` needed
-(see {doc}`rewrite_engine`). This is also why `cvzx.optimize.optimize` calls
+`ChainReductionRule` and `TerminalAbsorptionRule` — like `CopyRule` — scan the graph's own
+`"composition"` edges directly rather than walking `sub_diagram_ids` siblings, so none of the
+three is actually limited to same-immediate-parent matches: all three chase across
+`TensorDiagram`/`ContractedDiagram` container boundaries, and past any run of identity
+spiders or `Swap` nodes sitting directly in the path, to find the real neighboring leaf to
+check (see {doc}`rewrite_engine`).
+
+So normalization isn't load-bearing for *finding* matches the way it once was. What it still
+buys is a predictable, canonical shape to reason about in the first place: instead of an
+arbitrarily-nested tree where the same causal relationship (e.g. an ancilla prepared
+mid-circuit via a width-changing sub-`CompositionDiagram` nested inside one row of a wider
+`TensorDiagram`) can show up in any number of container shapes, every diagram normalizes to
+the same alternating type-1/type-2 form, with the same micro-layer ordering and the same
+`connectivity`-dict convention between stages — one shape every rule, present and future, can
+assume rather than re-derive, and the same shape `cvzx.lowering.bridges.mqc3.to_circuit_repr`
+relies on for its own stage-by-stage walk (see {doc}`circuit_conversion
+<../user_guide/circuit_conversion>`). This is also why `cvzx.passes.optimize.optimize` calls
 `normalize_diagram` at the start of *every* round, not just once at the start of the whole
-pipeline: each round's rewriting can re-nest the diagram in ways that need renormalizing
-before the next round's rules can see across them again.
+pipeline: each round's rewriting can re-nest the diagram in ways worth flattening back out
+before the next round, even though the rules themselves no longer strictly need that to see
+across the result.
 
 ## How it works, briefly
 

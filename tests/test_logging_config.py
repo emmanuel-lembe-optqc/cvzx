@@ -5,7 +5,7 @@ from pathlib import Path
 
 from cvzx.logging_config import setup_file_logging
 
-_LOGGER_NAMES = ("cvzx.normalize_diagram", "cvzx.nx_rewrite_rules", "cvzx.optimize")
+_LOGGER_NAMES = ("cvzx.passes.normalize", "cvzx.backends.nx.rules", "cvzx.passes.optimize")
 
 
 def _remove_file_handlers() -> None:
@@ -28,7 +28,7 @@ def test_creates_log_directory_and_one_file_per_pipeline_logger(tmp_path: Path):
             short_name = name.rsplit(".", 1)[-1]
             assert (log_dir / f"{short_name}.log").exists()
 
-        logging.getLogger("cvzx.optimize").debug("hello from a test")
+        logging.getLogger("cvzx.passes.optimize").debug("hello from a test")
         assert "hello from a test" in (log_dir / "optimize.log").read_text()
     finally:
         _remove_file_handlers()

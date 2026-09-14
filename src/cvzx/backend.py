@@ -48,10 +48,10 @@ def get_backend_modules(backend: Backend | str | None = None) -> tuple[Backend, 
         if importlib.util.find_spec("rustworkx") is None:
             msg = "Backend.RUSTWORKX was requested, but the 'rustworkx' package isn't installed."
             raise UnsupportedBackendError(msg)
-        import cvzx.rx_graph as graph_mod  # ruff: ignore[import-outside-top-level]
-        import cvzx.rx_rewrite_rules as rules_mod  # ruff: ignore[import-outside-top-level]
+        import cvzx.backends.rx.graph as graph_mod  # ruff: ignore[import-outside-top-level]
+        import cvzx.backends.rx.rules as rules_mod  # ruff: ignore[import-outside-top-level]
     else:
-        import cvzx.nx_graph as graph_mod  # type: ignore[no-redef]  # ruff: ignore[import-outside-top-level]
-        import cvzx.nx_rewrite_rules as rules_mod  # type: ignore[no-redef]  # ruff: ignore[import-outside-top-level]
+        import cvzx.backends.nx.graph as graph_mod  # type: ignore[no-redef]  # ruff: ignore[import-outside-top-level]
+        import cvzx.backends.nx.rules as rules_mod  # type: ignore[no-redef]  # ruff: ignore[import-outside-top-level]
 
     return chosen, graph_mod, rules_mod

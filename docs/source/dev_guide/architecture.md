@@ -11,38 +11,40 @@ This is a strict dependency order — nothing later in the list is imported by a
 (the diagram draws each module's most architecturally relevant direct dependency/dependencies,
 not the full import graph — see the module's own docstring for its complete import list).
 `exceptions.py` and `config.py` have no `cvzx` imports at all and sit at the foundation;
-`base_gates.py` (the `Diagram` hierarchy) depends only on `exceptions.py`.
+`ir/base.py` (the `Diagram` hierarchy) depends only on `exceptions.py`.
 
 `cvzx.backend.get_backend_modules()` is what makes the rest of the pipeline dual-backend:
-`nx_graph.py`/`nx_rewrite_rules.py` and `rx_graph.py`/`rx_rewrite_rules.py` are parallel,
+`backends/nx/graph.py`/`backends/nx/rules.py` and `backends/rx/graph.py`/`backends/rx/rules.py` are parallel,
 near-identical implementations over `networkx.DiGraph` and `rustworkx.PyDiGraph`
 respectively, and `optimize(diagram, backend=...)` picks between them (defaulting to
 `cvzx.config.DEFAULT_BACKEND`, which auto-detects whether `rustworkx` is installed).
-`normalize_diagram.py` itself is nx-only (it needs one concrete graph representation to
+`passes/normalize.py` itself is nx-only (it needs one concrete graph representation to
 canonicalize into, and nx was it first); `optimize()` bridges that by converting through
 whichever backend module `to_graph`/`to_diagram` it was given.
 
-Four more modules sit downstream of `normalize_diagram.py`, not pictured above:
-`cvzx.circuit_to_diagram` and `cvzx.diagram_to_circuit` each depend on `base_gates.py` +
-`gates.py` + `normalize_diagram.py` (nothing from `nx_rewrite_rules.py` or `optimize.py`);
-`cvzx.completion` (boundary closing) depends only on `cvzx.backend`/`base_gates.py`; and
-`cvzx.dag_extraction` + `cvzx.lowering` sit downstream of both `diagram_to_circuit.py` and
-`completion.py` in turn. See the pipeline diagram below for where they fit, and
-{doc}`../user_guide/circuit_conversion` for how to use them.
+Three more modules sit downstream of `passes/normalize.py`, not pictured above:
+`cvzx.lowering.bridges.mqc3` (both `from_circuit_repr` and `to_circuit_repr` — the two
+directions of the mqc3 bridge live in one module, see below) depends on `ir/base.py` +
+`ir/gates.py` + `passes/normalize.py` (nothing from `backends/nx/rules.py` or
+`passes/optimize.py`); `cvzx.passes.completion` (boundary closing) depends only on
+`cvzx.backend`/`ir/base.py`; and `cvzx.lowering.dag` + `cvzx.lowering.lowering` sit downstream
+of both `lowering/bridges/mqc3.py` and `passes/completion.py` in turn. See the pipeline
+diagram below for where they fit, and {doc}`../user_guide/circuit_conversion` for how to use
+them.
 
 ## Two representations of a circuit, on purpose
 
 `cvzx` deliberately keeps two representations of a circuit alive side by side, and converts
-between them (`cvzx.nx_graph.to_graph` / `to_diagram`) rather than picking one:
+between them (`cvzx.backends.nx.graph.to_graph` / `to_diagram`) rather than picking one:
 
-- **`Diagram`** (`base_gates.py`, `gates.py`) — a nested tree: `TensorDiagram`/
+- **`Diagram`** (`ir/base.py`, `ir/gates.py`) — a nested tree: `TensorDiagram`/
   `CompositionDiagram`/`ContractedDiagram` containers of `Diagram` leaves. This is the
   representation you *build* a circuit in, and the one {doc}`visualization <../user_guide/visualization>`
   draws. It is a poor representation to *rewrite*: finding "does this leaf have a
   same-color spider two doors down, possibly through a nested sub-composition" requires
   walking the tree structure itself, and a rewrite that merges two leaves living in
   different containers has no natural place to attach the result.
-- **`networkx.DiGraph` or `rustworkx.PyDiGraph`** (`nx_graph.py` / `rx_graph.py` — two
+- **`networkx.DiGraph` or `rustworkx.PyDiGraph`** (`backends/nx/graph.py` / `backends/rx/graph.py` — two
   near-identical implementations of the same schema, selected via `cvzx.backend`) — every
   leaf is a flat, randomly-addressable node (`kind="proper"` or `"compact"`), and every
   container is *also* a node (`kind="container"`, with `container_type` one of `"tensor"`,
@@ -52,7 +54,7 @@ between them (`cvzx.nx_graph.to_graph` / `to_diagram`) rather than picking one:
   {doc}`rewrite_engine` for why that one property is what makes graph-based rewriting
   tractable at all, and {doc}`../user_guide/optimization` for how to pick a backend.
 
-`GateRegister` (`nx_graph.py` / `rx_graph.py`) is the third piece: it indexes the graph's nodes by category
+`GateRegister` (`backends/nx/graph.py` / `backends/rx/graph.py`) is the third piece: it indexes the graph's nodes by category
 (squeezing gates, rotation gates, Fourier gates, identity spiders, input states, measurement
 nodes, and the three container types) so a rule's `match()` can look up "every rotation
 gate" in O(1) instead of scanning the whole graph. It has to be kept in sync with the graph
@@ -72,21 +74,21 @@ downstream embedding/machinery pipeline, which `cvzx` hands off to but does not 
 :width: 100%
 ```
 
-`cvzx.circuit_to_diagram.from_circuit_repr` and `cvzx.diagram_to_circuit.to_circuit_repr` are
-the two halves of the round trip at the `Diagram` boundary. `cvzx.completion.complete_boundaries`
+`cvzx.lowering.bridges.mqc3.from_circuit_repr` and `cvzx.lowering.bridges.mqc3.to_circuit_repr` are
+the two halves of the round trip at the `Diagram` boundary. `cvzx.passes.completion.complete_boundaries`
 closes an optimized diagram's open input/output ports (fresh ideal states in, fresh symbolic
 measurement effects out) — the precondition both lowering backends below rely on: an mqc3
 `CircuitRepr`/`DependencyDAG` has no concept of an externally-supplied mode, so every wire must
-terminate at a real state/measurement node first. `cvzx.lowering.graph_to_dependency_dag` is
-the pluggable dispatch point that turns that closed diagram into an mqc3 `DependencyDAG`.
+terminate at a real state/measurement node first. `cvzx.lowering.lowering.graph_to_dependency_dag`
+is the pluggable dispatch point that turns that closed diagram into an mqc3 `DependencyDAG`.
 
-`cvzx.lowering` exists as a plugin point (rather than hardcoding one fixed
+`cvzx.lowering.lowering` exists as a plugin point (rather than hardcoding one fixed
 `Diagram -> DependencyDAG` path) because a `DependencyDAG` can be built more than one way: the
 bundled `"mqc3"` backend (`Mqc3ReferenceBackend`) is the simplest correct implementation —
 `to_circuit_repr` then mqc3's own `DependencyDAG(circuit)` constructor — while `"cvzx-direct"`
 (`CvzxDirectBackend`) skips the `CircuitRepr` round-trip entirely and discovers execution order
-directly from the diagram's own `CVZXGraph` structure (dual-backend, via `cvzx.dag_extraction`),
-reusing `diagram_to_circuit`'s per-leaf translators rather than duplicating them. Both are
+directly from the diagram's own `CVZXGraph` structure (dual-backend, via `cvzx.lowering.dag`),
+reusing `cvzx.lowering.bridges.mqc3`'s per-leaf translators rather than duplicating them. Both are
 verified to produce an isomorphic `DependencyDAG` for the same input. A QPU wanting a different
 construction strategy registers its own `LoweringBackend` without touching `get_backend` or any
 other registered backend. From there, `DependencyDAG` is QPU-agnostic and ready for mqc3's own

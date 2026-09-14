@@ -44,6 +44,13 @@ autodoc_member_order = "bysource"
 autodoc_typehints = "description"
 autosummary_generate = True
 
+# `CVZXGraph` is deliberately defined once per graph backend
+# (`cvzx.backends.nx.graph.CVZXGraph`, `cvzx.backends.rx.graph.CVZXGraph`) -- mirrored
+# implementations of the same schema, not a naming collision to fix. Every bare `CVZXGraph`
+# cross-reference elsewhere in the docs is genuinely ambiguous between the two on purpose, so
+# this warning class is suppressed rather than chasing down and fully qualifying every mention.
+suppress_warnings = ["ref.python"]
+
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "networkx": ("https://networkx.org/documentation/stable/", None),

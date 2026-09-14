@@ -20,11 +20,16 @@ edge directly between them. A rule's `match()` can then simply scan
 this hardest: its docstring is the most detailed explanation in the codebase of exactly
 which container shapes this lets it restructure that a tree-walking version could not.
 
-The corollary is that **normalizing same-container matching is still useful** —
-{doc}`normalization` exists precisely so that, after normalization, the common case (two
-directly causally-adjacent leaves) *is* also a same-container, same-`sub_diagram_ids` case,
-which keeps most rules' `match()` logic simple; only `CopyRule` needs the general
-cross-container path.
+`ChainReductionRule` and `TerminalAbsorptionRule` lean on the same edge-scanning approach —
+both chase across container boundaries and past runs of identity spiders/`Swap` nodes to find
+their real neighboring leaf, exactly like `CopyRule` — so cross-container matching is the norm
+across the rule set, not a `CopyRule`-only special case.
+
+The corollary is that **normalization is still useful, just not for matching correctness** —
+{doc}`normalization` exists so that every diagram settles into the same canonical shape
+(same micro-layers, same `connectivity`-dict convention between stages) for rules — and
+non-rule consumers like `cvzx.lowering.bridges.mqc3.to_circuit_repr` — to reason about, rather
+than because any rule would otherwise fail to find a match.
 
 ## The `RewriteRule` contract
 
@@ -47,7 +52,7 @@ class RewriteRule(ABC):
 there is no fixed schema across rules, each rule documents its own match dict's keys.
 `apply_single()` mutates `graph` in place for exactly one match. `apply_rule()` (defined
 once, on the base class, not overridden) is the only place that ties the two together for a
-whole pass; `cvzx.optimize.optimize` calls `match()` + `apply_rule()` per rule, per round,
+whole pass; `cvzx.passes.optimize.optimize` calls `match()` + `apply_rule()` per rule, per round,
 until nothing matches.
 
 ```{note}
@@ -68,7 +73,7 @@ to make your subclass match it.
 source of truth (the graph is), and nothing updates it automatically. A rule's
 `apply_single` that adds or removes nodes is responsible for calling
 `registry.add_node()`/`remove_node()` itself, or the caller must rebuild the registry with
-`build_from_graph()` before the next `match()` call. `cvzx.optimize._simplify_to_fixed_point`
+`build_from_graph()` before the next `match()` call. `cvzx.passes.optimize._simplify_to_fixed_point`
 rebuilds the registry fresh right after a rule actually applies a change to the graph —
 never merely because a pass moves on to the next rule, since a rule whose `match()` returns
 nothing leaves the graph (and therefore every category the registry indexes) untouched, so a
@@ -79,11 +84,11 @@ auditing every rule's node bookkeeping for registry-sync correctness.
 
 ## `VoidDiagram`: a transient bookkeeping leaf, not a calculus generator
 
-`VoidDiagram` (`base_gates.py`) has no counterpart in the CV ZX calculus paper — it exists
+`VoidDiagram` (`ir/base.py`) has no counterpart in the CV ZX calculus paper — it exists
 purely so that `CopyRule` (and, more generally, any rule that needs to shrink a
 container's *content* without shrinking its *arity* mid-pass) can leave a same-shaped
 placeholder in a slot instead of forcing an immediate, potentially cascading re-derivation of
-every ancestor container's port count. `cvzx.nx_rewrite_rules.remove_void_and_identity_nodes`
+every ancestor container's port count. `cvzx.backends.nx.rules.remove_void_and_identity_nodes`
 is the only thing that ever removes these, and `optimize()` runs it exactly once, at the very
 end of the pipeline (see {doc}`architecture`) — a `Diagram` produced mid-pipeline (e.g. the
 `.diagram` field on `OptimizeResult`, or any partial round) may still contain them.

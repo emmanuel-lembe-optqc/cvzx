@@ -197,6 +197,23 @@ development on `main` to date, grouped by area rather than by commit.
   `mqc3`, needed by `circuit_to_diagram`/`diagram_to_circuit`/`lowering`
   and their tests) instead of a bare install, and builds the
   documentation with warnings treated as errors.
+- **Reorganized `src/cvzx/` into subpackages by role**, and mirrored the same
+  layout under `tests/`: `ir/` (`base.py`, `gates.py` — was `base_gates.py`,
+  `gates.py`), `backends/{nx,rx}/` (`graph.py`, `rules.py` — was
+  `{nx,rx}_graph.py`, `{nx,rx}_rewrite_rules.py`), `passes/` (`optimize.py`,
+  `completion.py`, `normalize.py` — was `normalize_diagram.py`),
+  `lowering/` (`dag.py` — was `dag_extraction.py`; `lowering.py`, unchanged
+  in content; `bridges/mqc3.py` — merges the former `circuit_to_diagram.py`
+  and `diagram_to_circuit.py`, the two directions of the same mqc3 bridge,
+  into one module), and `utils/` (`helpers.py` — was `utils.py`;
+  `visualization_base_gates.py` — was `visualize_base_gates.py`);
+  `config.py`/`exceptions.py`/`logging_config.py`/`backend.py` stay at the
+  package root. A clean rename with no compatibility shims (nothing has
+  been tagged/released yet, so the old flat `cvzx.<module>` import paths
+  are gone rather than kept working); every import across `src/`, `tests/`,
+  and the documentation was updated to match, and `docs/source/_static/
+  generate_diagrams.py`'s module-map and pipeline diagrams were rebuilt
+  for the new layout.
 
 ### Fixed
 
@@ -262,3 +279,37 @@ development on `main` to date, grouped by area rather than by commit.
   absorption (dividing by `tau**degree` instead of multiplying),
   contradicting the codebase's own established, independently tested
   convention for a `QSpider` state.
+- Nine `sphinx -W` doc-build failures: missing blank lines before RST
+  bullet lists in five rewrite-rule `match()` docstrings, and a
+  `circuit_to_diagram`/`diagram_to_circuit` module-docstring heading
+  collision (`"Feedforward"` used by both, now `"Feedforward on
+  ingestion"`/`"Feedforward on emission"`) once both were documented on
+  the same API-reference page. A repo-wide sweep also fixed the same
+  underlying RST bug pattern (a single-backtick reference immediately
+  followed by a plural "s", e.g. `` `Swap`s ``, which breaks docutils'
+  inline-markup end-string rule) everywhere else it occurred, before it
+  could cause the same failures elsewhere.
+- `api_reference.md` was missing half the package
+  (`backend`/`config`/`exceptions`/`completion`/`dag_extraction`/
+  `utils`/both `rx_*` modules) from its `automodule` listing; extending it
+  surfaced the same missing-blank-line docstring bug in
+  `rx_rewrite_rules.py`'s `match()` methods (mirroring the `nx` fix above)
+  and a genuine bug in `exceptions.py`'s own docstring (an unmarked ASCII
+  tree diagram parsed as a malformed paragraph instead of a literal
+  block), plus an inherent, permanent ambiguity from documenting both
+  `CVZXGraph` classes (`nx`/`rx`) on one page — resolved by suppressing
+  Sphinx's `ref.python` warning class in `conf.py` rather than qualifying
+  every bare `` `CVZXGraph` `` mention project-wide.
+- `docs/source/user_guide/circuit_conversion.md` and the architecture/
+  pipeline docs described a `graph_to_machinery_repr`/`to_machinery_repr`/
+  `MachineryRepr.from_graph_repr` API that was never actually implemented
+  in `lowering.py` (whose real, current surface ends at
+  `graph_to_dependency_dag`/`DependencyDAG`) — rewritten to match the real
+  API, including a second worked example for the `"cvzx-direct"` backend.
+- `docs/source/user_guide/rewrite_rules.md`'s and `quickstart.md`'s worked
+  examples called the pre-`CVZXGraph` `RewriteRule.match(graph, registry)`/
+  `GateRegister().build_from_graph(graph)` API against a `to_graph()` call
+  that has returned a `CVZXGraph` (a single object, registry included) for
+  some time -- both raised `AttributeError`/`TypeError` if actually run;
+  fixed to use the current `match(cvzx_graph)` signature and
+  `graph.registry` directly.

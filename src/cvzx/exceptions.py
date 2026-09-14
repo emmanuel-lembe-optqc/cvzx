@@ -10,18 +10,20 @@ backend) when that's useful.
 
 Hierarchy
 ---------
-CvzxError
-├── ParameterError
-│   ├── ParameterConflictError
-│   ├── UnboundMeasurementError
-│   └── InvalidSymbolError
-├── DiagramError
-│   ├── ArityMismatchError
-│   └── ExpansionError
-├── RewriteError
-│   └── RuleApplicationError
-└── BackendError
-    └── UnsupportedBackendError
+::
+
+    CvzxError
+    ├── ParameterError
+    │   ├── ParameterConflictError
+    │   ├── UnboundMeasurementError
+    │   └── InvalidSymbolError
+    ├── DiagramError
+    │   ├── ArityMismatchError
+    │   └── ExpansionError
+    ├── RewriteError
+    │   └── RuleApplicationError
+    └── BackendError
+        └── UnsupportedBackendError
 """
 
 

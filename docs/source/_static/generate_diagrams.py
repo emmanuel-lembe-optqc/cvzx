@@ -193,7 +193,7 @@ def generate_module_map() -> None:
         ax,
         y[1],
         [
-            ("base_gates", "base_gates.py", "Diagram hierarchy, ZxPoly, the Parametrized mixin.", _BLUE),
+            ("base_gates", "ir/base.py", "Diagram hierarchy, ZxPoly, the Parametrized mixin.", _BLUE),
             ("backend", "backend.py", "get_backend_modules() -> (Backend, graph\nmodule, rules module).", _BLUE),
         ],
         h=box_h,
@@ -205,8 +205,8 @@ def generate_module_map() -> None:
         ax,
         y[2],
         [
-            ("gates", "gates.py", "CompactDiagram + every gate class.", _BLUE),
-            ("completion", "completion.py", "complete_diagram()/complete_boundaries()\nclose open ports.", _ORANGE),
+            ("gates", "ir/gates.py", "CompactDiagram + every gate class.", _BLUE),
+            ("completion", "passes/completion.py", "complete_diagram()/complete_boundaries()\nclose open ports.", _ORANGE),
         ],
         h=box_h,
     )
@@ -217,9 +217,9 @@ def generate_module_map() -> None:
         ax,
         y[3],
         [
-            ("utils", "utils.py", "expand_two_mode_gates() and\nother shared helpers.", _BLUE),
-            ("nx_graph", "nx_graph.py", "Diagram <-> networkx.DiGraph,\nGateRegister.", _BLUE),
-            ("rx_graph", "rx_graph.py", "Diagram <-> rustworkx.PyDiGraph,\nGateRegister.", _BLUE),
+            ("utils", "utils/helpers.py", "expand_two_mode_gates() and\nother shared helpers.", _BLUE),
+            ("nx_graph", "backends/nx/graph.py", "Diagram <-> networkx.DiGraph,\nGateRegister.", _BLUE),
+            ("rx_graph", "backends/rx/graph.py", "Diagram <-> rustworkx.PyDiGraph,\nGateRegister.", _BLUE),
         ],
         h=box_h,
     )
@@ -229,10 +229,10 @@ def generate_module_map() -> None:
         ax,
         y[4],
         [
-            ("nx_rewrite_rules", "nx_rewrite_rules.py", "Rewrite rules over\na networkx graph.", _BLUE),
-            ("rx_rewrite_rules", "rx_rewrite_rules.py", "Rewrite rules over\na rustworkx graph.", _BLUE),
-            ("normalize_diagram", "normalize_diagram.py", "Canonicalization pass\n(type-1/type-2 stages).", _BLUE),
-            ("visualize_base_gates", "visualize_base_gates.py", "matplotlib rendering\nof a Diagram.", _TEAL),
+            ("nx_rewrite_rules", "backends/nx/rules.py", "Rewrite rules over\na networkx graph.", _BLUE),
+            ("rx_rewrite_rules", "backends/rx/rules.py", "Rewrite rules over\na rustworkx graph.", _BLUE),
+            ("normalize_diagram", "passes/normalize.py", "Canonicalization pass\n(type-1/type-2 stages).", _BLUE),
+            ("visualize_base_gates", "utils/visualization_base_gates.py", "matplotlib rendering\nof a Diagram.", _TEAL),
         ],
         h=box_h,
         title_size=11.3,
@@ -243,7 +243,7 @@ def generate_module_map() -> None:
     ax.text(
         _center_top(l4["nx_rewrite_rules"])[0],
         y[4] + 0.22,
-        "(+ utils.py)",
+        "(+ utils/helpers.py)",
         fontsize=7.8,
         color=_GRAY,
         style="italic",
@@ -254,7 +254,7 @@ def generate_module_map() -> None:
     ax.text(
         _center_top(l4["rx_rewrite_rules"])[0],
         y[4] + 0.22,
-        "(+ utils.py)",
+        "(+ utils/helpers.py)",
         fontsize=7.8,
         color=_GRAY,
         style="italic",
@@ -267,39 +267,38 @@ def generate_module_map() -> None:
         ax,
         y[5],
         [
-            ("optimize", "optimize.py", "Backend-dispatched fixed-point\nrewrite loop.", _BLUE),
-            ("circuit_to_diagram", "circuit_to_diagram.py", "mqc3 CircuitRepr -> Diagram.", _ORANGE),
-            ("diagram_to_circuit", "diagram_to_circuit.py", "Diagram -> mqc3 CircuitRepr.", _ORANGE),
+            ("optimize", "passes/optimize.py", "Backend-dispatched fixed-point\nrewrite loop.", _BLUE),
+            ("mqc3_bridge", "lowering/bridges/mqc3.py", "mqc3 CircuitRepr <-> Diagram (both directions).", _ORANGE),
         ],
         h=box_h,
     )
-    _branch(ax, l4["normalize_diagram"], [l5["optimize"], l5["circuit_to_diagram"], l5["diagram_to_circuit"]])
+    _branch(ax, l4["normalize_diagram"], [l5["optimize"], l5["mqc3_bridge"]])
 
     l6 = _row_boxes(
         ax,
         y[6],
-        [("dag_extraction", "dag_extraction.py", "Direct CVZXGraph forward sweep -> mqc3 DependencyDAG.", _ORANGE)],
+        [("dag_extraction", "lowering/dag.py", "Direct CVZXGraph forward sweep -> mqc3 DependencyDAG.", _ORANGE)],
         h=box_h,
     )
-    _elbow(ax, _center_bottom(l5["diagram_to_circuit"]), _center_top(l6["dag_extraction"]))
+    _elbow(ax, _center_bottom(l5["mqc3_bridge"]), _center_top(l6["dag_extraction"]))
 
     l7 = _row_boxes(
         ax,
         y[7],
-        [("lowering", "lowering.py", 'LoweringBackend plugin registry ("mqc3", "cvzx-direct").', _ORANGE)],
+        [("lowering", "lowering/lowering.py", 'LoweringBackend plugin registry ("mqc3", "cvzx-direct").', _ORANGE)],
         h=box_h,
     )
     _elbow(ax, _center_bottom(l6["dag_extraction"]), _center_top(l7["lowering"]), dashed=True)
 
     _side_route(ax, l1["backend"], l5["optimize"], 12.55, label="backend.py")
-    _side_route(ax, l2["completion"], l6["dag_extraction"], 13.15, label="completion.py")
-    _side_route(ax, l5["diagram_to_circuit"], l7["lowering"], 13.75, label="deferred import")
+    _side_route(ax, l2["completion"], l6["dag_extraction"], 13.15, label="passes/completion.py")
+    _side_route(ax, l5["mqc3_bridge"], l7["lowering"], 13.75, label="deferred import")
 
     ax.text(
         7,
         y[7] - box_h - 0.4,
         "Dashed arrows are deferred (function-local) imports in the real source, not eager top-level ones --\n"
-        "lowering.py only imports diagram_to_circuit.py / dag_extraction.py inside to_dependency_dag(), so registering\n"
+        "lowering/lowering.py only imports lowering/bridges/mqc3.py / lowering/dag.py inside to_dependency_dag(), so registering\n"
         "a LoweringBackend never pulls in mqc3 (or the rest of the bridge) until it's actually used.",
         ha="center",
         va="top",
@@ -316,11 +315,11 @@ def generate_module_map() -> None:
 def generate_pipeline_overview() -> None:
     """Regenerate `pipeline_overview.png`.
 
-    `CircuitRepr -> DependencyDAG`, ending where `cvzx.lowering`'s real,
+    `CircuitRepr -> DependencyDAG`, ending where `cvzx.lowering.lowering`'s real,
     current API actually ends (`graph_to_dependency_dag`) -- the previous
     version of this diagram continued on into a `graph_to_machinery_repr`/
     `MachineryRepr` step that was never actually implemented in
-    `lowering.py`; this version stops at `DependencyDAG` and shows the
+    `lowering/lowering.py`; this version stops at `DependencyDAG` and shows the
     remaining mqc3-internal steps (`GraphEmbedder`, `MachineryRepr`) as an
     explicitly out-of-package continuation instead.
     """
@@ -335,7 +334,7 @@ def generate_pipeline_overview() -> None:
     ax.text(
         7.5,
         0.78,
-        'CircuitRepr -> DependencyDAG, through optimize() and the cvzx.lowering plugin registry -- every box is the real function/class\n'
+        'CircuitRepr -> DependencyDAG, through optimize() and the cvzx.lowering.lowering plugin registry -- every box is the real function/class\n'
         "performing that step; the greyed-out tail is mqc3's own downstream machinery, not part of cvzx",
         ha="center",
         va="top",
@@ -354,7 +353,7 @@ def generate_pipeline_overview() -> None:
         7.8,
         1.05,
         "from_circuit_repr(circuit)",
-        "cvzx.circuit_to_diagram -- walks the circuit in time order (_naive_translate),\nproducing a compact-form Diagram, then canonicalizes it with normalize_diagram().",
+        "cvzx.lowering.bridges.mqc3 -- walks the circuit in time order (_naive_translate),\nproducing a compact-form Diagram, then canonicalizes it with normalize_diagram().",
     )
     _elbow(ax, _center_bottom(circuit_repr), _center_top(from_repr))
 
@@ -387,7 +386,7 @@ def generate_pipeline_overview() -> None:
     ax.add_patch(
         FancyBboxPatch((opt_x + opt_w - 3.0, opt_y - 0.62), 2.7, 0.5, boxstyle="round,pad=0.02,rounding_size=0.08", linewidth=1.3, edgecolor=_BLUE, facecolor=_LAVENDER_FILL, zorder=4)
     )
-    ax.text(opt_x + opt_w - 1.65, opt_y - 0.37, "cvzx.optimize", ha="center", va="center", fontsize=9.6, fontweight="bold", color=_BLUE, zorder=5)
+    ax.text(opt_x + opt_w - 1.65, opt_y - 0.37, "cvzx.passes.optimize", ha="center", va="center", fontsize=9.6, fontweight="bold", color=_BLUE, zorder=5)
 
     _box(ax, opt_x + 0.4, opt_y - 1.15, 4.3, 0.75, "normalize_diagram(diagram)", "", edgecolor=_BLUE)
     _box(ax, opt_x + 0.4, opt_y - 2.15, 4.3, 0.75, "graph_mod.to_graph(diagram)", "", edgecolor=_BLUE)
@@ -395,7 +394,7 @@ def generate_pipeline_overview() -> None:
     _box(ax, opt_x + 5.1, opt_y - 2.15, 3.4, 0.75, "graph (nx/rx)", "", edgecolor=_GRAY, fill=_GRAY_FILL, title_size=11.5)
     ax.annotate("", xy=(opt_x + 5.1, opt_y - 1.55), xytext=(opt_x + 4.7, opt_y - 1.55), arrowprops={"arrowstyle": "-|>", "color": _BLUE, "lw": 1.5})
     ax.annotate("", xy=(opt_x + 5.1, opt_y - 2.55), xytext=(opt_x + 4.7, opt_y - 2.55), arrowprops={"arrowstyle": "-|>", "color": _BLUE, "lw": 1.5})
-    ax.text(opt_x + 8.7, opt_y - 2.15, "networkx.DiGraph or rustworkx.PyDiGraph,\nvia cvzx.nx_graph / cvzx.rx_graph", fontsize=8.6, color=_GRAY, style="italic", va="top")
+    ax.text(opt_x + 8.7, opt_y - 2.15, "networkx.DiGraph or rustworkx.PyDiGraph,\nvia cvzx.backends.nx.graph / cvzx.backends.rx.graph", fontsize=8.6, color=_GRAY, style="italic", va="top")
 
     rewrite_b = _box(
         ax,
@@ -426,7 +425,7 @@ def generate_pipeline_overview() -> None:
     _elbow(ax, (opt_x + opt_w / 2, opt_y - opt_h), _center_top(result_b), color=_GRAY)
 
     y_branch = opt_y - opt_h - 1.9
-    vis_b = _box(ax, 0.8, y_branch, 5.6, 1.05, "visualize(diagram, title=...)", "cvzx.visualize_base_gates -- renders the diagram\nas a matplotlib figure for interactive inspection.", edgecolor=_TEAL)
+    vis_b = _box(ax, 0.8, y_branch, 5.6, 1.05, "visualize(diagram, title=...)", "cvzx.utils.visualization_base_gates -- renders the diagram\nas a matplotlib figure for interactive inspection.", edgecolor=_TEAL)
     complete_b = _box(
         ax,
         7.0,
@@ -434,7 +433,7 @@ def generate_pipeline_overview() -> None:
         7.0,
         1.3,
         "complete_boundaries(diagram, *, backend=None, ...)",
-        "cvzx.completion -- closes every open input port with a fresh ideal state and\nevery open output port with a fresh symbolic measurement effect (QSpider/PSpider).",
+        "cvzx.passes.completion -- closes every open input port with a fresh ideal state and\nevery open output port with a fresh symbolic measurement effect (QSpider/PSpider).",
         edgecolor=_ORANGE,
     )
     ax.text(3.6, y_branch + 0.35, "at the same level:", ha="center", fontsize=9.3, color=_GRAY, style="italic")
@@ -455,7 +454,7 @@ def generate_pipeline_overview() -> None:
     ax.text(
         lower_x + 0.25,
         lower_y - 0.58,
-        'cvzx.lowering -- dispatches via the LoweringBackend registry (default backend: "mqc3")',
+        'cvzx.lowering.lowering -- dispatches via the LoweringBackend registry (default backend: "mqc3")',
         fontsize=9.6,
         color=_TEXT,
         zorder=4,
@@ -466,18 +465,18 @@ def generate_pipeline_overview() -> None:
     sub_h = 3.15
     mqc3_ref = _box(ax, lower_x + 0.35, sub_top, 3.9, sub_h, 'Mqc3ReferenceBackend ("mqc3")', "", edgecolor=_BLUE, title_size=10.6)
     ax.text(lower_x + 0.55, sub_top - 0.62, "to_circuit_repr(diagram)", fontsize=9.6, fontweight="bold", color=_BLUE)
-    ax.text(lower_x + 0.55, sub_top - 0.90, "cvzx.diagram_to_circuit", fontsize=8.2, color=_GRAY, style="italic")
+    ax.text(lower_x + 0.55, sub_top - 0.90, "cvzx.lowering.bridges.mqc3", fontsize=8.2, color=_GRAY, style="italic")
     ax.annotate("", xy=(lower_x + 2.3, sub_top - 1.35), xytext=(lower_x + 2.3, sub_top - 1.0), arrowprops={"arrowstyle": "-|>", "color": _BLUE, "lw": 1.4})
     ax.text(lower_x + 0.55, sub_top - 1.55, "DependencyDAG(circuit)", fontsize=9.6, fontweight="bold", color=_BLUE)
     ax.text(lower_x + 0.55, sub_top - 1.83, "mqc3.graph.embed.dep_dag, from the CircuitRepr", fontsize=8.0, color=_GRAY, style="italic")
 
     cvzx_direct = _box(ax, lower_x + 4.4, sub_top, 3.9, sub_h, 'CvzxDirectBackend ("cvzx-direct")', "", edgecolor=_BLUE, title_size=10.6)
     ax.text(lower_x + 4.6, sub_top - 0.62, "extract_dependency_dag(diagram)", fontsize=9.6, fontweight="bold", color=_BLUE)
-    ax.text(lower_x + 4.6, sub_top - 0.90, "cvzx.dag_extraction", fontsize=8.2, color=_GRAY, style="italic")
+    ax.text(lower_x + 4.6, sub_top - 0.90, "cvzx.lowering.dag", fontsize=8.2, color=_GRAY, style="italic")
     ax.text(
         lower_x + 4.6,
         sub_top - 1.40,
-        "dual-backend forward sweep over the diagram's\nown CVZXGraph wire/classical edges -- reuses\ndiagram_to_circuit's per-leaf translators directly.",
+        "dual-backend forward sweep over the diagram's\nown CVZXGraph wire/classical edges -- reuses\nthe mqc3 bridge's per-leaf translators directly.",
         fontsize=8.0,
         color=_TEXT,
         va="top",
@@ -526,7 +525,7 @@ def generate_pipeline_overview() -> None:
         7.5,
         tail_bottom - 1.15,
         "The two representations either side of optimize() (Diagram <-> graph) are converted via graph_mod.to_graph/to_diagram, where\n"
-        "graph_mod is whichever of cvzx.nx_graph / cvzx.rx_graph optimize()'s backend= selected. cvzx.lowering is the analogous plugin\n"
+        "graph_mod is whichever of cvzx.backends.nx.graph / cvzx.backends.rx.graph optimize()'s backend= selected. cvzx.lowering.lowering is the analogous plugin\n"
         "point one step further downstream: a QPU wanting a different DependencyDAG construction strategy registers its own\n"
         "LoweringBackend (cvzx-direct is one example, skipping the CircuitRepr round-trip) without touching get_backend or any other backend.",
         ha="center",
