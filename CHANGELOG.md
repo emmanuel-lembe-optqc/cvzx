@@ -127,6 +127,47 @@ development on `main` to date, grouped by area rather than by commit.
   `ChainReductionRule`/`FusionRule`'s internal "should not occur"
   invariant checks, and `get_backend_modules()`, replacing the generic
   `ValueError`s these previously raised.
+- **mqc3 `FeedForward` bridge** (`circuit_to_diagram.py`,
+  `diagram_to_circuit.py`): a `CircuitRepr` operation parameter driven by
+  `FeedForward[MeasuredVariable]` now round-trips through `Diagram` in
+  both directions -- `from_circuit_repr` reconstructs the source
+  measurement as a symbolic effect (recovering an affine
+  `FeedForwardFunction`'s slope/intercept by evaluating it at `0.0`/`1.0`)
+  and threads the resulting `Symbol` onto the downstream gate, while
+  `to_circuit_repr` re-emits an equivalent `FeedForward` from a gate's
+  `param_measurement_map` provenance. Unsupported cases (a `FeedForward`
+  depending on more than one measurement, a non-affine
+  `FeedForwardFunction`) raise `NotImplementedError` instead of
+  mistranslating.
+- **Boundary completion** (`completion.py`): `complete_diagram()` closes
+  every open *output* port of a `Diagram` with a fresh symbolic
+  measurement effect (`QSpider`/`PSpider` in the chosen basis), returning
+  the completed graph, diagram, and a `dict[Symbol, int]` of the fresh
+  symbols' measurement-node bindings; `complete_boundaries()` additionally
+  closes open *input* ports first (fresh ideal states in the chosen
+  basis), so a `Diagram` with any combination of open inputs/outputs can
+  be turned into a fully-bounded one in one call. `relink_measurement_symbol()`
+  repoints an already-bound symbol's `param_measurement_map` entries at a
+  different measurement node (re-validating via
+  `validate_parameter_consistency()` afterward), for callers that need to
+  correct or reassign provenance post-completion.
+- **Direct `CVZXGraph` -> `DependencyDAG` extraction** (`dag_extraction.py`,
+  registered in `lowering.py` as the `"cvzx-direct"` `LoweringBackend`):
+  an alternative to the `"mqc3"` reference backend's `to_circuit_repr`
+  round-trip. `extract_dependency_dag()` discovers execution order with a
+  single dual-backend (`networkx`/`rustworkx`) forward sweep directly over
+  a `CVZXGraph`'s own `"composition"`/`"contracted_internal"` wire edges,
+  anchored at `GateRegister.input_states` and gated on both wire-readiness
+  (every input port fed) and classical-readiness (every measurement a
+  node's `param_measurement_map` cites already visited), so a feedforward
+  edge is never added pointing at an unvisited measurement. Automatically
+  closes open ports first via `complete_boundaries()`, then delegates
+  actual per-leaf op translation to `diagram_to_circuit`'s existing
+  `_apply_1mode_leaf`/`_apply_2mode_leaf` translators rather than
+  duplicating that logic, before handing the result to mqc3's own
+  `DependencyDAG` constructor. Verified to produce a `DependencyDAG`
+  isomorphic to the `"mqc3"` reference backend's output across both graph
+  backends.
 
 ### Changed
 

@@ -61,7 +61,13 @@ if TYPE_CHECKING:
     from cvzx.nx_graph import CVZXGraph as NxCVZXGraph
     from cvzx.rx_graph import CVZXGraph as RxCVZXGraph
 
-__all__ = ["CompletionResult", "complete_diagram", "relink_measurement_symbol"]
+__all__ = [
+    "BoundaryCompletionResult",
+    "CompletionResult",
+    "complete_boundaries",
+    "complete_diagram",
+    "relink_measurement_symbol",
+]
 
 _symbol_counter = count(1)
 
@@ -164,6 +170,104 @@ def complete_diagram(
     _, graph_mod, _ = get_backend_modules(backend)
     graph = graph_mod.to_graph(completed_diagram)
     return CompletionResult(graph=graph, diagram=completed_diagram, bindings=bindings)
+
+
+class BoundaryCompletionResult(NamedTuple):
+    """`complete_boundaries()`'s return value.
+
+    Attributes
+    ----------
+    graph
+        The fully closed `CVZXGraph` (`num_inputs == num_outputs == 0`),
+        registry already rebuilt.
+    diagram : Diagram
+        The fully closed compact-form `Diagram`.
+    measurement_bindings : dict[Symbol, int]
+        One entry per synthesized output-side measurement effect: the
+        fresh symbol bound to that leaf's node id (see
+        `CompletionResult.bindings` -- input-side states get no symbol,
+        since a state has no "outcome" to feed forward from).
+    n_synthesized_inputs : int
+        How many open input ports were closed with a fresh state.
+    n_synthesized_outputs : int
+        How many open output ports were closed with a fresh measurement
+        effect (`len(measurement_bindings)`).
+    """
+
+    graph: "NxCVZXGraph | RxCVZXGraph"
+    diagram: Diagram
+    measurement_bindings: dict[Symbol, int]
+    n_synthesized_inputs: int
+    n_synthesized_outputs: int
+
+
+def complete_boundaries(
+    diagram: Diagram,
+    *,
+    backend: Backend | str | None = None,
+    input_basis: str | list[str] = "Q",
+    output_basis: str | list[str] = "Q",
+) -> BoundaryCompletionResult:
+    """Close both open input and output ports of `diagram`.
+
+    Every open input port gets a fresh idealized (zero-phase) state
+    leaf -- there's no outcome to name, so unlike the output side no
+    symbol is minted for it. Every open output port gets a fresh
+    symbolic measurement effect exactly as `complete_diagram()` produces.
+    The result is a diagram every `GateRegister.input_states` and
+    `GateRegister.measurement_nodes` entry bounds a complete wire for --
+    the precondition `cvzx.dag_extraction.extract_dependency_dag()` (a
+    single deterministic forward sweep anchored at `input_states`) relies
+    on.
+
+    Parameters
+    ----------
+    diagram : Diagram
+        The diagram to close. Not mutated.
+    backend : Backend | str | None
+        Which `CVZXGraph` backend to build the completed graph with.
+        `None` (default) uses `cvzx.config.DEFAULT_BACKEND`.
+    input_basis : str | list[str]
+        Which quadrature each newly opened input port's state is
+        idealized along: `"Q"` (the x-eigenstate) or `"P"` (the
+        p-eigenstate). Same broadcasting rule as `output_basis`.
+    output_basis : str | list[str]
+        Forwarded to `complete_diagram()` as `basis` -- see there.
+
+    Returns
+    -------
+    BoundaryCompletionResult
+
+    Raises
+    ------
+    ValueError
+        If `input_basis`/`output_basis` (or any entry) isn't `"Q"`/`"P"`,
+        or a list of the wrong length.
+    """
+    n_open_in = diagram.num_inputs
+
+    in_bases = [input_basis] * n_open_in if isinstance(input_basis, str) else list(input_basis)
+    if len(in_bases) != n_open_in:
+        msg = f"input_basis has {len(in_bases)} entries but diagram has {n_open_in} open input port(s)."
+        raise ValueError(msg)
+    for b in in_bases:
+        if b not in _BASIS_TO_CLS:
+            msg = f"Unknown basis {b!r}; expected one of {sorted(_BASIS_TO_CLS)}."
+            raise ValueError(msg)
+
+    if n_open_in:
+        states = [_BASIS_TO_CLS[b](0, 1, ZxPoly({})) for b in in_bases]
+        opening_layer = TensorDiagram(states) if len(states) > 1 else states[0]
+        diagram = diagram.compose(opening_layer)
+
+    output_result = complete_diagram(diagram, backend=backend, basis=output_basis)
+    return BoundaryCompletionResult(
+        graph=output_result.graph,
+        diagram=output_result.diagram,
+        measurement_bindings=output_result.bindings,
+        n_synthesized_inputs=n_open_in,
+        n_synthesized_outputs=len(output_result.bindings),
+    )
 
 
 def _node_attrs(cvzx_graph: "NxCVZXGraph | RxCVZXGraph", node_id: int) -> dict:

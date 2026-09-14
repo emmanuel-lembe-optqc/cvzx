@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from cvzx.base_gates import Diagram
 
 __all__ = [
+    "CvzxDirectBackend",
     "LoweringBackend",
     "Mqc3ReferenceBackend",
     "get_backend",
@@ -197,3 +198,32 @@ class Mqc3ReferenceBackend(LoweringBackend):
 
         circuit = to_circuit_repr(diagram)
         return DependencyDAG(circuit)
+
+
+@register_backend("cvzx-direct")
+class CvzxDirectBackend(LoweringBackend):
+    """Direct lowering backend: `Diagram` -> `CVZXGraph` -> `DependencyDAG`.
+
+    Skips `normalize_diagram`'s canonical-stage requirement: execution
+    order is discovered by a single forward sweep over the diagram's own
+    `CVZXGraph` structure instead, anchored at `GateRegister.input_states`
+    and dual-backend (uses whichever of `networkx`/`rustworkx` is
+    selected, or the default -- see `cvzx.config.Backend`). See
+    `cvzx.dag_extraction` for the full algorithm; per-leaf op translation
+    is still delegated to `cvzx.diagram_to_circuit`'s own translators (no
+    duplicated translation logic), so the same `FeedForward` support and
+    documented per-gate limitations apply. Automatically closes any open
+    input/output ports first via `cvzx.completion.complete_boundaries()`.
+    """
+
+    def to_dependency_dag(self, diagram: Diagram) -> DependencyDAG:
+        """Lower `diagram` via a direct `CVZXGraph` forward sweep.
+
+        Returns
+        -------
+        DependencyDAG
+            The resulting dependency DAG.
+        """
+        from cvzx.dag_extraction import extract_dependency_dag  # ruff: ignore[import-outside-top-level]
+
+        return extract_dependency_dag(diagram)
