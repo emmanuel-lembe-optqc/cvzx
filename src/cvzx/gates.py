@@ -28,6 +28,7 @@ from cvzx.base_gates import (
     TensorDiagram,
     ZxPoly,
 )
+from cvzx.exceptions import ExpansionError
 
 
 @dataclass
@@ -500,11 +501,21 @@ class DisplacementGate(CompactDiagram):
         -------
         ZxPoly
             Phase polynomial with the given coefficient.
+
+        Raises
+        ------
+        ExpansionError
+            If `coeff` can't be converted to a `float` in the non-parametric
+            case (e.g. a stray non-real symbolic remainder).
         """
         if self.parametric:
             return ZxPoly({degree: coeff})
         # Convert to float for numeric case
-        return ZxPoly({degree: float(coeff)})
+        try:
+            return ZxPoly({degree: float(coeff)})
+        except (TypeError, ValueError) as exc:
+            msg = f"DisplacementGate.expand(): could not convert phase coefficient {coeff!r} to float."
+            raise ExpansionError(msg) from exc
 
 
 @dataclass

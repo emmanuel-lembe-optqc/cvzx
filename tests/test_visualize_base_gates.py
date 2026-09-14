@@ -24,6 +24,7 @@ from cvzx.base_gates import (
     ZxPoly,
     flatten_composition,
 )
+from cvzx.exceptions import ArityMismatchError
 from cvzx.visualize_base_gates import visualize
 
 # Create output directory using Path
@@ -53,41 +54,41 @@ def test_base_gates_exceptions():
     fourier = Fourier()
 
     # --- CompositionDiagram ---
-    with pytest.raises(ValueError, match="Cannot compose diagram"):
+    with pytest.raises(ArityMismatchError, match="Cannot compose diagram"):
         CompositionDiagram([q1, q2])  # q1 outputs=1, q2 inputs=2 -> should fail
 
-    with pytest.raises(ValueError, match="The keys of the connectivity dictionary do not correspond"):
+    with pytest.raises(ArityMismatchError, match="The keys of the connectivity dictionary do not correspond"):
         CompositionDiagram([fourier, fourier], connectivity={0: {1: 0}})  # fourier has 1 input, key must be 0 only
 
-    with pytest.raises(ValueError, match="The values of the connectivity dictionary do not correspond"):
+    with pytest.raises(ArityMismatchError, match="The values of the connectivity dictionary do not correspond"):
         CompositionDiagram([fourier, fourier], connectivity={0: {0: 1}})  # fourier has 1 output, value must be 0
 
     # --- ContractedDiagram ---
-    with pytest.raises(ValueError, match="contain duplicate indices"):
+    with pytest.raises(ArityMismatchError, match="contain duplicate indices"):
         ContractedDiagram(q1, q2, [0, 0], [0, 1], [], [])
 
-    with pytest.raises(ValueError, match="must equal"):
+    with pytest.raises(ArityMismatchError, match="must equal"):
         ContractedDiagram(q1, q2, [0], [0, 1], [], [])
 
-    with pytest.raises(ValueError, match="out of range"):
+    with pytest.raises(ArityMismatchError, match="out of range"):
         ContractedDiagram(q1, q2, [2], [0], [], [])
 
-    with pytest.raises(ValueError, match="out of range"):
+    with pytest.raises(ArityMismatchError, match="out of range"):
         ContractedDiagram(q1, q2, [], [], [2], [0])
 
     # --- ProperDiagram.compose ---
-    with pytest.raises(ValueError, match="The keys of the connectivity dictionary do not correspond"):
+    with pytest.raises(ArityMismatchError, match="The keys of the connectivity dictionary do not correspond"):
         fourier.compose(fourier, connectivity={1: 0})  # fourier has 1 input, key must be 0
 
-    with pytest.raises(ValueError, match="The values of the connectivity dictionary do not correspond"):
+    with pytest.raises(ArityMismatchError, match="The values of the connectivity dictionary do not correspond"):
         fourier.compose(fourier, connectivity={0: 1})  # other.fourier has 1 output, value must be 0
 
     # --- TensorDiagram.compose ---
     tensor = TensorDiagram([q1, q2])  # num_inputs = 1+2 = 3
-    with pytest.raises(ValueError, match="The keys of the connectivity dictionary do not correspond"):
+    with pytest.raises(ArityMismatchError, match="The keys of the connectivity dictionary do not correspond"):
         tensor.compose(fourier, connectivity={0: 0, 1: 1})  # keys must be 0,1,2
 
-    with pytest.raises(ValueError, match="The values of the connectivity dictionary do not correspond"):
+    with pytest.raises(ArityMismatchError, match="The values of the connectivity dictionary do not correspond"):
         tensor.compose(fourier, connectivity={0: 0, 1: 0, 2: 1})  # fourier has 1 output, values must be 0
 
 

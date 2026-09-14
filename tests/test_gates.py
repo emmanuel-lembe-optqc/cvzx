@@ -12,6 +12,7 @@ dropping `control`/`target`.
 import pytest
 from sympy import I, symbols
 
+from cvzx.exceptions import InvalidSymbolError
 from cvzx.gates import ArbitraryGate, ControlledSumGate, DisplacementGate, PhaseRotationGate, SqueezingGate
 
 
@@ -37,7 +38,7 @@ class TestDisplacementGateSubstituteParameters:
         """A param_measurement_map keyed on a non-parameter symbol is illegal."""
         a, c = symbols("a c", real=True)
 
-        with pytest.raises(ValueError, match="references symbols that are not parameters"):
+        with pytest.raises(InvalidSymbolError, match="not among its own parameters"):
             DisplacementGate(a, parametric=True, param_measurement_map={c: {1}})
 
 

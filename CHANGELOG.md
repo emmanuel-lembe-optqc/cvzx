@@ -105,6 +105,28 @@ development on `main` to date, grouped by area rather than by commit.
   tests (`test_base_gates.py`, `test_gates.py`) plus matching nx/rx
   backend tests (`tests/nx_graph`, `tests/rx_graph`,
   `tests/rewrite_rules`, `tests/rx_rewrite_rules`).
+- **Backend dispatcher** (`config.py`, `backend.py`): a `Backend` enum
+  (`NETWORKX`/`RUSTWORKX`) with an auto-detecting `DEFAULT_BACKEND`, and
+  `get_backend_modules()` resolving a `Backend` selector to its
+  `*_graph`/`*_rewrite_rules` module pair. `optimize()` now takes an
+  optional `backend=` keyword, so callers can pick either graph backend
+  explicitly instead of `optimize.py` being hardwired to `networkx`.
+- **Domain-specific exception hierarchy** (`exceptions.py`): every error
+  the compiler itself raises now derives from `CvzxError`, letting
+  callers catch any internal compiler failure with a single
+  `except CvzxError:` while still narrowing to a specific failure mode --
+  `ParameterError` (`ParameterConflictError`, `UnboundMeasurementError`,
+  `InvalidSymbolError`) for symbolic-parameter/feedforward problems,
+  `DiagramError` (`ArityMismatchError`, `ExpansionError`) for malformed
+  diagram structure, `RewriteError` (`RuleApplicationError`) for a
+  rewrite rule hitting a corrupted graph state, and `BackendError`
+  (`UnsupportedBackendError`) for an unavailable or invalid graph
+  backend. Wired into `CVZXGraph.validate_parameter_consistency()`,
+  `Parametrized._sync_feedforward_state()`, `Diagram.compose()`/
+  `TensorDiagram` contraction/`ContractedDiagram` construction,
+  `ChainReductionRule`/`FusionRule`'s internal "should not occur"
+  invariant checks, and `get_backend_modules()`, replacing the generic
+  `ValueError`s these previously raised.
 
 ### Changed
 
@@ -178,3 +200,24 @@ development on `main` to date, grouped by area rather than by commit.
   `rustworkx`'s types (surfacing as `import-not-found` and a downstream
   `no-any-return` in `rx_graph.py`/`rx_rewrite_rules.py`) even though
   `pyproject.toml` already listed it as a real dependency.
+- `optimize()`'s inner simplification loop
+  (`_simplify_to_fixed_point`) had no round cap, unlike every other loop
+  in the pipeline -- a rule interaction that never reaches a true fixed
+  point could hang effectively forever instead of returning a
+  not-fully-simplified result. Root cause of one such hang:
+  `FusionRule._apply_contracted`'s `special_case` branch swaps
+  `first_id`/`second_id` but kept reading the stale `first_attrs`
+  captured before the swap, always seeing `phase=None` and silently
+  no-op'ing the same match forever (fixed in both backends).
+- `ChainReductionRule.apply_single` reset every non-surviving chain
+  member to a same-arity zero-phase spider, which is only a genuine,
+  prunable identity at arity `(1, 1)`; for wider gates
+  (`ControlledSumGate`, `BeamsplitterGate`, ...) the leftover node was
+  never pruned and stayed stranded in the diagram. Now falls back to the
+  general splice-and-flatten path for any non-`(1, 1)` chain, in both
+  backends.
+- `tests/test_optimize.py::test_squeezing_absorption_folds_tau_into_terminal_phase`
+  asserted the wrong direction for `TerminalAbsorptionRule`'s squeezing
+  absorption (dividing by `tau**degree` instead of multiplying),
+  contradicting the codebase's own established, independently tested
+  convention for a `QSpider` state.

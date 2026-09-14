@@ -10,6 +10,8 @@ from typing import Any, ClassVar
 
 from sympy import Expr, Poly, S, Symbol, symbols, sympify
 
+from cvzx.exceptions import ArityMismatchError, InvalidSymbolError
+
 
 class ZxPoly(Poly):
     """Real polynomial in one variable for CV ZX calculus phase functions.
@@ -441,9 +443,9 @@ class ProperDiagram(Diagram):
 
         Raises
         ------
-        ValueError
-            If the connectivity dictionary coherent with the inputs of
-            self and/or the outputs of the input diagram.
+        ArityMismatchError
+            If the connectivity dictionary isn't coherent with the inputs
+            of self and/or the outputs of the input diagram.
         """
         if connectivity is None:
             connectivity = {k: k for k in range(self.num_inputs)}
@@ -452,14 +454,14 @@ class ProperDiagram(Diagram):
         keys.sort()
         if keys != list(range(self.num_inputs)):
             msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         values = list(connectivity.values())
         values.sort()
         if values != list(range(other.num_outputs)):
             msg = (
                 "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
             )
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
             old_connectivity = dict(other.connectivity)
@@ -591,7 +593,7 @@ class ContractedDiagram(Diagram):
 
         Raises
         ------
-        ValueError
+        ArityMismatchError
             If I1, J1, I2, or J2 contains duplicate indices.
             If \|I1\| != \|I2\| or \|J1\| != \|J2\|.
             If \|I1\| = \|I2\| = \|J1\| = \|J2\| = 0.
@@ -612,55 +614,55 @@ class ContractedDiagram(Diagram):
         # Check uniqueness of indices of the first diagram
         if len(set(I1)) != len(I1):
             msg = f"Output wires of the first diagram {I1} contain duplicate indices"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if len(set(J1)) != len(J1):
             msg = f"Input wires of the first diagram {J1} contain duplicate indices"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
 
         # Check uniqueness of indices of the second diagram
         if len(set(I2)) != len(I2):
             msg = f"Output wires of the second diagram {I2} contain duplicate indices"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if len(set(J2)) != len(J2):
             msg = f"Input wires of the second diagram {J2} contain duplicate indices"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
 
         # Validate lengths match
         if len(I1) != len(I2):
             msg = f"I1 length ({len(I1)}) must equal I2 length ({len(I2)})"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if len(J1) != len(J2):
             msg_0 = f"J1 length ({len(J1)}) must equal J2 length ({len(J2)})"
-            raise ValueError(msg_0)
+            raise ArityMismatchError(msg_0)
 
         # Validate I1, I2, J1 and J2 are not all empty
         if not I1 and not I2 and not J1 and not J2:
             msg = "A contraction diagam must have at least one contraction link."
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
 
         # Validate I1 indices are within first's outputs
         for idx in self.I1:
             if idx < 0 or idx >= self.first.num_outputs:
                 msg_1 = f"I1 index {idx} out of range for first diagram outputs [0, {self.first.num_outputs})"
-                raise ValueError(msg_1)
+                raise ArityMismatchError(msg_1)
 
         # Validate I2 indices are within second's inputs
         for idx in self.I2:
             if idx < 0 or idx >= self.second.num_inputs:
                 msg_2 = f"I2 index {idx} out of range for second diagram inputs [0, {self.second.num_inputs})"
-                raise ValueError(msg_2)
+                raise ArityMismatchError(msg_2)
 
         # Validate J1 indices are within first's inputs
         for idx in self.J1:
             if idx < 0 or idx >= self.first.num_inputs:
                 msg_3 = f"J1 index {idx} out of range for first diagram inputs [0, {self.first.num_inputs})"
-                raise ValueError(msg_3)
+                raise ArityMismatchError(msg_3)
 
         # Validate J2 indices are within second's outputs
         for idx in self.J2:
             if idx < 0 or idx >= self.second.num_outputs:
                 msg_4 = f"J2 index {idx} out of range for second diagram outputs [0, {self.second.num_outputs})"
-                raise ValueError(msg_4)
+                raise ArityMismatchError(msg_4)
 
         # Determine which inputs/outputs remain external
         # Inputs: all inputs from first diagram EXCEPT those in J1
@@ -712,9 +714,9 @@ class ContractedDiagram(Diagram):
 
         Raises
         ------
-        ValueError
-            If the connectivity dictionary coherent with the inputs of
-            self and/or the outputs of the input diagram.
+        ArityMismatchError
+            If the connectivity dictionary isn't coherent with the inputs
+            of self and/or the outputs of the input diagram.
         """
         if connectivity is None:
             connectivity = {k: k for k in range(self.num_inputs)}
@@ -723,14 +725,14 @@ class ContractedDiagram(Diagram):
         keys.sort()
         if keys != list(range(self.num_inputs)):
             msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         values = list(connectivity.values())
         values.sort()
         if values != list(range(other.num_outputs)):
             msg = (
                 "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
             )
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
             old_connectivity = other.connectivity
@@ -855,7 +857,7 @@ class TensorDiagram(Diagram):
 
         Raises
         ------
-        ValueError
+        ArityMismatchError
             If diagram_pairs is empty.
             If first diagram index is out of range.
             If second diagram index is out of range.
@@ -882,7 +884,7 @@ class TensorDiagram(Diagram):
         """
         if not diagram_pairs:
             msg = "diagram_pairs cannot be empty"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
 
         # Make a mutable copy of the diagrams list
         diagrams = list(self.diagrams)
@@ -894,10 +896,10 @@ class TensorDiagram(Diagram):
         # Validate diagram indices in the tensor product
         if first_idx < 0 or first_idx >= len(diagrams):
             msg = f"First diagram index {first_idx} out of range [0, {len(diagrams) - 1}]"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if second_idx < 0 or second_idx >= len(diagrams):
             msg = f"Second diagram index {second_idx} out of range [0, {len(diagrams) - 1}]"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
 
         # Check that diagrams are consecutive
         if abs(first_idx - second_idx) != 1:
@@ -905,7 +907,7 @@ class TensorDiagram(Diagram):
                 f"Diagrams {first_idx} and {second_idx} are not consecutive. "
                 f"Contraction requires consecutive diagrams."
             )
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
 
         first = diagrams[first_idx]
         second = diagrams[second_idx]
@@ -914,44 +916,44 @@ class TensorDiagram(Diagram):
         for w in f_output_wires:
             if w < 0 or w >= first.num_outputs:
                 msg = f"Output wire {w} out of range [0, {first.num_outputs - 1}] for diagram {first_idx}"
-                raise ValueError(msg)
+                raise ArityMismatchError(msg)
         for w in f_input_wires:
             if w < 0 or w >= first.num_inputs:
                 msg = f"Input wire {w} out of range [0, {second.num_inputs - 1}] for diagram {first_idx}"
-                raise ValueError(msg)
+                raise ArityMismatchError(msg)
         # Validate wire indices for the second diagram
         for w in s_output_wires:
             if w < 0 or w >= second.num_outputs:
                 msg = f"Input wire {w} out of range [0, {first.num_inputs - 1}] for diagram {second_idx}"
-                raise ValueError(msg)
+                raise ArityMismatchError(msg)
         for w in s_input_wires:
             if w < 0 or w >= second.num_inputs:
                 msg = f"Output wire {w} out of range [0, {second.num_outputs - 1}] for diagram {second_idx}"
-                raise ValueError(msg)
+                raise ArityMismatchError(msg)
 
         # Validate lengths match
         if len(f_output_wires) != len(s_input_wires):
             msg_0 = f"I1 length ({len(f_output_wires)}) must equal I2 length ({len(s_input_wires)})"
-            raise ValueError(msg_0)
+            raise ArityMismatchError(msg_0)
         if len(f_input_wires) != len(s_output_wires):
             msg_1 = f"J1 length ({len(f_input_wires)}) must equal J2 length ({len(s_output_wires)})"
-            raise ValueError(msg_1)
+            raise ArityMismatchError(msg_1)
 
         # Check uniqueness of indices of the first diagram
         if len(set(f_output_wires)) != len(f_output_wires):
             msg = f"Output wires of the first diagram {f_output_wires} contain duplicate indices"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if len(set(f_input_wires)) != len(f_input_wires):
             msg = f"Input wires of the first diagram {f_input_wires} contain duplicate indices"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
 
         # Check uniqueness of indices of the second diagram
         if len(set(s_output_wires)) != len(s_output_wires):
             msg = f"Output wires of the second diagram {s_output_wires} contain duplicate indices"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if len(set(s_input_wires)) != len(s_input_wires):
             msg = f"Input wires of the second diagram {s_input_wires} contain duplicate indices"
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
 
         # Replace the two diagrams with the contracted one
         diagrams[first_idx : second_idx + 1] = [
@@ -997,9 +999,9 @@ class TensorDiagram(Diagram):
 
         Raises
         ------
-        ValueError
-            If the connectivity dictionary coherent with the inputs of
-            self and/or the outputs of the input diagram.
+        ArityMismatchError
+            If the connectivity dictionary isn't coherent with the inputs
+            of self and/or the outputs of the input diagram.
         """
         if connectivity is None:
             connectivity = {k: k for k in range(self.num_inputs)}
@@ -1008,14 +1010,14 @@ class TensorDiagram(Diagram):
         keys.sort()
         if keys != list(range(self.num_inputs)):
             msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         values = list(connectivity.values())
         values.sort()
         if values != list(range(other.num_outputs)):
             msg = (
                 "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
             )
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
             old_connectivity = other.connectivity
@@ -1165,9 +1167,9 @@ class CompositionDiagram(Diagram):
 
         Raises
         ------
-        ValueError
-            If the connectivity dictionary coherent with the inputs of
-            self and/or the outputs of the input diagram.
+        ArityMismatchError
+            If the connectivity dictionary isn't coherent with the inputs
+            of self and/or the outputs of the input diagram.
         """
         if connectivity is None:
             connectivity = {k: k for k in range(self.num_inputs)}
@@ -1176,14 +1178,14 @@ class CompositionDiagram(Diagram):
         keys.sort()
         if keys != list(range(self.num_inputs)):
             msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         values = list(connectivity.values())
         values.sort()
         if values != list(range(other.num_outputs)):
             msg = (
                 "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
             )
-            raise ValueError(msg)
+            raise ArityMismatchError(msg)
         # Composition
         diagrams = list(self.diagrams)
         if isinstance(other, CompositionDiagram):
@@ -1247,7 +1249,7 @@ class CompositionDiagram(Diagram):
 
         Raises
         ------
-        ValueError
+        ArityMismatchError
             If any consecutive diagrams have mismatched input/output counts.
             If the connectivity dictionary is coherent with the input/output
                 of diagrams.
@@ -1261,7 +1263,7 @@ class CompositionDiagram(Diagram):
                     f"Cannot compose diagram {i} (outputs={first.num_outputs}) "
                     f"with diagram {i + 1} (inputs={second.num_inputs})"
                 )
-                raise ValueError(msg)
+                raise ArityMismatchError(msg)
         self._num_inputs = self.diagrams[0].num_inputs
         self._num_outputs = self.diagrams[-1].num_outputs
         if not self.connectivity:
@@ -1277,7 +1279,7 @@ class CompositionDiagram(Diagram):
                     "The keys of the connectivity dictionary do not correspond "
                     f"the input indices of the sub_diagram {i + 1}."
                 )
-                raise ValueError(msg)
+                raise ArityMismatchError(msg)
             # Check values
             values = list(self.connectivity[i].values())
             values.sort()
@@ -1286,7 +1288,7 @@ class CompositionDiagram(Diagram):
                     "The values of the connectivity dictionary do not "
                     f"correspond the output indices of the sub_diagram {i}."
                 )
-                raise ValueError(msg)
+                raise ArityMismatchError(msg)
 
     def __repr__(self) -> str:
         """Return string representation of the composition diagram.
@@ -1393,19 +1395,25 @@ class Parametrized:
         ------
         TypeError
             If `param_measurement_map` is not a `dict`.
+        InvalidSymbolError
+            If `param_measurement_map` references a symbol that is not
+            one of this object's own parameters.
         ValueError
             If any of `param_measurement_map`'s values is not a non-empty
-            `set`, if it references a symbol that is not one of this
-            object's parameters, or if the legacy `feedforward`/
-            `measurement_ids` fields are inconsistent with each other
-            (only checked when `param_measurement_map` is empty).
+            `set`, or if the legacy `feedforward`/`measurement_ids`
+            fields are inconsistent with each other (only checked when
+            `param_measurement_map` is empty).
         """
         if not isinstance(self.param_measurement_map, dict):
             msg = f"The param_measurement_map attribute must be a dict, got {type(self.param_measurement_map)}."
             raise TypeError(msg)
         if not self.param_measurement_map.keys() <= self.get_parameters():
-            msg = "The param_measurement_map attribute references symbols that are not parameters of this object."
-            raise ValueError(msg)
+            extra = self.param_measurement_map.keys() - self.get_parameters()
+            msg = (
+                f"param_measurement_map on {type(self).__name__} references symbol(s) {sorted(extra, key=str)} "
+                f"that are not among its own parameters {sorted(self.get_parameters(), key=str)}."
+            )
+            raise InvalidSymbolError(msg)
         for symbol, ids in self.param_measurement_map.items():
             if not isinstance(ids, set) or not ids:
                 msg = f"The param_measurement_map value for {symbol} must be a non-empty set, got {ids!r}."

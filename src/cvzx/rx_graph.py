@@ -36,6 +36,7 @@ from cvzx.base_gates import (
     VoidDiagram,
     ZxPoly,
 )
+from cvzx.exceptions import ParameterConflictError, UnboundMeasurementError
 from cvzx.gates import (
     ArbitraryGate,
     BeamsplitterGate,
@@ -451,9 +452,17 @@ class CVZXGraph:
         list[str]
             One message per violation found; empty if the graph is consistent.
         """
+        return [*self._symbol_conflict_violations(), *self._unbound_measurement_violations()]
+
+    def _symbol_conflict_violations(self) -> list[str]:
+        """Find symbols bound to conflicting measurement-id sets across nodes.
+
+        Returns
+        -------
+        list[str]
+        """
         violations: list[str] = []
         id_map = {self.graph[idx]["id"]: idx for idx in self.graph.node_indices()}
-
         for symbol, node_ids in self.registry.symbol_registry.items():
             if len(node_ids) < 2:  # ruff: ignore[magic-value-comparison]
                 continue
@@ -466,28 +475,46 @@ class CVZXGraph:
                     f"Symbol {symbol!r} is bound to conflicting measurement sets across nodes "
                     f"{sorted(node_ids)}: {bindings}."
                 )
+        return violations
 
-        violations.extend(
+    def _unbound_measurement_violations(self) -> list[str]:
+        """Find measurement IDs referenced by no registered measurement node.
+
+        Returns
+        -------
+        list[str]
+        """
+        return [
             f"measurement_to_feedforward_map references measurement id {measurement_id}, "
             "which is not a registered measurement node."
             for measurement_id in self.registry.measurement_to_feedforward_map
             if measurement_id not in self.registry.measurement_nodes
-        )
-
-        return violations
+        ]
 
     def validate_parameter_consistency(self) -> None:
         """Raise if `parameter_consistency_violations()` finds anything.
 
+        Symbol conflicts are checked (and raised) first, since an
+        unresolved conflict makes any measurement-existence finding
+        downstream of it suspect too.
+
         Raises
         ------
-        ValueError
-            Listing every violation found by :meth:`parameter_consistency_violations`.
+        ParameterConflictError
+            Listing every symbol bound to conflicting measurement-id sets.
+        UnboundMeasurementError
+            Listing every measurement id referenced by
+            `measurement_to_feedforward_map` that isn't a registered
+            measurement node.
         """
-        violations = self.parameter_consistency_violations()
-        if violations:
-            msg = "Parameter consistency violations found:\n" + "\n".join(violations)
-            raise ValueError(msg)
+        conflicts = self._symbol_conflict_violations()
+        if conflicts:
+            msg = "Parameter consistency violations found:\n" + "\n".join(conflicts)
+            raise ParameterConflictError(msg)
+        unbound = self._unbound_measurement_violations()
+        if unbound:
+            msg = "Parameter consistency violations found:\n" + "\n".join(unbound)
+            raise UnboundMeasurementError(msg)
 
     def copy(self) -> "CVZXGraph":
         """Return an independent copy of this ``CVZXGraph``.

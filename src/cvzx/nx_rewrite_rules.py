@@ -18,6 +18,7 @@ import networkx as nx
 from sympy import Expr, cos, pi, tan
 
 from cvzx.base_gates import Diagram, ZxPoly
+from cvzx.exceptions import RuleApplicationError
 from cvzx.nx_graph import (
     CVZXGraph,
     to_diagram,
@@ -1926,7 +1927,7 @@ class FusionRule(RewriteRule):
 
         Raises
         ------
-        ValueError
+        RuleApplicationError
             If `"shape"` is neither "contracted" nor "composition".
         """
         shape = match.get("shape", "contracted")
@@ -1936,7 +1937,7 @@ class FusionRule(RewriteRule):
             self._apply_terminal(cvzx_graph, match)
         else:
             msg = f"FusionRule.apply_single: unknown match shape {shape!r}"
-            raise ValueError(msg)
+            raise RuleApplicationError(msg)
 
     def _apply_contracted(self, cvzx_graph: CVZXGraph, match: dict) -> None:  # ruff: ignore[too-many-locals, complex-structure, too-many-branches, too-many-statements]
         """Fuse two same-color spiders in a ContractedDiagram in-place.
@@ -2743,7 +2744,7 @@ class ChainReductionRule(RewriteRule):
 
         Raises
         ------
-        ValueError
+        RuleApplicationError
             If `match["gate_type"]` is not a type `reduce_chain` recognizes
             (should not occur for a match produced by `match()`).
         """
@@ -2756,7 +2757,7 @@ class ChainReductionRule(RewriteRule):
         reduced_gate = self.reduce_chain(gate_type, values, gate_info)
         if reduced_gate is None:
             msg = f"reduce_chain: unrecognized gate_type {gate_type!r}"
-            raise ValueError(msg)
+            raise RuleApplicationError(msg)
 
         first_id = node_ids[0]
         first_attrs = graph.nodes[first_id]
@@ -2946,7 +2947,7 @@ class ChainReductionRule(RewriteRule):
 
         Raises
         ------
-        ValueError
+        RuleApplicationError
             If `gate_type` is 'Q', 'P', or 'CSUM' but `gate_info` is None
             (should not occur: those kinds always carry gate_info).
         """
@@ -2967,7 +2968,7 @@ class ChainReductionRule(RewriteRule):
         if gate_type == "Q":
             if gate_info is None:
                 msg = "get_gate_info returned no gate_info for a 'Q' node."
-                raise ValueError(msg)
+                raise RuleApplicationError(msg)
             total_phase = zero_phase
             for v in values:
                 total_phase += v
@@ -2982,7 +2983,7 @@ class ChainReductionRule(RewriteRule):
         if gate_type == "P":
             if gate_info is None:
                 msg = "get_gate_info returned no gate_info for a 'P' node."
-                raise ValueError(msg)
+                raise RuleApplicationError(msg)
             total_phase = ZxPoly({})
             for v in values:
                 total_phase += v
@@ -3057,7 +3058,7 @@ class ChainReductionRule(RewriteRule):
         if gate_type == "CSUM":
             if gate_info is None:
                 msg = "get_gate_info returned no gate_info for a 'CSUM' node."
-                raise ValueError(msg)
+                raise RuleApplicationError(msg)
             # Check that all ControlledSumGate gates have same control and target
             # We need to get this from the graph
             total = sum(values)

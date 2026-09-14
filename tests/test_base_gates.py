@@ -18,6 +18,7 @@ from cvzx.base_gates import (
     ZxPoly,
     flatten_composition,
 )
+from cvzx.exceptions import ArityMismatchError, InvalidSymbolError
 
 
 class TestFlattenComposition(unittest.TestCase):
@@ -280,7 +281,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(1, 1, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="diagram_pairs cannot be empty"):
+        with pytest.raises(ArityMismatchError, match="diagram_pairs cannot be empty"):
             tensor.partial_trace([])
 
     def test_first_index_out_of_range(self):
@@ -289,7 +290,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(1, 1, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="First diagram index 2 out of range"):
+        with pytest.raises(ArityMismatchError, match="First diagram index 2 out of range"):
             tensor.partial_trace([(2, [0], [0]), (3, [0], [0])])
 
     def test_second_index_out_of_range(self):
@@ -298,7 +299,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(1, 1, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Second diagram index 5 out of range"):
+        with pytest.raises(ArityMismatchError, match="Second diagram index 5 out of range"):
             tensor.partial_trace([(0, [0], [0]), (5, [0], [0])])
 
     def test_non_consecutive_diagrams(self):
@@ -308,7 +309,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d3 = Swap()
         tensor = TensorDiagram([d1, d2, d3])
 
-        with pytest.raises(ValueError, match="are not consecutive"):
+        with pytest.raises(ArityMismatchError, match="are not consecutive"):
             tensor.partial_trace([(0, [0], [0]), (2, [0], [0])])
 
     def test_duplicate_output_wires_first(self):
@@ -317,7 +318,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Output wires of the first diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
+        with pytest.raises(ArityMismatchError, match="Output wires of the first diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([(0, [0, 0], [0, 1]), (1, [0, 1], [0, 1])])
 
     def test_duplicate_input_wires_first(self):
@@ -326,7 +327,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Input wires of the first diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
+        with pytest.raises(ArityMismatchError, match="Input wires of the first diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([(0, [0, 1], [0, 0]), (1, [0, 1], [0, 1])])
 
     def test_duplicate_output_wires_second(self):
@@ -335,7 +336,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Output wires of the second diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
+        with pytest.raises(ArityMismatchError, match="Output wires of the second diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([(0, [0, 1], [0, 1]), (1, [0, 0], [0, 1])])
 
     def test_duplicate_input_wires_second(self):
@@ -344,7 +345,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Input wires of the second diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
+        with pytest.raises(ArityMismatchError, match="Input wires of the second diagram.*contain duplicate indices"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([(0, [0, 1], [0, 1]), (1, [0, 1], [0, 0])])
 
     def test_mismatched_i_lengths(self):
@@ -353,7 +354,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="I1 length.*must equal I2 length"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
+        with pytest.raises(ArityMismatchError, match="I1 length.*must equal I2 length"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([
                 (0, [0, 1], [0]),
                 (1, [0], [1]),
@@ -365,7 +366,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="J1 length.*must equal J2 length"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
+        with pytest.raises(ArityMismatchError, match="J1 length.*must equal J2 length"):  # ruff: ignore[pytest-raises-ambiguous-pattern]
             tensor.partial_trace([
                 (0, [0], [0, 1]),
                 (1, [0], [0]),
@@ -377,7 +378,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Output wire 5 out of range"):
+        with pytest.raises(ArityMismatchError, match="Output wire 5 out of range"):
             tensor.partial_trace([(0, [5], [0]), (1, [0], [0])])
 
     def test_input_wire_out_of_range_first(self):
@@ -386,7 +387,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(1, 1, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Input wire 5 out of range"):
+        with pytest.raises(ArityMismatchError, match="Input wire 5 out of range"):
             tensor.partial_trace([(0, [0], [5]), (1, [0], [0])])
 
     def test_output_wire_out_of_range_second(self):
@@ -395,7 +396,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(1, 1, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Input wire 5 out of range"):
+        with pytest.raises(ArityMismatchError, match="Input wire 5 out of range"):
             tensor.partial_trace([(0, [0], [0]), (1, [5], [0])])
 
     def test_input_wire_out_of_range_second(self):
@@ -404,7 +405,7 @@ class TestTensorDiagramPartialTraceExceptions:
         d2 = PSpider(2, 2, ZxPoly({}))
         tensor = TensorDiagram([d1, d2])
 
-        with pytest.raises(ValueError, match="Output wire 5 out of range"):
+        with pytest.raises(ArityMismatchError, match="Output wire 5 out of range"):
             tensor.partial_trace([(0, [0], [0]), (1, [0], [5])])
 
     def test_first_and_second_indices_swapped(self):
@@ -516,7 +517,7 @@ class TestParametrizedMixin:
         a, c = symbols("a c", real=True)
         phase = ZxPoly({1: a})
 
-        with pytest.raises(ValueError, match="references symbols that are not parameters"):
+        with pytest.raises(InvalidSymbolError, match="not among its own parameters"):
             QSpider(1, 1, phase, True, param_measurement_map={c: {1}})
 
     def test_substitute_parameters_filters_out_substituted_symbol(self):

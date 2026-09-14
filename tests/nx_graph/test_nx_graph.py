@@ -25,6 +25,7 @@ from cvzx.base_gates import (
     ZxPoly,
     flatten_composition,
 )
+from cvzx.exceptions import ParameterConflictError, UnboundMeasurementError
 from cvzx.gates import (
     BeamsplitterGate,
     ControlledSumGate,
@@ -228,7 +229,7 @@ class TestCVZXGraphParameterConsistency:
         assert len(violations) == 1
         assert "Symbol" in violations[0]
         assert "conflicting measurement sets" in violations[0]
-        with pytest.raises(ValueError, match="conflicting measurement sets"):
+        with pytest.raises(ParameterConflictError, match="conflicting measurement sets"):
             cvzx_graph.validate_parameter_consistency()
 
     def test_measurement_existence_violation(self):
@@ -249,7 +250,7 @@ class TestCVZXGraphParameterConsistency:
 
         assert len(violations) == 1
         assert "measurement id 999" in violations[0]
-        with pytest.raises(ValueError, match="measurement id 999"):
+        with pytest.raises(UnboundMeasurementError, match="measurement id 999"):
             cvzx_graph.validate_parameter_consistency()
 
     def test_no_conflict_when_bindings_agree(self):

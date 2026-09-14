@@ -7,9 +7,11 @@ resolves a `Backend` selector to that pair of modules so a single call
 site (e.g. `optimize()`) can stay backend-agnostic.
 """
 
+import importlib.util
 from types import ModuleType
 
 from cvzx.config import DEFAULT_BACKEND, Backend
+from cvzx.exceptions import UnsupportedBackendError
 
 
 def get_backend_modules(backend: Backend | str | None = None) -> tuple[Backend, ModuleType, ModuleType]:
@@ -29,8 +31,9 @@ def get_backend_modules(backend: Backend | str | None = None) -> tuple[Backend, 
 
     Raises
     ------
-    ValueError
-        If `backend` is not a valid `Backend` value.
+    UnsupportedBackendError
+        If `backend` is not a valid `Backend` value, or names a backend
+        whose package isn't installed.
     """
     if backend is None:
         chosen = DEFAULT_BACKEND
@@ -39,9 +42,12 @@ def get_backend_modules(backend: Backend | str | None = None) -> tuple[Backend, 
             chosen = Backend(backend)
         except ValueError as exc:
             msg = f"Unknown backend {backend!r}; expected one of {[b.value for b in Backend]}."
-            raise ValueError(msg) from exc
+            raise UnsupportedBackendError(msg) from exc
 
     if chosen == Backend.RUSTWORKX:
+        if importlib.util.find_spec("rustworkx") is None:
+            msg = "Backend.RUSTWORKX was requested, but the 'rustworkx' package isn't installed."
+            raise UnsupportedBackendError(msg)
         import cvzx.rx_graph as graph_mod  # ruff: ignore[import-outside-top-level]
         import cvzx.rx_rewrite_rules as rules_mod  # ruff: ignore[import-outside-top-level]
     else:
