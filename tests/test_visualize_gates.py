@@ -639,8 +639,8 @@ def feedforward_test():  # ruff: ignore[too-many-locals]
     contract = ContractedDiagram(PSpider(1, 2, zero_phase), QSpider(2, 1, zero_phase), [1], [0], [], [])
     tensor2 = TensorDiagram([contract, id_q])
     m1, m2 = symbols("m1 m2", real=True)
-    meas_diag1 = PSpider(1, 0, ZxPoly({1: -m1}))
-    meas_diag2 = QSpider(1, 0, ZxPoly({1: -m2}))
+    meas_diag1 = PSpider(1, 0, ZxPoly({1: -m1}), True)
+    meas_diag2 = QSpider(1, 0, ZxPoly({1: -m2}), True)
     tensor3 = TensorDiagram([
         DisplacementGate(
             m1 + I * m2, parametric=True, feedforward=True, measurement_ids={meas_diag1.id, meas_diag2.id}
@@ -847,7 +847,7 @@ def feedforward_params_all_gates_test():
     """
     print("Testing feedforward/measurement_ids on all parametrized gates...")
     m = symbols("m", real=True)
-    meas_leaf = QSpider(1, 0, ZxPoly({1: m}))
+    meas_leaf = QSpider(1, 0, ZxPoly({1: m}), True)
 
     gate_specs = [
         (DisplacementGate, {"alpha": m, "parametric": True}),
@@ -912,7 +912,7 @@ def nx_graph_roundtrip_test():
     """
     print("Testing nx_graph.py to_graph()/to_diagram() round-trip for all gates...")
     m = symbols("m", real=True)
-    meas_leaf = QSpider(1, 0, ZxPoly({1: m}))
+    meas_leaf = QSpider(1, 0, ZxPoly({1: m}), True)
 
     gates = [
         DisplacementGate(alpha=0.5 + 0.2j),

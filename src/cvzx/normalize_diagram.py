@@ -33,7 +33,7 @@ import math
 from typing import TYPE_CHECKING
 
 from cvzx.base_gates import CompositionDiagram, Diagram, QSpider, TensorDiagram, ZxPoly
-from cvzx.nx_graph import GateRegister, _reconstruct_proper_node, get_root_node, to_graph
+from cvzx.nx_graph import GateRegister, get_root_node, reconstruct_proper_node, to_graph
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -81,7 +81,7 @@ def _leaf_diagram(graph: nx.DiGraph, leaf_id: int, reg: GateRegister) -> Diagram
     Diagram
         The rebuilt leaf.
     """
-    return _reconstruct_proper_node(graph, leaf_id, reg)
+    return reconstruct_proper_node(graph, leaf_id, reg)
 
 
 def _resolve_input(graph: nx.DiGraph, node_id: int, port: int) -> tuple[int, int]:

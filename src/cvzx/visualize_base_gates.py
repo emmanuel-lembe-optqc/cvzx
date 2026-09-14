@@ -85,115 +85,6 @@ def _require[T](value: T | None, message: str) -> T:
     return value
 
 
-def _elide_voids(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-structure, too-many-return-statements]
-    """Strip `VoidDiagram` placeholders out of `diagram` for display.
-
-    A `VoidDiagram` is purely a bookkeeping artifact left behind by rewrite
-    rules to preserve port counts/indices after absorbing a real node into
-    its neighbor -- it carries no information a viewer should see. Drawing
-    it (even as an invisible node whose wires still get drawn, so real
-    neighbors stay visually connected) is a reasonable fallback, but it
-    still leaves empty boxes worth of layout space and, for a wire that is
-    void on *both* ends (fully absorbed, connecting nothing real to
-    nothing real), a stray floating arrow.
-
-    This rebuilds `diagram`'s container hierarchy in place, dropping void
-    leaves as it goes, rather than flattening to a leaf graph and
-    reconstructing chains from scratch. Preserving the hierarchy is what
-    keeps a tensor's lane count, a composition's element order, and a
-    contraction's first/second slots intact: a three-lane tensor stays a
-    three-lane tensor with each lane's voids removed, instead of the
-    lane count being re-derived from however many chains the leaf graph
-    happens to decompose into (which can differ, e.g. when a
-    non-square void -- a `(0,1)` or `(1,0)` placeholder from a terminal
-    absorption -- splits what was one visual lane into two, or when two
-    lanes happen to be joined by a surviving wire).
-
-    Each container is rebuilt as follows:
-
-    - `CompositionDiagram`: drop void children from `diagrams`, then
-      recompute `connectivity` from the remaining children's arities
-      (adjacent pair `(i, i+1)` maps the identity over the intersection
-      of slot `i`'s outputs and slot `i+1`'s inputs). If nothing real
-      remains, the whole composition collapses to a same-shaped
-      `VoidDiagram`; if exactly one child remains, that child is
-      returned directly.
-    - `TensorDiagram`: drop void children from `diagrams`. If every
-      child was a void, collapse to a same-shaped `VoidDiagram`; if any
-      real child remains, keep the tensor with the reduced child list
-      so its lane count and per-lane layout still come from the tensor
-      structure, not from a chain-count.
-    - `ContractedDiagram`: elide voids in `first` and `second`
-      independently, keeping `I1`/`I2`/`J1`/`J2` unchanged. A side that
-      reduces to a void stays a void in place, preserving the contract's
-      shape.
-    - Proper leaves (including `VoidDiagram` itself): returned as-is.
-      The caller decides what to do with them.
-
-    Parameters
-    ----------
-    diagram : Diagram
-        The diagram to elide voids from.
-
-    Returns
-    -------
-    Diagram
-        An equivalent diagram for display purposes, with all void content
-        removed from the parts of the hierarchy where it can be dropped
-        without changing container shapes. If `diagram` has no void
-        content, it is returned unchanged.
-    """
-    if isinstance(diagram, CompositionDiagram):
-        kept: list[Diagram] = []
-        for sub in diagram.diagrams:
-            stripped = _elide_voids(sub)
-            if isinstance(stripped, VoidDiagram):
-                continue
-            kept.append(stripped)
-
-        if not kept:
-            return VoidDiagram(diagram.num_inputs, diagram.num_outputs)
-        if len(kept) == 1:
-            return kept[0]
-
-        new_conn: dict[int, dict[int, int]] = {}
-        for i in range(len(kept) - 1):
-            left = kept[i]
-            right = kept[i + 1]
-            n = min(left.num_outputs, right.num_inputs)
-            new_conn[i] = {j: j for j in range(n)}
-        return CompositionDiagram(kept, new_conn)
-
-    if isinstance(diagram, TensorDiagram):
-        kept = []
-        all_void = True
-        for sub in diagram.diagrams:
-            stripped = _elide_voids(sub)
-            if not isinstance(stripped, VoidDiagram):
-                all_void = False
-            kept.append(stripped)
-
-        if all_void:
-            return VoidDiagram(diagram.num_inputs, diagram.num_outputs)
-        return TensorDiagram(kept)
-
-    if isinstance(diagram, ContractedDiagram):
-        new_first = _elide_voids(diagram.first)
-        new_second = _elide_voids(diagram.second)
-        if new_first is diagram.first and new_second is diagram.second:
-            return diagram
-        return ContractedDiagram(
-            first=new_first,
-            second=new_second,
-            I1=diagram.I1,
-            I2=diagram.I2,
-            J1=diagram.J1,
-            J2=diagram.J2,
-        )
-
-    return diagram
-
-
 @dataclass
 class VisualizerConfig:
     """Configuration for diagram visualization.
@@ -282,11 +173,6 @@ class DiagramVisualizer:
         plt.Figure
             Matplotlib figure.
         """
-        # Strip void placeholders before doing anything else, so neither
-        # the drawing below nor the registry/feedforward bookkeeping ever
-        # sees them -- see `_elide_voids`.
-        # diagram = _elide_voids(diagram)
-
         fig, ax = plt.subplots(figsize=(12, 8))
         ax.set_aspect("equal")
         ax.axis("off")
@@ -562,15 +448,17 @@ class DiagramVisualizer:
                                 if (comp_idx is None or comp_idx == 0)
                                 else input_positions[draw_kept_inputs.index(i)]
                             )
-                        input_i = patches.FancyArrowPatch(
-                            input_pos,
-                            (pivot[0] + arrow_length, pivot[1] + y_offset_in[i]),
-                            arrowstyle="->",
-                            ec="black",
-                            mutation_scale=20,
-                            linewidth=self.config.wire_width,
-                        )
-                        ax.add_patch(input_i)
+                        # A Hack to not draw outgoing arrows from void diagrams
+                        if input_pos:
+                            input_i = patches.FancyArrowPatch(
+                                input_pos,
+                                (pivot[0] + arrow_length, pivot[1] + y_offset_in[i]),
+                                arrowstyle="->",
+                                ec="black",
+                                mutation_scale=20,
+                                linewidth=self.config.wire_width,
+                            )
+                            ax.add_patch(input_i)
 
             # Draw output wires (right side)
             output_positions = [(pivot[0], pivot[1] + y_offset_out[i]) for i in range(diagram.num_outputs)]
@@ -587,6 +475,9 @@ class DiagramVisualizer:
                         )
                         ax.add_patch(output_i)
                 ax.plot()
+            # A Hack to not draw outgoing arrows from void diagrams
+            if is_void:
+                output_positions = [() for i in range(diagram.num_outputs)]  # type: ignore[misc]
         elif isinstance(diagram, Swap):
             output_positions, init_input_positions, radius = self._draw_swap(
                 ax, x, y, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs
@@ -1786,25 +1677,26 @@ class DiagramVisualizer:
                 x2, y2 = self.graph.nodes[node_id]["pos"]
                 r2 = self.graph.nodes[node_id]["radius"]
                 for meas_node in self.graph.nodes[node_id]["measurement_ids"]:
-                    x1, y1 = self.graph.nodes[meas_node]["pos"]
-                    r1 = self.graph.nodes[meas_node]["radius"]
-                    # Depending of the relative vertical position we change the
-                    # edges of the arrow of the classical link
-                    pos1 = (x1 + r1, y1 + r1)
-                    pos2 = (x2 - r2, y2 - r2)
-                    if y1 > y2:
-                        pos1 = (x1 + r1, y1 - r1)
-                        pos2 = (x2 - r2, y2 + r2)
-                    arrow = patches.FancyArrowPatch(
-                        pos1,
-                        pos2,
-                        arrowstyle="->",
-                        linestyle="dashed",
-                        ec="green",
-                        mutation_scale=20,
-                        linewidth=self.config.wire_width,
-                    )
-                    ax.add_patch(arrow)
+                    if meas_node in self.graph.nodes:
+                        x1, y1 = self.graph.nodes[meas_node]["pos"]
+                        r1 = self.graph.nodes[meas_node]["radius"]
+                        # Depending of the relative vertical position we change the
+                        # edges of the arrow of the classical link
+                        pos1 = (x1 + r1, y1 + r1)
+                        pos2 = (x2 - r2, y2 - r2)
+                        if y1 > y2:
+                            pos1 = (x1 + r1, y1 - r1)
+                            pos2 = (x2 - r2, y2 + r2)
+                        arrow = patches.FancyArrowPatch(
+                            pos1,
+                            pos2,
+                            arrowstyle="->",
+                            linestyle="dashed",
+                            ec="green",
+                            mutation_scale=20,
+                            linewidth=self.config.wire_width,
+                        )
+                        ax.add_patch(arrow)
 
     def _format_phase(self, phase: ZxPoly | str) -> str:  # ruff: ignore[too-many-branches]
         """Format phase polynomial or Compact Diagram label for display.

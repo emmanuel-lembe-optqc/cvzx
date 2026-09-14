@@ -6,8 +6,9 @@ from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import count
+from typing import Any, ClassVar
 
-from sympy import Expr, Poly, S, symbols, sympify
+from sympy import Expr, Poly, S, Symbol, symbols, sympify
 
 
 class ZxPoly(Poly):
@@ -127,16 +128,17 @@ class ZxPoly(Poly):
             super().__init__(*args, **kwargs)
 
     @property
-    def coeffs(self) -> dict[int, float | Expr]:
+    def coeffs(self) -> dict[int, float | complex | Expr]:
         """Coefficients as a dictionary, for backward compatibility.
 
         Returns a dictionary mapping degree → coefficient. Zero coefficients
         are omitted. Numeric coefficients are converted to Python floats
-        for compatibility, while symbolic coefficients remain as sympy expressions.
+        (or `complex`, if the coefficient has a nonzero imaginary part) for
+        compatibility, while symbolic coefficients remain as sympy expressions.
 
         Returns
         -------
-        dict[int, float | Expr]
+        dict[int, float | complex | Expr]
             Dictionary mapping degree to coefficient. Returns empty dict
             for the zero polynomial.
 
@@ -159,11 +161,36 @@ class ZxPoly(Poly):
         for monom, coeff in self.terms():
             degree = monom[0]  # For univariate
             # Convert numeric coefficients to Python floats for compatibility
+            # -- unless the coefficient is genuinely complex (nonzero
+            # imaginary part), in which case `float()` would raise.
             if coeff.is_number and not coeff.is_symbol:
-                coeff_dict[degree] = float(coeff)
+                as_complex = complex(coeff)
+                coeff_dict[degree] = as_complex.real if as_complex.imag == 0 else as_complex
             else:
                 coeff_dict[degree] = coeff
         return coeff_dict
+
+    def is_parametric(self) -> bool:
+        """Check if the phase is parametric or not.
+
+        Returns
+        -------
+        bool
+        """
+        return any(isinstance(coef, Expr) for coef in self.coeffs.values())
+
+    def get_parameters(self) -> set[Symbol]:
+        """Return the free symbols used in the polynomial's coefficients.
+
+        Deliberately not `self.free_symbols`: sympy's `Poly.free_symbols`
+        also includes the polynomial's own generator variable, which is
+        never a gate parameter.
+
+        Returns
+        -------
+        set[Symbol]
+        """
+        return {symbol for coef in self.coeffs.values() if isinstance(coef, Expr) for symbol in coef.free_symbols}
 
     def __repr__(self) -> str:
         """Return a string representation of the polynomial.
@@ -265,7 +292,7 @@ class Diagram(ABC):
     id_counter = count(1)
 
     def __init__(self) -> None:
-        self.id = next(Diagram.id_counter)  # type: ignore[misc]
+        self.id = next(Diagram.id_counter)
 
     @abstractmethod
     def tensor(self, other: "Diagram") -> "Diagram":
@@ -333,17 +360,6 @@ class Diagram(ABC):
         bool
             True if diagram is one of the basic generators.
         """
-
-    @property
-    def id(self) -> int:
-        """ID of the diagram.
-
-        Returns
-        -------
-            int
-                ID of the diagram.
-        """
-        return self.id
 
     @property
     @abstractmethod
@@ -502,7 +518,7 @@ class ContractedDiagram(Diagram):
     r"""Diagram resulting from contracting (tracing) outputs to inputs in both directions.
 
     This is the output of the contraction rule apply to a tensor diagram of two diagrams D1 and D2
-    from [3] Eq. (51)::
+    from [1] Eq. (51)::
 
         ∫∫ ds̄ dȳ ⟨s_i\| D1 \|s_j⟩ ⊗ q⟨s_j\| D2 \|s_i⟩
 
@@ -820,7 +836,7 @@ class TensorDiagram(Diagram):
         to specified input wires of other diagrams. The contracted diagrams must be
         consecutive in the tensor product.
 
-        This implements diagram contraction as defined in [3] Eq. (51)::
+        This implements diagram contraction as defined in [1] Eq. (51)::
 
             ∫∫ ds̄ dȳ ⟨s_i\| D1 \|s_j⟩ ⊗ q⟨s_j\| D2 \|s_i⟩
 
@@ -1283,8 +1299,219 @@ class CompositionDiagram(Diagram):
         return f"Compose({self.diagrams})"
 
 
+def _substitute_value(
+    value: Any,  # ruff: ignore[any-type]
+    mapping: dict[Symbol, Any],
+) -> Any:  # ruff: ignore[any-type]
+    """Apply a symbol substitution to a phase/parameter value.
+
+    Handles `ZxPoly` specially since `sympy.Poly.subs` returns a plain
+    `Add`, not a `Poly` -- substitution is done coefficient-wise instead.
+
+    Parameters
+    ----------
+    value : Any
+        The current field value (a `ZxPoly`, a plain `Expr`, or a
+        non-symbolic value passed through unchanged).
+    mapping : dict[Symbol, Any]
+        Mapping from symbol to replacement value.
+
+    Returns
+    -------
+    Any
+    """
+    if isinstance(value, ZxPoly):
+        return ZxPoly({
+            degree: sympify(coeff).subs(mapping) if isinstance(coeff, Expr) else coeff
+            for degree, coeff in value.coeffs.items()
+        })
+    if isinstance(value, Expr):
+        return value.subs(mapping)
+    return value
+
+
+class Parametrized:
+    """Mixin providing shared symbolic-parameter bookkeeping.
+
+    Adds `param_measurement_map` handling (feedforward provenance: which
+    measurement outcomes a symbolic parameter depends on) uniformly across
+    `QSpider`, `PSpider`, and every `CompactDiagram` gate subclass. This is
+    a plain method-only mixin, not a dataclass itself: dataclass field
+    ordering means fields can't be hoisted into a shared base once a
+    subclass adds a non-default field, so each concrete class keeps
+    declaring its own `parametric`/`feedforward`/`measurement_ids`/
+    `param_measurement_map` fields, but every method touching them lives
+    here.
+
+    Every concrete class using this mixin must declare a class-level
+    `_param_fields: ClassVar[tuple[str, ...]]` naming its symbolic-value
+    attributes (e.g. `("phase",)` for a spider, `("alpha", "beta", "lam")`
+    for `ArbitraryGate`), and implement `_rebuild(values, new_map)` to
+    construct a new instance from substituted field values.
+    """
+
+    _param_fields: ClassVar[tuple[str, ...]] = ()
+
+    param_measurement_map: dict[Symbol, set[int]]
+    parametric: bool
+    feedforward: bool
+    measurement_ids: set[int] | None
+
+    def get_parameters(self) -> set[Symbol]:
+        """Return every symbolic parameter used by this object's fields.
+
+        Returns
+        -------
+        set[Symbol]
+        """
+        parameters: set[Symbol] = set()
+        for field_name in self._param_fields:
+            value = getattr(self, field_name)
+            if isinstance(value, ZxPoly):
+                parameters |= value.get_parameters()
+            elif isinstance(value, Expr):
+                parameters |= value.free_symbols
+        return parameters
+
+    @property
+    def is_parametric(self) -> bool:
+        """Whether this object carries any free symbolic parameter.
+
+        Not to be confused with `ZxPoly.is_parametric()`, a method on a
+        different class checking the same notion for a bare polynomial.
+
+        Returns
+        -------
+        bool
+        """
+        return bool(self.get_parameters())
+
+    def _sync_feedforward_state(self) -> None:
+        """Validate `param_measurement_map` and derive dependent fields.
+
+        Raises
+        ------
+        TypeError
+            If `param_measurement_map` is not a `dict`.
+        ValueError
+            If any of `param_measurement_map`'s values is not a non-empty
+            `set`, if it references a symbol that is not one of this
+            object's parameters, or if the legacy `feedforward`/
+            `measurement_ids` fields are inconsistent with each other
+            (only checked when `param_measurement_map` is empty).
+        """
+        if not isinstance(self.param_measurement_map, dict):
+            msg = f"The param_measurement_map attribute must be a dict, got {type(self.param_measurement_map)}."
+            raise TypeError(msg)
+        if not self.param_measurement_map.keys() <= self.get_parameters():
+            msg = "The param_measurement_map attribute references symbols that are not parameters of this object."
+            raise ValueError(msg)
+        for symbol, ids in self.param_measurement_map.items():
+            if not isinstance(ids, set) or not ids:
+                msg = f"The param_measurement_map value for {symbol} must be a non-empty set, got {ids!r}."
+                raise ValueError(msg)
+
+        if self.param_measurement_map:
+            self.measurement_ids = set().union(*self.param_measurement_map.values())
+            self.feedforward = bool(self.measurement_ids)
+            return
+
+        if self.feedforward:
+            if not isinstance(self.measurement_ids, set):
+                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
+                raise ValueError(msg)
+            if not self.measurement_ids:
+                msg = "The measurement_ids attribute can not be empty."
+                raise ValueError(msg)
+
+    def slice_param_map(self, params: set[Symbol]) -> dict[Symbol, set[int]]:
+        """Restrict `param_measurement_map` to a subset of symbols.
+
+        Used by `expand()` to hand each spawned sub-object exactly the
+        provenance entries relevant to its own parameters.
+
+        Parameters
+        ----------
+        params : set[Symbol]
+            Symbols relevant to the sub-object being constructed.
+
+        Returns
+        -------
+        dict[Symbol, set[int]]
+            A fresh dict (values copied, not aliased) restricted to `params`.
+        """
+        return {symbol: set(ids) for symbol, ids in self.param_measurement_map.items() if symbol in params}
+
+    def _legacy_feedforward_kwargs(self) -> dict[str, Any]:
+        """Carry forward `feedforward`/`measurement_ids` for a rebuild.
+
+        These stay meaningful independently of `param_measurement_map`
+        when the map is empty (see `_sync_feedforward_state`), so a
+        rebuilt instance must start from the same legacy values before
+        `__post_init__` re-derives them from any surviving map entries.
+
+        Returns
+        -------
+        dict[str, Any]
+        """
+        return {"feedforward": self.feedforward, "measurement_ids": self.measurement_ids}
+
+    def substitute_parameters(self, mapping: dict[Symbol, Any]) -> "Parametrized":
+        """Substitute symbolic parameters with concrete or other symbolic values.
+
+        Parameters
+        ----------
+        mapping : dict[Symbol, Any]
+            Mapping from symbol to replacement value (numeric or symbolic).
+
+        Returns
+        -------
+        Parametrized
+            A new instance with the substitution applied.
+        """
+        values = {
+            field_name: _substitute_value(getattr(self, field_name), mapping) for field_name in self._param_fields
+        }
+        new_map = {symbol: ids for symbol, ids in self.param_measurement_map.items() if symbol not in mapping}
+        return self._rebuild(values, new_map)
+
+    def evaluate(self, **kwargs: Any) -> "Parametrized":  # ruff: ignore[any-type]
+        """Substitute symbolic parameters by name.
+
+        Parameters
+        ----------
+        **kwargs : Any
+            Replacement values keyed by symbol name.
+
+        Returns
+        -------
+        Parametrized
+            A new instance with the substitution applied.
+        """
+        mapping = {Symbol(name): value for name, value in kwargs.items()}
+        return self.substitute_parameters(mapping)
+
+    def _rebuild(self, values: dict[str, Any], new_map: dict[Symbol, set[int]]) -> "Parametrized":
+        """Construct a new instance from substituted field values.
+
+        Must be implemented by every concrete class using this mixin.
+
+        Parameters
+        ----------
+        values : dict[str, Any]
+            New values for each name in `_param_fields`.
+        new_map : dict[Symbol, set[int]]
+            `param_measurement_map` filtered to still-symbolic parameters.
+
+        Returns
+        -------
+        Parametrized
+        """
+        raise NotImplementedError
+
+
 @dataclass
-class QSpider(ProperDiagram):
+class QSpider(ProperDiagram, Parametrized):
     r"""q-spider: position-basis spider with polynomial phase.
 
     Represents the diagram:
@@ -1303,8 +1530,14 @@ class QSpider(ProperDiagram):
     """
 
     phase: ZxPoly
+    parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     _num_inputs: int
     _num_outputs: int
+    param_measurement_map: dict[Symbol, set[int]] = field(default_factory=dict)
+
+    _param_fields: ClassVar[tuple[str, ...]] = ("phase",)
 
     def conjugate(self) -> Diagram:
         """Conjugate: negate phase, keep q-spider type.
@@ -1314,7 +1547,15 @@ class QSpider(ProperDiagram):
         QSpider
             New QSpider with negated phase.
         """
-        return QSpider(phase=-self.phase, _num_inputs=self.num_inputs, _num_outputs=self.num_outputs)
+        return QSpider(
+            phase=-self.phase,
+            parametric=self.parametric,
+            feedforward=self.feedforward,
+            measurement_ids=self.measurement_ids,
+            _num_inputs=self.num_inputs,
+            _num_outputs=self.num_outputs,
+            param_measurement_map=dict(self.param_measurement_map),
+        )
 
     def __repr__(self) -> str:
         """Return string representation of the q-spider.
@@ -1328,9 +1569,36 @@ class QSpider(ProperDiagram):
             return f"QSpider(num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
         return f"QSpider(f(x)={self.phase}, num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
 
+    def __post_init__(self) -> None:
+        """Initialize the q-spider and validate parameters.
+
+        Raises
+        ------
+        ValueError
+            If `parametric` doesn't match whether `phase` is actually
+            parametric, or if `_sync_feedforward_state` finds an
+            inconsistency (see its own docstring).
+        """
+        if self.parametric != self.phase.is_parametric():
+            msg = "The parametric attribute is not accurate."
+            raise ValueError(msg)
+        self._sync_feedforward_state()
+        super().__post_init__()
+
+    def _rebuild(self, values: dict[str, Any], new_map: dict[Symbol, set[int]]) -> "QSpider":
+        phase = values["phase"]
+        return QSpider(
+            phase=phase,
+            parametric=phase.is_parametric(),
+            _num_inputs=self.num_inputs,
+            _num_outputs=self.num_outputs,
+            param_measurement_map=new_map,
+            **self._legacy_feedforward_kwargs(),
+        )
+
 
 @dataclass
-class PSpider(ProperDiagram):
+class PSpider(ProperDiagram, Parametrized):
     r"""p-spider: momentum-basis spider with polynomial phase.
 
     Represents the diagram:
@@ -1350,8 +1618,14 @@ class PSpider(ProperDiagram):
     """
 
     phase: ZxPoly
+    parametric: bool = False
+    feedforward: bool = False
+    measurement_ids: set[int] | None = None
     _num_inputs: int
     _num_outputs: int
+    param_measurement_map: dict[Symbol, set[int]] = field(default_factory=dict)
+
+    _param_fields: ClassVar[tuple[str, ...]] = ("phase",)
 
     def conjugate(self) -> Diagram:
         """Conjugate: negate phase, keep p-spider type.
@@ -1361,7 +1635,15 @@ class PSpider(ProperDiagram):
         PSpider
             New PSpider with negated phase.
         """
-        return PSpider(phase=-self.phase, _num_inputs=self.num_inputs, _num_outputs=self.num_outputs)
+        return PSpider(
+            phase=-self.phase,
+            parametric=self.parametric,
+            feedforward=self.feedforward,
+            measurement_ids=self.measurement_ids,
+            _num_inputs=self.num_inputs,
+            _num_outputs=self.num_outputs,
+            param_measurement_map=dict(self.param_measurement_map),
+        )
 
     def __repr__(self) -> str:
         """Return string representation of the p-spider.
@@ -1374,6 +1656,33 @@ class PSpider(ProperDiagram):
         if self.phase.is_zero:
             return f"PSpider(num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
         return f"PSpider(f(x)={self.phase}, num_imputs={self.num_inputs}, num_outputs={self.num_outputs})"
+
+    def __post_init__(self) -> None:
+        """Initialize the p-spider and validate parameters.
+
+        Raises
+        ------
+        ValueError
+            If `parametric` doesn't match whether `phase` is actually
+            parametric, or if `_sync_feedforward_state` finds an
+            inconsistency (see its own docstring).
+        """
+        if self.parametric != self.phase.is_parametric():
+            msg = "The parametric attribute is not accurate."
+            raise ValueError(msg)
+        self._sync_feedforward_state()
+        super().__post_init__()
+
+    def _rebuild(self, values: dict[str, Any], new_map: dict[Symbol, set[int]]) -> "PSpider":
+        phase = values["phase"]
+        return PSpider(
+            phase=phase,
+            parametric=phase.is_parametric(),
+            _num_inputs=self.num_inputs,
+            _num_outputs=self.num_outputs,
+            param_measurement_map=new_map,
+            **self._legacy_feedforward_kwargs(),
+        )
 
 
 @dataclass

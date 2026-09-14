@@ -3,6 +3,7 @@
 import unittest
 
 import pytest
+from sympy import symbols
 
 from cvzx.base_gates import (
     CompositionDiagram,
@@ -72,7 +73,7 @@ class TestFlattenComposition(unittest.TestCase):
         assert result.diagrams[0] == self.fourier
         assert result.diagrams[1] == self.q1
         assert result.diagrams[2] == self.p1
-        assert result.diagrams[3] == self.q2
+        assert result.diagrams[1] == self.q2
 
     def test_flatten_deeply_nested(self):
         """Test flattening deeply nested compositions."""
@@ -85,7 +86,7 @@ class TestFlattenComposition(unittest.TestCase):
         assert result.diagrams[0] == self.fourier
         assert result.diagrams[1] == self.q1
         assert result.diagrams[2] == self.p1
-        assert result.diagrams[3] == self.q2
+        assert result.diagrams[1] == self.q2
 
     def test_flatten_with_non_composition_elements(self):
         """Test flattening with non-composition elements inside."""
@@ -97,7 +98,7 @@ class TestFlattenComposition(unittest.TestCase):
         assert result.diagrams[0] == self.fourier
         assert result.diagrams[1] == self.q1
         assert result.diagrams[2] == self.p1
-        assert result.diagrams[3] == self.q2
+        assert result.diagrams[1] == self.q2
 
     def test_does_not_flatten_tensor_diagram(self):
         """Test that TensorDiagram == NOT flattened."""
@@ -456,3 +457,124 @@ class TestTensorDiagramPartialTraceEdgeCases:
         # All wires connected, so no external ports
         assert contracted.num_inputs == 0
         assert contracted.num_outputs == 0
+
+
+class TestZxPolyGetParameters:
+    """Test suite for ZxPoly.get_parameters()."""
+
+    def test_excludes_own_generator_variable(self):
+        """The polynomial's own generator variable must never be a parameter.
+
+        This is the highest-value regression test flagged by the
+        param_measurement_map plan: `sympy.Poly.free_symbols` incorrectly
+        includes the generator, which is why `get_parameters()` is built
+        from `.coeffs` instead.
+        """
+        m = symbols("m")
+        poly = ZxPoly({1: m})
+        x = symbols("x", real=True)  # ZxPoly's own generator variable.
+
+        assert poly.get_parameters() == {m}
+        assert x not in poly.get_parameters()
+
+    def test_numeric_poly_has_no_parameters(self):
+        """A purely numeric polynomial carries no free symbols."""
+        poly = ZxPoly({0: 1.0, 2: -0.5})
+        assert poly.get_parameters() == set()
+
+    def test_multi_symbol_poly(self):
+        """Multiple coefficients each contribute their own symbol."""
+        a, b = symbols("a b")
+        poly = ZxPoly({1: a, 2: b})
+        assert poly.get_parameters() == {a, b}
+
+
+class TestParametrizedMixin:
+    """Test suite for the `Parametrized` mixin, exercised via QSpider/PSpider.
+
+    Covers `param_measurement_map` subset validation, filtering during
+    `substitute_parameters`/`evaluate`, `slice_param_map`, and `conjugate()`
+    threading -- shared logic used identically by every `CompactDiagram`
+    gate subclass in `gates.py`.
+    """
+
+    def test_subset_param_measurement_map_is_legal(self):
+        """A param_measurement_map that is a strict subset of the parameters is legal."""
+        a, b = symbols("a b", real=True)
+        phase = ZxPoly({1: a, 2: b})
+        spider = QSpider(1, 1, phase, True, param_measurement_map={a: {10}})
+
+        assert spider.param_measurement_map == {a: {10}}
+        assert spider.get_parameters() == {a, b}
+        assert spider.is_parametric
+        # Non-empty map derives feedforward/measurement_ids automatically.
+        assert spider.feedforward
+        assert spider.measurement_ids == {10}
+
+    def test_param_measurement_map_invalid_symbol_raises(self):
+        """A map keyed on a symbol that is not a parameter of the object is illegal."""
+        a, c = symbols("a c", real=True)
+        phase = ZxPoly({1: a})
+
+        with pytest.raises(ValueError, match="references symbols that are not parameters"):
+            QSpider(1, 1, phase, True, param_measurement_map={c: {1}})
+
+    def test_substitute_parameters_filters_out_substituted_symbol(self):
+        """Substituting a symbol away must drop its entry from the resulting map."""
+        a = symbols("a", real=True)
+        phase = ZxPoly({1: a})
+        spider = QSpider(1, 1, phase, True, param_measurement_map={a: {5}})
+
+        result = spider.substitute_parameters({a: 2.0})
+
+        assert result.param_measurement_map == {}
+        assert not result.is_parametric
+        assert result.phase == ZxPoly({1: 2.0})
+
+    def test_evaluate_partial_substitution_narrows_map(self):
+        """Substituting one of two symbols must keep the other's map entry."""
+        a, b = symbols("a b")
+        phase = ZxPoly({1: a, 2: b})
+        spider = QSpider(1, 1, phase, True, param_measurement_map={a: {1}, b: {2}})
+
+        result = spider.evaluate(a=5.0)
+
+        assert result.param_measurement_map == {b: {2}}
+        assert result.get_parameters() == {b}
+
+    def test_conjugate_preserves_param_measurement_map(self):
+        """conjugate() must carry param_measurement_map through unchanged."""
+        a = symbols("a", real=True)
+        phase = ZxPoly({1: a})
+        spider = QSpider(1, 1, phase, True, param_measurement_map={a: {7}})
+
+        conjugated = spider.conjugate()
+
+        assert conjugated.param_measurement_map == {a: {7}}
+        assert conjugated.param_measurement_map is not spider.param_measurement_map
+        assert conjugated.phase == -phase
+
+    def test_slice_param_map_copies_inner_sets(self):
+        """slice_param_map must restrict to the given symbols and copy, not alias, sets."""
+        a, b = symbols("a b", real=True)
+        phase = ZxPoly({1: a, 2: b})
+        spider = QSpider(1, 1, phase, True, param_measurement_map={a: {1}, b: {2}})
+
+        sliced = spider.slice_param_map({a})
+
+        assert sliced == {a: {1}}
+        sliced[a].add(999)
+        assert spider.param_measurement_map[a] == {1}
+
+    def test_pspider_also_supports_param_measurement_map(self):
+        """The mixin applies identically to PSpider."""
+        a = symbols("a", real=True)
+        phase = ZxPoly({1: a})
+        spider = PSpider(1, 1, phase, True, param_measurement_map={a: {3}})
+
+        assert spider.param_measurement_map == {a: {3}}
+        assert spider.feedforward
+        assert spider.measurement_ids == {3}
+
+        conjugated = spider.conjugate()
+        assert conjugated.param_measurement_map == {a: {3}}

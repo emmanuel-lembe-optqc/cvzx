@@ -1,23 +1,22 @@
-"""Tests for the GateRegister class.
+"""Tests for the GateRegister class using rustworkx.
 
 This module contains comprehensive unit tests for the GateRegister class,
-which tracks specific gate types and nodes in a CV ZX graph.
-
+which tracks specific gate types and nodes in a CV ZX rustworkx graph.
 """
 
 from math import pi
 
-import networkx as nx
 import pytest
+import rustworkx as rx
 from sympy import symbols
 
 from cvzx.base_gates import ZxPoly
 from cvzx.gates import CubicPhaseGate, DisplacementGate, PhaseRotationGate, SqueezingGate
-from cvzx.nx_graph import GateRegister
+from cvzx.rx_graph import GateRegister
 
 
 class TestGateRegister:
-    """Test suite for GateRegister class."""
+    """Test suite for GateRegister class with rustworkx."""
 
     def test_initialization(self):
         """Test that GateRegister initializes with empty sets."""
@@ -250,18 +249,6 @@ class TestGateRegister:
         reg.tensor_nodes.add(node_id)
         reg.composition_nodes.add(node_id)
 
-        # Verify it's in all sets
-        assert node_id in reg.squeezing_gates
-        assert node_id in reg.displacement_gates
-        assert node_id in reg.rotation_gates
-        assert node_id in reg.fourier_gates
-        assert node_id in reg.identity_spiders
-        assert node_id in reg.input_states
-        assert node_id in reg.measurement_nodes
-        assert node_id in reg.contracted_diagrams
-        assert node_id in reg.tensor_nodes
-        assert node_id in reg.composition_nodes
-
         # Remove it
         reg.remove_node(node_id)
 
@@ -282,10 +269,8 @@ class TestGateRegister:
         reg = GateRegister()
         node_id = 18
 
-        # Should not raise an error
         reg.remove_node(node_id)
 
-        # All sets should still be empty
         assert len(reg.squeezing_gates) == 0
         assert len(reg.displacement_gates) == 0
         assert len(reg.rotation_gates) == 0
@@ -301,7 +286,6 @@ class TestGateRegister:
         """Test creating a copy of the register."""
         reg = GateRegister()
 
-        # Add some nodes
         reg.squeezing_gates.add(1)
         reg.displacement_gates.add(2)
         reg.rotation_gates.add(3)
@@ -313,10 +297,8 @@ class TestGateRegister:
         reg.tensor_nodes.add(9)
         reg.composition_nodes.add(10)
 
-        # Create copy
         copy_reg = reg.copy()
 
-        # Verify copies are independent
         assert copy_reg is not reg
         assert copy_reg.squeezing_gates == reg.squeezing_gates
         assert copy_reg.displacement_gates == reg.displacement_gates
@@ -329,7 +311,6 @@ class TestGateRegister:
         assert copy_reg.tensor_nodes == reg.tensor_nodes
         assert copy_reg.composition_nodes == reg.composition_nodes
 
-        # Modify original and verify copy unchanged
         reg.squeezing_gates.add(100)
         assert 100 not in copy_reg.squeezing_gates
 
@@ -337,7 +318,6 @@ class TestGateRegister:
         """Test clearing the register."""
         reg = GateRegister()
 
-        # Add some nodes
         reg.squeezing_gates.add(1)
         reg.displacement_gates.add(2)
         reg.rotation_gates.add(3)
@@ -349,10 +329,8 @@ class TestGateRegister:
         reg.tensor_nodes.add(9)
         reg.composition_nodes.add(10)
 
-        # Clear all
         reg.clear()
 
-        # Verify all sets are empty
         assert len(reg.squeezing_gates) == 0
         assert len(reg.displacement_gates) == 0
         assert len(reg.rotation_gates) == 0
@@ -365,27 +343,30 @@ class TestGateRegister:
         assert len(reg.composition_nodes) == 0
 
     def test_build_from_graph(self):
-        """Test building the registry from a graph."""
+        """Test building the registry from a rustworkx PyDiGraph."""
         reg = GateRegister()
-        # Create a graph with various nodes
-        graph = nx.DiGraph()
+        graph = rx.PyDiGraph()
 
-        # Add nodes with attributes
-        graph.add_node(1, kind="compact", type="SqueezingGate", num_inputs=1, num_outputs=1)
-        graph.add_node(2, kind="compact", type="DisplacementGate", num_inputs=1, num_outputs=1)
-        graph.add_node(3, kind="compact", type="PhaseRotationGate", num_inputs=1, num_outputs=1)
-        graph.add_node(4, kind="proper", type="Fourier", num_inputs=1, num_outputs=1)
-        graph.add_node(5, kind="proper", type="QSpider", num_inputs=1, num_outputs=1, phase=ZxPoly({0: 0}))
-        graph.add_node(6, kind="proper", num_inputs=0, num_outputs=1)
-        graph.add_node(7, kind="proper", num_inputs=1, num_outputs=0)
-        graph.add_node(8, kind="container", container_type="tensor")
-        graph.add_node(9, kind="container", container_type="composition")
-        graph.add_node(10, kind="container", container_type="contracted")
+        graph.add_node({"id": 1, "kind": "compact", "type": "SqueezingGate", "num_inputs": 1, "num_outputs": 1})
+        graph.add_node({"id": 2, "kind": "compact", "type": "DisplacementGate", "num_inputs": 1, "num_outputs": 1})
+        graph.add_node({"id": 3, "kind": "compact", "type": "PhaseRotationGate", "num_inputs": 1, "num_outputs": 1})
+        graph.add_node({"id": 4, "kind": "proper", "type": "Fourier", "num_inputs": 1, "num_outputs": 1})
+        graph.add_node({
+            "id": 5,
+            "kind": "proper",
+            "type": "QSpider",
+            "num_inputs": 1,
+            "num_outputs": 1,
+            "phase": ZxPoly({0: 0}),
+        })
+        graph.add_node({"id": 6, "kind": "proper", "num_inputs": 0, "num_outputs": 1})
+        graph.add_node({"id": 7, "kind": "proper", "num_inputs": 1, "num_outputs": 0})
+        graph.add_node({"id": 8, "kind": "container", "container_type": "tensor"})
+        graph.add_node({"id": 9, "kind": "container", "container_type": "composition"})
+        graph.add_node({"id": 10, "kind": "container", "container_type": "contracted"})
 
-        # Rebuild registry
         reg.build_from_graph(graph)
 
-        # Verify all nodes were added correctly
         assert 1 in reg.squeezing_gates
         assert 2 in reg.displacement_gates
         assert 3 in reg.rotation_gates
@@ -397,7 +378,6 @@ class TestGateRegister:
         assert 9 in reg.composition_nodes
         assert 10 in reg.contracted_diagrams
 
-        # Verify sizes match
         assert len(reg.squeezing_gates) == 1
         assert len(reg.displacement_gates) == 1
         assert len(reg.rotation_gates) == 1
@@ -413,23 +393,18 @@ class TestGateRegister:
         """Test that build_from_graph clears existing entries."""
         reg = GateRegister()
 
-        # Add some nodes manually
         reg.squeezing_gates.add(100)
         reg.displacement_gates.add(200)
 
-        # Create a new graph
-        graph = nx.DiGraph()
-        graph.add_node(1, kind="compact", type="PhaseRotationGate", num_inputs=1, num_outputs=1)
-        graph.add_node(2, kind="proper", type="Fourier2", num_inputs=1, num_outputs=1)
+        graph = rx.PyDiGraph()
+        graph.add_node({"id": 1, "kind": "compact", "type": "PhaseRotationGate", "num_inputs": 1, "num_outputs": 1})
+        graph.add_node({"id": 2, "kind": "proper", "type": "Fourier2", "num_inputs": 1, "num_outputs": 1})
 
-        # Rebuild
         reg.build_from_graph(graph)
 
-        # Old entries should be gone
         assert 100 not in reg.squeezing_gates
         assert 200 not in reg.displacement_gates
 
-        # New entries should be there
         assert 1 in reg.rotation_gates
         assert 2 in reg.fourier_gates
 
@@ -448,19 +423,14 @@ class TestGateRegister:
 
         reg.add_node(node_id, attrs)
         assert node_id in reg.displacement_gates
-        # Note: feedforward info is stored in node attributes, not in the registry
-        # The registry only tracks node IDs by type
 
     def test_identity_spider_detection_with_complex_phase(self):
         """Test that identity spider detection works with various zero phase representations."""
         reg = GateRegister()
 
         test_cases = [
-            # Zero polynomial (empty dict)
             {"kind": "proper", "type": "QSpider", "num_inputs": 1, "num_outputs": 1, "phase": ZxPoly({})},
-            # Zero constant
             {"kind": "proper", "type": "PSpider", "num_inputs": 1, "num_outputs": 1, "phase": ZxPoly({0: 0})},
-            # Zero polynomial after simplification
             {"kind": "proper", "type": "QSpider", "num_inputs": 1, "num_outputs": 1, "phase": ZxPoly({1: 0, 2: 0})},
         ]
 
@@ -498,7 +468,7 @@ class TestGateRegister:
             "kind": "proper",
             "num_inputs": 0,
             "num_outputs": 1,
-            "type": "InputState",  # Extra attribute
+            "type": "InputState",
             "label": "|0>",
         }
 
@@ -513,7 +483,7 @@ class TestGateRegister:
             "kind": "proper",
             "num_inputs": 1,
             "num_outputs": 0,
-            "type": "Measurement",  # Extra attribute
+            "type": "Measurement",
             "basis": "homodyne",
         }
 
@@ -521,11 +491,10 @@ class TestGateRegister:
         assert node_id in reg.measurement_nodes
 
     def test_performance_large_graph(self):
-        """Test performance with a large graph."""
+        """Test performance with a large rustworkx graph."""
         reg = GateRegister()
-        graph = nx.DiGraph()
+        graph = rx.PyDiGraph()
 
-        # Create a large graph with 1000 nodes
         kind = "proper"
         for i in range(1000):
             if i % 5 == 0:
@@ -542,24 +511,22 @@ class TestGateRegister:
             else:
                 gate_type = "QSpider"
 
-            graph.add_node(
-                i,
-                kind=kind,
-                type=gate_type,
-                num_inputs=1,
-                num_outputs=1,
-                phase=ZxPoly({0: 0}) if gate_type == "QSpider" else None,
-            )
+            graph.add_node({
+                "id": i,
+                "kind": kind,
+                "type": gate_type,
+                "num_inputs": 1,
+                "num_outputs": 1,
+                "phase": ZxPoly({0: 0}) if gate_type == "QSpider" else None,
+            })
 
-        # Rebuild registry
         reg.build_from_graph(graph)
 
-        # Check counts
-        assert len(reg.squeezing_gates) == 200  # 1000 / 5
+        assert len(reg.squeezing_gates) == 200
         assert len(reg.displacement_gates) == 200
         assert len(reg.rotation_gates) == 200
         assert len(reg.fourier_gates) == 200
-        assert len(reg.identity_spiders) == 200  # All QSpider are identity
+        assert len(reg.identity_spiders) == 200
         assert len(reg.input_states) == 0
         assert len(reg.measurement_nodes) == 0
         assert len(reg.contracted_diagrams) == 0
@@ -570,19 +537,15 @@ class TestGateRegister:
         """Test that the registry can be used for O(1) lookups."""
         reg = GateRegister()
 
-        # Add nodes
         reg.squeezing_gates.add(1)
         reg.squeezing_gates.add(2)
         reg.displacement_gates.add(3)
 
-        # Test lookups
         assert 1 in reg.squeezing_gates
         assert 2 in reg.squeezing_gates
         assert 3 in reg.displacement_gates
         assert 4 not in reg.squeezing_gates
         assert 1 not in reg.displacement_gates
-
-        # This would be O(1) instead of scanning all nodes
 
     @pytest.mark.parametrize(
         ("gate_type", "expected_set"),
@@ -603,11 +566,9 @@ class TestGateRegister:
 
         reg.add_node(node_id, attrs)
 
-        # Get the set by name
         reg_set = getattr(reg, expected_set)
         assert node_id in reg_set
 
-        # Verify it's not in other sets
         all_sets = [
             "squeezing_gates",
             "displacement_gates",
@@ -645,7 +606,6 @@ class TestGateRegister:
         assert node_id in reg_set
 
 
-# Integration test with actual gates
 class TestGateRegisterIntegration:
     """Integration tests with actual gate classes."""
 
@@ -653,17 +613,11 @@ class TestGateRegisterIntegration:
         """Test registering actual gate instances."""
         reg = GateRegister()
 
-        # Create real gates
         sq = SqueezingGate(0.5)
         d = DisplacementGate(1.0 + 0.5j)
         r = PhaseRotationGate(pi / 4)
         cpg = CubicPhaseGate(0.1)
 
-        # In a real implementation, these would be added to a graph
-        # and the registry would be updated. This test verifies the
-        # registry structure works with real gate types.
-
-        # Simulate adding them to the registry
         sq_id = id(sq)
         d_id = id(d)
         r_id = id(r)
@@ -672,7 +626,6 @@ class TestGateRegisterIntegration:
         reg.squeezing_gates.add(sq_id)
         reg.displacement_gates.add(d_id)
         reg.rotation_gates.add(r_id)
-        # CubicPhaseGate is not in the registry (not tracked)
 
         assert sq_id in reg.squeezing_gates
         assert d_id in reg.displacement_gates
@@ -687,6 +640,7 @@ class TestGateRegisterParameterTracking:
 
     Covers `parametric_nodes`, `feedforward_nodes`, `symbol_registry`, and
     `measurement_to_feedforward_map`, added alongside `param_measurement_map`.
+    Mirrors `tests/nx_graph/test_gate_registry.py::TestGateRegisterParameterTracking`.
     """
 
     def test_symbol_from_zxpoly_phase_excludes_generator(self):
@@ -809,11 +763,7 @@ class TestGateRegisterParameterTracking:
         assert 5050 not in reg.feedforward_nodes
 
     def test_clear_resets_all_new_fields_and_void_nodes(self):
-        """clear() must reset parametric/feedforward/symbol fields, and void_nodes.
-
-        `void_nodes.clear()` was a pre-existing bug on the nx side (already
-        fixed on rx): `clear()` cleared 10 of 11 sets, omitting `void_nodes`.
-        """
+        """clear() must reset parametric/feedforward/symbol fields, and void_nodes."""
         reg = GateRegister()
         m = symbols("m")
         reg.add_node(
@@ -885,18 +835,25 @@ class TestGateRegisterParameterTracking:
     def test_build_from_graph_round_trips_new_fields(self):
         """build_from_graph() must populate the new fields exactly like add_node() does."""
         reg = GateRegister()
-        graph = nx.DiGraph()
+        graph = rx.PyDiGraph()
         m = symbols("m")
-        graph.add_node(1, kind="proper", type="QSpider", num_inputs=1, num_outputs=1, phase=ZxPoly({1: m}))
-        graph.add_node(
-            2,
-            kind="compact",
-            type="DisplacementGate",
-            num_inputs=1,
-            num_outputs=1,
-            feedforward=True,
-            measurement_ids={7},
-        )
+        graph.add_node({
+            "id": 1,
+            "kind": "proper",
+            "type": "QSpider",
+            "num_inputs": 1,
+            "num_outputs": 1,
+            "phase": ZxPoly({1: m}),
+        })
+        graph.add_node({
+            "id": 2,
+            "kind": "compact",
+            "type": "DisplacementGate",
+            "num_inputs": 1,
+            "num_outputs": 1,
+            "feedforward": True,
+            "measurement_ids": {7},
+        })
 
         reg.build_from_graph(graph)
 

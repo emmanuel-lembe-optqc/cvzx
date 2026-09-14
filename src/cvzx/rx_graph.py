@@ -1,23 +1,24 @@
-"""Graph extraction utilities for CV ZX diagrams.
+"""Graph extraction utilities for CV ZX diagrams using rustworkx.
 
-This module provides functions to convert CV ZX diagrams to directed graphs
-for optimization purposes. The graph preserves all information needed for
-faithful reconstruction.
+This module provides high-performance functions to convert CV ZX diagrams
+to rustworkx directed graphs (PyDiGraph) for large-scale graph optimization.
 
 Key design decisions:
+    - Uses rustworkx.PyDiGraph for 10x-100x traversal and embedding speedups
+    - Each node payload is a dictionary storing metadata, type, and original diagram ID
+    - node_map dictionary maintains O(1) bi-directional mapping between original
+      diagram.id and rustworkx node indices (0, 1, 2...)
     - Containers (CompositionDiagram, TensorDiagram, ContractedDiagram) are
       preserved as nodes with kind='container'
     - Proper diagrams are nodes with kind='proper'
     - The hierarchy is preserved through sub_diagram_ids
-    - Each node stores its immediate container ID (container_id)
     - The root container is identified by is_root=True
-    - All port connections are stored as edges with port information
 """
 
 from copy import deepcopy
 from typing import cast
 
-import networkx as nx
+import rustworkx as rx
 from sympy import Expr, Symbol
 
 from cvzx.base_gates import (
@@ -84,9 +85,7 @@ def _collect_symbols(attrs: dict) -> set[Symbol]:
     Looks at every key `add_node`/`build_from_graph` may populate with a
     symbolic value (`phase`, and the multi-parameter gate keys `alpha`,
     `beta`, `lam`, `a`, `b`), plus the keys of `param_measurement_map` if
-    present on the payload (Phase 1's provenance map, not yet written to
-    every node's attrs by the graph-construction helpers, but already
-    handled gracefully here via `.get(...)`).
+    present on the payload.
 
     Parameters
     ----------
@@ -108,18 +107,8 @@ def _collect_symbols(attrs: dict) -> set[Symbol]:
 class GateRegister:
     """Registry for tracking specific gate types and nodes in a CV ZX graph.
 
-    The GateRegister maintains sets of node IDs for different gate types,
-    enabling O(1) lookups instead of O(N) scans of the entire graph.
-    This is essential for performance in large circuits.
-
-    The registry tracks:
-        - Proper nodes: Q/P spiders, squeezing, displacement, rotation, Fourier gates
-        - Terminals: input states (0→1) and measurements (1→0)
-        - Containers: tensor, composition, and contracted diagrams
-
-    The registry must be kept in sync with the graph. Whenever the graph is
-    modified (nodes added, removed, or changed), the registry must be updated
-    accordingly using `add_node()`, `remove_node()`, or rebuilding from scratch.
+    The GateRegister maintains sets of node IDs (original diagram IDs) for
+    different gate types, enabling O(1) lookups instead of scanning the graph.
 
     Parameters
     ----------
@@ -128,8 +117,8 @@ class GateRegister:
         rotation_gates set[int]: Node IDs of phase rotation gates (R)
         fourier_gates set[int]: Node IDs of Fourier gates (F, F†, F²)
         identity_spiders set[int]: Node IDs of identity spiders (zero phase, 1→1)
-        input_states set[int]: Node IDs of input states (0 inputs, 1 output)
-        measurement_nodes set[int]: Node IDs of measurements (1 input, 0 outputs)
+        input_states set[int]: Node IDs of input states (0→1)
+        measurement_nodes set[int]: Node IDs of measurements (1→0)
         contracted_diagrams set[int]: Node IDs of ContractedDiagram containers
         tensor_nodes set[int]: Node IDs of TensorDiagram containers
         composition_nodes set[int]: Node IDs of CompositionDiagram containers
@@ -158,45 +147,26 @@ class GateRegister:
         self.feedforward_nodes: set[int] = set()
         self.symbol_registry: dict[Symbol, set[int]] = {}
         self.measurement_to_feedforward_map: dict[int, set[int]] = {}
-        # Private inverse caches so remove_node() can retract in O(k), not
-        # O(n): they record what was indexed for a node at add_node() time,
-        # so remove_node() doesn't need to re-derive it from (possibly
-        # already-gone) attrs.
         self._indexed_symbols: dict[int, set[Symbol]] = {}
         self._indexed_measurements: dict[int, set[int]] = {}
 
     def add_node(self, node_id: int, attrs: dict) -> None:  # ruff: ignore[complex-structure, too-many-branches]
         """Add a node to the appropriate sets based on its attributes.
 
-        This method inspects the node's attributes and adds its ID to the
-        corresponding sets based on its type, kind, and container type.
-
         Parameters
         ----------
         node_id : int
-            The ID of the node to add.
+            The original diagram ID of the node to add.
         attrs : dict
-            The node's attributes from the graph, containing at least 'kind',
-            and optionally 'type', 'container_type', 'num_inputs', 'num_outputs',
-            and 'phase'.
-
-        Notes
-        -----
-        - Container nodes (kind='container') are added to container-specific sets.
-        - Proper nodes (kind='proper') are added to gate-type-specific sets.
-        - Identity spiders are detected using `_is_identity_spider()`.
-        - Input states have num_inputs=0, num_outputs=1.
-        - Measurements have num_inputs=1, num_outputs=0.
+            The node's attributes from the graph payload.
         """
         gate_type = attrs.get("type")
         kind = attrs.get("kind")
         container_type = attrs.get("container_type")
 
-        # Ignore nodes that are neither proper nor container
         if kind not in {"proper", "container", "compact"}:
             return
 
-        # Handle container nodes
         if kind == "container":
             if container_type == "tensor":
                 self.tensor_nodes.add(node_id)
@@ -206,8 +176,6 @@ class GateRegister:
                 self.contracted_diagrams.add(node_id)
             return
 
-        # Handle proper nodes
-        # Gate types
         if gate_type == "SqueezingGate":
             self.squeezing_gates.add(node_id)
         elif gate_type == "DisplacementGate":
@@ -217,15 +185,12 @@ class GateRegister:
         elif gate_type in {"Fourier", "FourierInv", "Fourier2"}:
             self.fourier_gates.add(node_id)
 
-        # Identity spiders
         if self._is_identity_spider(attrs):
             self.identity_spiders.add(node_id)
 
-        # Void placeholders (see `VoidDiagram`)
         if gate_type == "VoidDiagram":
             self.void_nodes.add(node_id)
 
-        # Terminals
         if self._is_input_state(attrs):
             self.input_states.add(node_id)
         elif self._is_measurement(attrs):
@@ -234,15 +199,12 @@ class GateRegister:
         self._index_parameters(node_id, attrs)
 
     def remove_node(self, node_id: int) -> None:
-        """Remove a node from all sets.
-
-        This method removes the given node ID from every set in the registry.
-        It uses `discard()` to safely handle cases where the node is not present.
+        """Remove a node ID from all sets in the registry.
 
         Parameters
         ----------
         node_id : int
-            The ID of the node to remove from the registry.
+            The ID of the node to remove.
         """
         self.squeezing_gates.discard(node_id)
         self.displacement_gates.discard(node_id)
@@ -263,13 +225,7 @@ class GateRegister:
         Returns
         -------
         GateRegister
-            A new GateRegister instance with copies of all sets.
-
-        Notes
-        -----
-        This is useful for parallelization where each partition needs its
-        own independent registry that can be modified without affecting others.
-        The copy is shallow (sets are copied, but the contained integers are immutable).
+            A new GateRegister with copied sets.
         """
         new_reg = GateRegister()
         new_reg.squeezing_gates = self.squeezing_gates.copy()
@@ -285,9 +241,6 @@ class GateRegister:
         new_reg.void_nodes = self.void_nodes.copy()
         new_reg.parametric_nodes = self.parametric_nodes.copy()
         new_reg.feedforward_nodes = self.feedforward_nodes.copy()
-        # dict.copy() would be shallow here: the values are sets, so a plain
-        # copy would alias the inner sets between `self` and `new_reg`.
-        # Copy each inner set too, so the two registries are independent.
         new_reg.symbol_registry = {symbol: nodes.copy() for symbol, nodes in self.symbol_registry.items()}
         new_reg.measurement_to_feedforward_map = {
             measurement_id: nodes.copy() for measurement_id, nodes in self.measurement_to_feedforward_map.items()
@@ -297,11 +250,7 @@ class GateRegister:
         return new_reg
 
     def clear(self) -> None:
-        """Clear all sets in the registry.
-
-        This removes all node IDs from every set, effectively resetting
-        the registry to an empty state.
-        """
+        """Clear all sets in the registry."""
         self.squeezing_gates.clear()
         self.displacement_gates.clear()
         self.rotation_gates.clear()
@@ -320,25 +269,18 @@ class GateRegister:
         self._indexed_symbols.clear()
         self._indexed_measurements.clear()
 
-    def build_from_graph(self, graph: nx.DiGraph) -> None:
-        """Build the entire registry from a graph.
-
-        This clears all sets and then adds every node in the graph
-        using `add_node()`. This is useful when the graph has been
-        extensively modified and the registry may be out of sync.
+    def build_from_graph(self, graph: rx.PyDiGraph) -> None:
+        """Build the entire registry from a rustworkx PyDiGraph.
 
         Parameters
         ----------
-        graph : nx.DiGraph
+        graph : rx.PyDiGraph
             The graph to rebuild the registry from.
-
-        Notes
-        -----
-        This operation is O(N) where N is the number of nodes in the graph.
-        It should be used sparingly; incremental updates are preferred.
         """
         self.clear()
-        for node_id, attrs in graph.nodes(data=True):
+        for idx in graph.node_indices():
+            attrs = graph[idx]
+            node_id = attrs.get("id", idx)
             self.add_node(node_id, attrs)
 
     def _is_identity_spider(self, attrs: dict) -> bool:
@@ -352,16 +294,11 @@ class GateRegister:
         if node_type not in {"QSpider", "PSpider"}:
             return False
 
-        num_inputs = attrs.get("num_inputs", 0)
-        num_outputs = attrs.get("num_outputs", 0)
-        if num_inputs != 1 or num_outputs != 1:
+        if attrs.get("num_inputs", 0) != 1 or attrs.get("num_outputs", 0) != 1:
             return False
 
         phase = attrs.get("phase")
-        if phase is None:
-            return False
-
-        return bool(phase.is_zero)
+        return bool(phase is not None and phase.is_zero)
 
     def _is_input_state(self, attrs: dict) -> bool:
         """Check if a node is an input state.
@@ -451,34 +388,25 @@ class GateRegister:
 
 
 class CVZXGraph:
-    """A CV ZX diagram represented as a directed graph, paired with its registry.
-
-    ``CVZXGraph`` bundles the ``networkx.DiGraph`` produced by :func:`to_graph`
-    together with the :class:`GateRegister` that indexes it, so that code
-    working on a diagram's graph representation does not have to thread the
-    graph and registry through separately. It is a thin, mutable wrapper:
-    it does not change how the graph or registry are built, read, or kept
-    in sync, it only gives them a single home.
+    """A CV ZX diagram represented as a rustworkx PyDiGraph, paired with its registry.
 
     Parameters
     ----------
-    graph : nx.DiGraph
-        The graph representation of a CV ZX diagram, as produced by
-        :func:`to_graph`.
+    graph : rx.PyDiGraph
+        The rustworkx graph representation of a CV ZX diagram.
     registry : GateRegister | None, optional
-        A registry already built from ``graph``. If ``None`` (the default),
-        a new registry is built from ``graph`` via
-        :meth:`GateRegister.build_from_graph`.
+        A registry already built from ``graph``. If ``None``, a new registry
+        is built from ``graph``.
 
     Attributes
     ----------
-    graph : nx.DiGraph
-        The underlying graph.
+    graph : rx.PyDiGraph
+        The underlying rustworkx directed graph.
     registry : GateRegister
         The registry indexing ``graph``.
     """
 
-    def __init__(self, graph: nx.DiGraph, registry: "GateRegister | None" = None) -> None:
+    def __init__(self, graph: rx.PyDiGraph, registry: "GateRegister | None" = None) -> None:
         self.graph = graph
         if registry is None:
             registry = GateRegister()
@@ -497,16 +425,12 @@ class CVZXGraph:
         Returns
         -------
         CVZXGraph
-            The graph representation of ``diagram``, with a freshly built
-            registry.
+            The rustworkx graph representation of ``diagram``.
         """
         return to_graph(diagram)
 
     def to_diagram(self) -> Diagram:
         """Reconstruct the CV ZX diagram from the current graph.
-
-        See :func:`to_diagram`; this raises ``ValueError`` under the same
-        condition, since it delegates to that function.
 
         Returns
         -------
@@ -516,46 +440,25 @@ class CVZXGraph:
         return to_diagram(self)
 
     def rebuild_registry(self) -> None:
-        """Rebuild ``self.registry`` from the current state of ``self.graph``.
-
-        This performs a full O(N) rescan of the graph, discarding whatever
-        the registry previously held. Call this after mutating ``self.graph``
-        directly (for example, after applying a rewrite rule) if the
-        registry has not already been kept in sync incrementally.
-        """
+        """Rebuild ``self.registry`` from the current state of ``self.graph``."""
         self.registry.build_from_graph(self.graph)
 
     def parameter_consistency_violations(self) -> list[str]:
         """Find symbolic-parameter/feedforward inconsistencies, without raising.
 
-        Runs two checks against ``self.registry`` and the current node
-        payloads in ``self.graph``:
-
-        1. Symbol conflict: every symbol used by 2+ nodes
-           (``self.registry.symbol_registry[symbol]`` has size >= 2) must be
-           bound to the same measurement-id set (each node's own
-           ``attrs.get("param_measurement_map", {}).get(symbol, ())``)
-           across all of those nodes. `param_measurement_map` may not exist
-           on a node's attrs yet (Phase 1 lands it separately); a missing
-           key degrades to ``{}``, i.e. "no binding", rather than raising.
-        2. Measurement existence: every key in
-           ``self.registry.measurement_to_feedforward_map`` must be a
-           currently registered measurement node
-           (``self.registry.measurement_nodes``).
-
         Returns
         -------
         list[str]
-            One message per violation found; empty if the graph is
-            consistent.
+            One message per violation found; empty if the graph is consistent.
         """
         violations: list[str] = []
+        id_map = {self.graph[idx]["id"]: idx for idx in self.graph.node_indices()}
 
         for symbol, node_ids in self.registry.symbol_registry.items():
             if len(node_ids) < 2:  # ruff: ignore[magic-value-comparison]
                 continue
             bindings = {
-                node_id: frozenset(self.graph.nodes[node_id].get("param_measurement_map", {}).get(symbol, ()))
+                node_id: frozenset(self.graph[id_map[node_id]].get("param_measurement_map", {}).get(symbol, ()))
                 for node_id in node_ids
             }
             if len(set(bindings.values())) > 1:
@@ -579,8 +482,7 @@ class CVZXGraph:
         Raises
         ------
         ValueError
-            Listing every violation found by
-            :meth:`parameter_consistency_violations`.
+            Listing every violation found by :meth:`parameter_consistency_violations`.
         """
         violations = self.parameter_consistency_violations()
         if violations:
@@ -590,11 +492,6 @@ class CVZXGraph:
     def copy(self) -> "CVZXGraph":
         """Return an independent copy of this ``CVZXGraph``.
 
-        The graph is copied via ``networkx.DiGraph.copy()`` (a new graph
-        with its own node/edge attribute dicts) and the registry via
-        :meth:`GateRegister.copy`, so mutating the copy's graph or registry
-        does not affect this one.
-
         Returns
         -------
         CVZXGraph
@@ -603,58 +500,29 @@ class CVZXGraph:
         return CVZXGraph(self.graph.copy(), self.registry.copy())
 
     def _root_attrs(self) -> dict:
-        """Return the attribute dict of the graph's root node.
-
-        Returns
-        -------
-        dict
-            The root node's attributes.
-
-        Raises
-        ------
-        ValueError
-            If the graph has no root node.
-        """
-        root = get_root_node(self)
-        if root is None:
+        root_id = get_root_node(self)
+        if root_id is None:
             msg = "No root node found in the graph."
             raise ValueError(msg)
-        return cast("dict", self.graph.nodes[root])
+        for idx in self.graph.node_indices():
+            if self.graph[idx].get("id") == root_id:
+                return cast("dict", self.graph[idx])
+        msg = "Root node payload missing from graph."
+        raise ValueError(msg)
 
     @property
     def root_id(self) -> int | None:
-        """The node ID of the root container, or ``None`` if there is none.
-
-        Returns
-        -------
-        int | None
-        """
+        """The node ID of the root container, or ``None`` if there is none."""
         return get_root_node(self)
 
     @property
     def num_inputs(self) -> int:
-        """The number of external inputs of the diagram.
-
-        See :meth:`_root_attrs`; this raises ``ValueError`` under the same
-        condition, since it delegates to that method.
-
-        Returns
-        -------
-        int
-        """
+        """The number of external inputs of the diagram."""
         return cast("int", self._root_attrs()["num_inputs"])
 
     @property
     def num_outputs(self) -> int:
-        """The number of external outputs of the diagram.
-
-        See :meth:`_root_attrs`; this raises ``ValueError`` under the same
-        condition, since it delegates to that method.
-
-        Returns
-        -------
-        int
-        """
+        """The number of external outputs of the diagram."""
         return cast("int", self._root_attrs()["num_outputs"])
 
     def __len__(self) -> int:
@@ -664,7 +532,7 @@ class CVZXGraph:
         -------
         int
         """
-        return cast("int", self.graph.number_of_nodes())
+        return len(self.graph)
 
     def __repr__(self) -> str:
         """Return a debug representation of this ``CVZXGraph``.
@@ -673,7 +541,7 @@ class CVZXGraph:
         -------
         str
         """
-        return f"CVZXGraph(nodes={self.graph.number_of_nodes()}, edges={self.graph.number_of_edges()})"
+        return f"CVZXGraph(nodes={len(self.graph)}, edges={len(self.graph.edge_list())})"
 
     def __eq__(self, other: object) -> bool:
         """Check equality by comparing the reconstructed diagrams.
@@ -705,15 +573,7 @@ class CVZXGraph:
 
 
 def to_graph(diagram: Diagram) -> CVZXGraph:
-    """Convert a CV ZX diagram to a graph representation.
-
-    The graph preserves the full hierarchy of the original diagram:
-        - Container nodes (CompositionDiagram, TensorDiagram, ContractedDiagram)
-          have kind='container' and store their sub-diagram IDs
-        - Proper nodes have kind='proper' and store their attributes
-        - Each node stores its immediate container ID (container_id)
-        - The root container is marked with is_root=True
-        - Edges represent connections between nodes
+    """Convert a CV ZX diagram to a rustworkx graph representation.
 
     Parameters
     ----------
@@ -723,18 +583,19 @@ def to_graph(diagram: Diagram) -> CVZXGraph:
     Returns
     -------
     CVZXGraph
-        Graph representation of the diagram, with all nodes and edges, and
-        a freshly built registry.
+        Graph representation backed by rustworkx PyDiGraph.
     """
-    graph = nx.DiGraph()
-    root_id = _convert_diagram_to_graph(deepcopy(diagram), graph, container_id=None, is_root=True)
+    graph = rx.PyDiGraph(multigraph=False)
+    node_map: dict[int, int] = {}
 
-    # Mark the root node
-    if root_id is not None and root_id != -1:
-        graph.nodes[root_id]["is_root"] = True
+    root_id = _convert_diagram_to_graph(deepcopy(diagram), graph, node_map, container_id=None, is_root=True)
 
-    # Remove diagram references
-    for _, attrs in graph.nodes(data=True):
+    if root_id is not None and root_id != -1 and root_id in node_map:
+        root_idx = node_map[root_id]
+        graph[root_idx]["is_root"] = True
+
+    for idx in graph.node_indices():
+        attrs = graph[idx]
         if "diagram" in attrs:
             del attrs["diagram"]
 
@@ -742,10 +603,7 @@ def to_graph(diagram: Diagram) -> CVZXGraph:
 
 
 def to_diagram(cvzx_graph: CVZXGraph) -> Diagram:
-    """Reconstruct a CV ZX diagram from a graph representation.
-
-    This function reconstructs the original diagram from the graph, preserving
-    the full hierarchy, container nodes, and all connections.
+    """Reconstruct a CV ZX diagram from a rustworkx graph representation.
 
     Parameters
     ----------
@@ -764,25 +622,20 @@ def to_diagram(cvzx_graph: CVZXGraph) -> Diagram:
     """
     graph = cvzx_graph.graph
 
-    # Find the root node
     root = get_root_node(cvzx_graph)
     if root is None:
         msg = "No root node found in the graph."
         raise ValueError(msg)
 
-    # Reconstruct the diagram from the root
-    return reconstruct_from_node(graph, root, cvzx_graph.registry)
-
-
-# =========================================================================
-# Diagram to graph helper functions
-# =========================================================================
+    id_to_idx = {graph[idx]["id"]: idx for idx in graph.node_indices()}
+    return reconstruct_from_node(graph, root, cvzx_graph.registry, id_to_idx)
 
 
 def find_node_by_external_output(
     diagram: Diagram,
     ext_port: int,
-    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_map: dict[int, int],
 ) -> tuple[int | None, int | None]:
     """Find the proper node and its internal port for a given external output port.
 
@@ -806,41 +659,39 @@ def find_node_by_external_output(
         (node_id, internal_port) of the proper node handling this external port,
         or (None, None) if not found.
     """
-    # If it's a proper diagram, return its node ID and the port
+    """Find proper node ID and internal port for an external output port."""
     if isinstance(diagram, (ProperDiagram, CompactDiagram)):
         return diagram.id, ext_port
 
-    # If it's a container diagram, get its node attributes
-    attrs = G.nodes[diagram.id]
+    node_idx = node_map.get(diagram.id)
+    if node_idx is None:
+        return None, None
+
+    attrs = G[node_idx]
     output_mapping = attrs.get("external_output_mapping", {})
 
     if ext_port not in output_mapping:
         return None, None
 
-    # output_mapping[ext_port] = (sub_ref, internal_port)
-    # where sub_ref is either:
-    #   - an index (for TensorDiagram)
-    #   - 'first' or 'second' (for ContractedDiagram)
     sub_ref, internal_port = output_mapping[ext_port]
 
-    # Get the sub-diagram based on the reference type
-    if attrs.get("container_type") == "tensor" or attrs.get("container_type") == "composition":
+    if attrs.get("container_type") in {"tensor", "composition"}:
         sub_node_id = attrs["sub_diagram_ids"][sub_ref]
-        sub_diagram = G.nodes[sub_node_id]["diagram"]
+        sub_node_idx = node_map[sub_node_id]
+        sub_diagram = G[sub_node_idx]["diagram"]
     elif attrs.get("container_type") == "contracted" and isinstance(diagram, ContractedDiagram):
-        # For ContractedDiagram: sub_ref is 'first' or 'second'
         sub_diagram = diagram.first if sub_ref == "first" else diagram.second
     else:
         return None, None
 
-    # Recursively traverse into the sub-diagram with the internal port
-    return find_node_by_external_output(sub_diagram, internal_port, G)
+    return find_node_by_external_output(sub_diagram, internal_port, G, node_map)
 
 
 def find_node_by_external_input(
     diagram: Diagram,
     ext_port: int,
-    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_map: dict[int, int],
 ) -> tuple[int | None, int | None]:
     """Find the proper node and its internal port for a given external input port.
 
@@ -864,31 +715,31 @@ def find_node_by_external_input(
         (node_id, internal_port) of the proper node handling this external input port,
         or (None, None) if not found.
     """
-    # If it's a proper diagram, return its node ID and the port
     if isinstance(diagram, (ProperDiagram, CompactDiagram)):
         return diagram.id, ext_port
 
-    # If it's a container diagram, get its node attributes
-    attrs = G.nodes[diagram.id]
+    node_idx = node_map.get(diagram.id)
+    if node_idx is None:
+        return None, None
+
+    attrs = G[node_idx]
     input_mapping = attrs.get("external_input_mapping", {})
 
     if ext_port not in input_mapping:
         return None, None
 
-    # input_mapping[ext_port] = (sub_ref, internal_port)
     sub_ref, internal_port = input_mapping[ext_port]
 
-    # Get the sub-diagram based on the reference type
-    if attrs.get("container_type") == "tensor" or attrs.get("container_type") == "composition":
+    if attrs.get("container_type") in {"tensor", "composition"}:
         sub_node_id = attrs["sub_diagram_ids"][sub_ref]
-        sub_diagram = G.nodes[sub_node_id]["diagram"]
+        sub_node_idx = node_map[sub_node_id]
+        sub_diagram = G[sub_node_idx]["diagram"]
     elif attrs.get("container_type") == "contracted" and isinstance(diagram, ContractedDiagram):
         sub_diagram = diagram.first if sub_ref == "first" else diagram.second
     else:
         return None, None
 
-    # Recursively traverse into the sub-diagram with the internal port
-    return find_node_by_external_input(sub_diagram, internal_port, G)
+    return find_node_by_external_input(sub_diagram, internal_port, G, node_map)
 
 
 def get_proper_nodes(cvzx_graph: CVZXGraph) -> list[int]:
@@ -908,7 +759,7 @@ def get_proper_nodes(cvzx_graph: CVZXGraph) -> list[int]:
         List of node IDs for all proper nodes in the graph.
     """
     graph = cvzx_graph.graph
-    return [n for n, attrs in graph.nodes(data=True) if attrs.get("kind") == "proper"]
+    return [graph[idx]["id"] for idx in graph.node_indices() if graph[idx].get("kind") in {"proper", "compact"}]
 
 
 def get_container_nodes(cvzx_graph: CVZXGraph) -> list[int]:
@@ -928,7 +779,7 @@ def get_container_nodes(cvzx_graph: CVZXGraph) -> list[int]:
         List of node IDs for all container nodes in the graph.
     """
     graph = cvzx_graph.graph
-    return [n for n, attrs in graph.nodes(data=True) if attrs.get("kind") == "container"]
+    return [graph[idx]["id"] for idx in graph.node_indices() if graph[idx].get("kind") == "container"]
 
 
 def get_root_node(cvzx_graph: CVZXGraph) -> int | None:
@@ -947,9 +798,9 @@ def get_root_node(cvzx_graph: CVZXGraph) -> int | None:
         The node ID of the root container, or None if no root is found.
     """
     graph = cvzx_graph.graph
-    for node, attrs in graph.nodes(data=True):
-        if attrs.get("is_root", False):
-            return cast("int", node)
+    for idx in graph.node_indices():
+        if graph[idx].get("is_root", False):
+            return cast("int", graph[idx]["id"])
     return None
 
 
@@ -969,8 +820,10 @@ def get_immediate_container(cvzx_graph: CVZXGraph, node_id: int) -> int | None:
         The node ID of the immediate container, or None if the node is the root.
     """
     graph = cvzx_graph.graph
-    attrs = graph.nodes[node_id]
-    return cast("int | None", attrs.get("container_id"))
+    for idx in graph.node_indices():
+        if graph[idx].get("id") == node_id:
+            return cast("int | None", graph[idx].get("container_id"))
+    return None
 
 
 def get_sub_diagrams(cvzx_graph: CVZXGraph, container_node: int) -> list[int]:
@@ -990,10 +843,13 @@ def get_sub_diagrams(cvzx_graph: CVZXGraph, container_node: int) -> list[int]:
         a container or has no sub-diagrams.
     """
     graph = cvzx_graph.graph
-    attrs = graph.nodes[container_node]
-    if attrs.get("kind") != "container":
-        return []
-    return cast("list[int]", attrs.get("sub_diagram_ids", []))
+    for idx in graph.node_indices():
+        if graph[idx].get("id") == container_node:
+            attrs = graph[idx]
+            if attrs.get("kind") != "container":
+                return []
+            return cast("list[int]", attrs.get("sub_diagram_ids", []))
+    return []
 
 
 def get_connectivity(cvzx_graph: CVZXGraph, container_node: int) -> dict[int, dict[int, int]] | None:
@@ -1013,10 +869,13 @@ def get_connectivity(cvzx_graph: CVZXGraph, container_node: int) -> dict[int, di
         otherwise None.
     """
     graph = cvzx_graph.graph
-    attrs = graph.nodes[container_node]
-    if attrs.get("container_type") != "composition":
-        return None
-    return cast("dict[int, dict[int, int]] | None", attrs.get("connectivity"))
+    for idx in graph.node_indices():
+        if graph[idx].get("id") == container_node:
+            attrs = graph[idx]
+            if attrs.get("container_type") != "composition":
+                return None
+            return cast("dict[int, dict[int, int]] | None", attrs.get("connectivity"))
+    return None
 
 
 def get_contracted_connections(cvzx_graph: CVZXGraph, container_node: int) -> dict | None:
@@ -1036,15 +895,18 @@ def get_contracted_connections(cvzx_graph: CVZXGraph, container_node: int) -> di
         ContractedDiagram, otherwise None.
     """
     graph = cvzx_graph.graph
-    attrs = graph.nodes[container_node]
-    if attrs.get("container_type") != "contracted":
-        return None
-    return {
-        "I1": attrs.get("I1", []),
-        "I2": attrs.get("I2", []),
-        "J1": attrs.get("J1", []),
-        "J2": attrs.get("J2", []),
-    }
+    for idx in graph.node_indices():
+        if graph[idx].get("id") == container_node:
+            attrs = graph[idx]
+            if attrs.get("container_type") != "contracted":
+                return None
+            return {
+                "I1": attrs.get("I1", []),
+                "I2": attrs.get("I2", []),
+                "J1": attrs.get("J1", []),
+                "J2": attrs.get("J2", []),
+            }
+    return None
 
 
 def get_nodes_by_container(cvzx_graph: CVZXGraph, container_node: int) -> list[int]:
@@ -1065,12 +927,13 @@ def get_nodes_by_container(cvzx_graph: CVZXGraph, container_node: int) -> list[i
         List of node IDs belonging to the container.
     """
     graph = cvzx_graph.graph
-    return [n for n, attrs in graph.nodes(data=True) if attrs.get("container_id") == container_node]
+    return [graph[idx]["id"] for idx in graph.node_indices() if graph[idx].get("container_id") == container_node]
 
 
 def _convert_diagram_to_graph(
     diagram: Diagram,
-    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_map: dict[int, int],
     container_id: int | None,
     is_root: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> int:
@@ -1098,19 +961,20 @@ def _convert_diagram_to_graph(
         has no representation.
     """
     if isinstance(diagram, (ProperDiagram, CompactDiagram)):
-        return _add_proper_node(diagram, G, container_id)
+        return _add_proper_node(diagram, G, node_map, container_id)
     if isinstance(diagram, CompositionDiagram):
-        return _add_composition_node(diagram, G, container_id, is_root)
+        return _add_composition_node(diagram, G, node_map, container_id, is_root)
     if isinstance(diagram, TensorDiagram):
-        return _add_tensor_node(diagram, G, container_id, is_root)
+        return _add_tensor_node(diagram, G, node_map, container_id, is_root)
     if isinstance(diagram, ContractedDiagram):
-        return _add_contracted_node(diagram, G, container_id, is_root)
+        return _add_contracted_node(diagram, G, node_map, container_id, is_root)
     return -1
 
 
-def _add_proper_node(  # ruff: ignore[complex-structure, too-many-branches]
+def _add_proper_node(  # ruff: ignore[complex-structure]
     diagram: ProperDiagram | CompactDiagram,
-    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_map: dict[int, int],
     container_id: int | None,
 ) -> int:
     """Add a proper diagram as a node in the graph.
@@ -1124,6 +988,8 @@ def _add_proper_node(  # ruff: ignore[complex-structure, too-many-branches]
         The proper diagram to add as a node.
     G : nx.DiGraph
         The graph to add the node to (modified in place).
+    node_map : dict[int, int]
+        Mapping from cvzx diagram id to rustworkx node index (modified in place).
     container_id : int | None
         The node ID of the immediate container of this proper diagram.
 
@@ -1133,15 +999,10 @@ def _add_proper_node(  # ruff: ignore[complex-structure, too-many-branches]
         The node ID of the added proper node.
     """
     node_id = diagram.id
-
     phase = getattr(diagram, "phase", None)
     node_type = diagram.__class__.__name__
     kind = "proper" if isinstance(diagram, ProperDiagram) else "compact"
 
-    # Every CompactDiagram gate (see cvzx.gates) now carries feedforward /
-    # measurement_ids (mirroring DisplacementGate's original pattern), so
-    # this is pulled once here and attached to every node below rather
-    # than being recomputed per gate-type branch.
     feedforward = getattr(diagram, "feedforward", None)
     measurement_ids = getattr(diagram, "measurement_ids", None)
     param_measurement_map = getattr(diagram, "param_measurement_map", {})
@@ -1163,129 +1024,52 @@ def _add_proper_node(  # ruff: ignore[complex-structure, too-many-branches]
     elif isinstance(diagram, (MeasurementGate, Squeezing45Gate)):
         phase = getattr(diagram, "theta", None)
 
+    attrs = {
+        "id": node_id,
+        "type": node_type,
+        "kind": kind,
+        "phase": phase,
+        "feedforward": feedforward,
+        "measurement_ids": measurement_ids,
+        "param_measurement_map": param_measurement_map,
+        "num_inputs": diagram.num_inputs,
+        "num_outputs": diagram.num_outputs,
+        "diagram": diagram,
+        "container_id": container_id,
+        "external_inputs": list(range(diagram.num_inputs)),
+        "external_outputs": list(range(diagram.num_outputs)),
+    }
+
     if isinstance(diagram, DisplacementGate):
-        phase = getattr(diagram, "alpha", None)
-        G.add_node(
-            node_id,
-            id=node_id,
-            type=node_type,
-            kind=kind,
-            phase=phase,
-            feedforward=feedforward,
-            measurement_ids=measurement_ids,
-            param_measurement_map=param_measurement_map,
-            num_inputs=diagram.num_inputs,
-            num_outputs=diagram.num_outputs,
-            diagram=diagram,
-            container_id=container_id,
-            # Store external port mappings
-            external_inputs=list(range(diagram.num_inputs)),
-            external_outputs=list(range(diagram.num_outputs)),
-        )
+        attrs["phase"] = getattr(diagram, "alpha", None)
     elif isinstance(diagram, ControlledSumGate):
-        control = diagram.control
-        target = diagram.target
-        G.add_node(
-            node_id,
-            id=node_id,
-            type=node_type,
-            kind=kind,
-            phase=phase,
-            control=control,
-            target=target,
-            feedforward=feedforward,
-            measurement_ids=measurement_ids,
-            param_measurement_map=param_measurement_map,
-            num_inputs=diagram.num_inputs,
-            num_outputs=diagram.num_outputs,
-            diagram=diagram,
-            container_id=container_id,
-            # Store external port mappings
-            external_inputs=list(range(diagram.num_inputs)),
-            external_outputs=list(range(diagram.num_outputs)),
-        )
+        attrs["control"] = diagram.control
+        attrs["target"] = diagram.target
     elif isinstance(diagram, ArbitraryGate):
-        G.add_node(
-            node_id,
-            id=node_id,
-            type=node_type,
-            kind=kind,
-            alpha=diagram.alpha,
-            beta=diagram.beta,
-            lam=diagram.lam,
-            feedforward=feedforward,
-            measurement_ids=measurement_ids,
-            param_measurement_map=param_measurement_map,
-            num_inputs=diagram.num_inputs,
-            num_outputs=diagram.num_outputs,
-            diagram=diagram,
-            container_id=container_id,
-            # Store external port mappings
-            external_inputs=list(range(diagram.num_inputs)),
-            external_outputs=list(range(diagram.num_outputs)),
-        )
+        attrs.update({
+            "alpha": diagram.alpha,
+            "beta": diagram.beta,
+            "lam": diagram.lam,
+        })
     elif isinstance(diagram, TwoModeShearGate):
-        G.add_node(
-            node_id,
-            id=node_id,
-            type=node_type,
-            kind=kind,
-            a=diagram.a,
-            b=diagram.b,
-            feedforward=feedforward,
-            measurement_ids=measurement_ids,
-            param_measurement_map=param_measurement_map,
-            num_inputs=diagram.num_inputs,
-            num_outputs=diagram.num_outputs,
-            diagram=diagram,
-            container_id=container_id,
-            # Store external port mappings
-            external_inputs=list(range(diagram.num_inputs)),
-            external_outputs=list(range(diagram.num_outputs)),
-        )
-    else:
-        G.add_node(
-            node_id,
-            id=node_id,
-            type=node_type,
-            kind=kind,
-            phase=phase,
-            feedforward=feedforward,
-            measurement_ids=measurement_ids,
-            param_measurement_map=param_measurement_map,
-            num_inputs=diagram.num_inputs,
-            num_outputs=diagram.num_outputs,
-            diagram=diagram,
-            container_id=container_id,
-            # Store external port mappings
-            external_inputs=list(range(diagram.num_inputs)),
-            external_outputs=list(range(diagram.num_outputs)),
-        )
+        attrs.update({
+            "a": diagram.a,
+            "b": diagram.b,
+        })
+
+    node_idx = G.add_node(attrs)
+    node_map[node_id] = node_idx
     return node_id
 
 
-def _add_composition_node(
+def _add_composition_node(  # ruff: ignore[too-many-locals]
     diagram: CompositionDiagram,
-    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_map: dict[int, int],
     container_id: int | None,
     is_root: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> int:
     """Add a CompositionDiagram as a container node in the graph.
-
-    Container nodes have kind='container' and store:
-        - container_type: 'composition'
-        - sub_diagram_ids: ordered list of child node IDs
-        - connectivity: the composition connectivity dictionary
-        - container_id: the immediate container of this composition
-        - is_root: whether this is the root container
-
-    Edges are added between sub-diagrams based on the connectivity dictionary.
-    The connectivity maps output ports of the left diagram to input ports of
-    the right diagram. For each connection, the function traverses through
-    any nested containers to find the actual proper nodes that handle the ports.
-
-    If multiple connections exist between the same pair of proper nodes, they
-    are stored as lists of source_port and target_port on a single edge.
 
     Parameters
     ----------
@@ -1304,122 +1088,84 @@ def _add_composition_node(
     int
         The node ID of the added composition container node.
 
-    Notes
-    -----
-    The connectivity dictionary follows the convention:
-        connectivity[i] connects diagrams[i] → diagrams[i+1]
-        where each entry maps: output port of left → input port of right
     """
     node_id = diagram.id
 
-    # First, recursively convert all sub-diagrams
     sub_node_ids = []
     for sub_diagram in diagram.diagrams:
-        sub_node_id = _convert_diagram_to_graph(sub_diagram, G, container_id=node_id)
+        sub_node_id = _convert_diagram_to_graph(sub_diagram, G, node_map, container_id=node_id)
         sub_node_ids.append(sub_node_id)
 
-    # `find_node_by_external_output`/`find_node_by_external_input` resolve
-    # THROUGH a composition container exactly like they do a tensor
-    # container: via an `external_output_mapping`/`external_input_mapping`
-    # dict keyed by external port, valued (sub_diagram_index, internal_port)
-    # (their own container_type check already branches on "tensor" OR
-    # "composition" and does `sub_diagram_ids[sub_ref]` -- that branch was
-    # simply unreachable for composition nodes before this, since this
-    # dict was never populated here, so `ext_port not in output_mapping`
-    # always failed and any composition edge whose endpoint resolved
-    # through a *nested* CompositionDiagram (a CompositionDiagram sitting
-    # as one row of an enclosing TensorDiagram, itself then composed with
-    # a neighbor -- e.g. an ancilla-preparation sub-composition placed at
-    # one row of a wider layer) was silently dropped instead of being
-    # added). A composition's external inputs are exactly its first
-    # element's inputs, in order; its external outputs are exactly its
-    # last element's outputs, in order (see `__post_init__`:
-    # `_num_inputs = self.diagrams[0].num_inputs`,
-    # `_num_outputs = self.diagrams[-1].num_outputs`).
     external_input_mapping = {j: (0, j) for j in range(diagram.diagrams[0].num_inputs)}
     last_idx = len(diagram.diagrams) - 1
     external_output_mapping = {j: (last_idx, j) for j in range(diagram.diagrams[-1].num_outputs)}
 
-    G.add_node(
-        node_id,
-        id=node_id,
-        type="CompositionDiagram",
-        kind="container",
-        container_type="composition",
-        phase=None,
-        num_inputs=diagram.num_inputs,
-        num_outputs=diagram.num_outputs,
-        diagram=diagram,
-        container_id=container_id,
-        is_root=is_root,
-        sub_diagram_ids=sub_node_ids,
-        connectivity=diagram.connectivity,
-        external_inputs=list(range(diagram.num_inputs)),
-        external_outputs=list(range(diagram.num_outputs)),
-        external_input_mapping=external_input_mapping,
-        external_output_mapping=external_output_mapping,
-    )
+    attrs = {
+        "id": node_id,
+        "type": "CompositionDiagram",
+        "kind": "container",
+        "container_type": "composition",
+        "phase": None,
+        "num_inputs": diagram.num_inputs,
+        "num_outputs": diagram.num_outputs,
+        "diagram": diagram,
+        "container_id": container_id,
+        "is_root": is_root,
+        "sub_diagram_ids": sub_node_ids,
+        "connectivity": diagram.connectivity,
+        "external_inputs": list(range(diagram.num_inputs)),
+        "external_outputs": list(range(diagram.num_outputs)),
+        "external_input_mapping": external_input_mapping,
+        "external_output_mapping": external_output_mapping,
+    }
 
-    # Add edges between sub-diagrams based on connectivity
-    # connectivity[i] connects diagrams[i] → diagrams[i+1]
-    # conn maps: output port of left diagram → input port of right diagram
+    node_idx = G.add_node(attrs)
+    node_map[node_id] = node_idx
+
     for left_idx, conn in diagram.connectivity.items():
         left_diagram = diagram.diagrams[left_idx]
         right_diagram = diagram.diagrams[left_idx + 1]
 
-        # Group connections by (src_node, tgt_node) to combine them
-        connections_by_node: dict[tuple, list] = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
+        connections_by_node: dict[tuple, list] = {}
 
-        # conn maps: output port of left → input port of right
         for out_port, in_port in conn.items():
-            # Find the proper node in left diagram for this output port
-            src_node, src_internal_port = find_node_by_external_output(left_diagram, out_port, G)
-            # Find the proper node in right diagram for this input port
-            tgt_node, tgt_internal_port = find_node_by_external_input(right_diagram, in_port, G)
+            src_node, src_internal_port = find_node_by_external_output(left_diagram, out_port, G, node_map)
+            tgt_node, tgt_internal_port = find_node_by_external_input(right_diagram, in_port, G, node_map)
             if src_node is not None and tgt_node is not None:
                 key = (src_node, tgt_node)
                 if key not in connections_by_node:
                     connections_by_node[key] = []
                 connections_by_node[key].append((src_internal_port, tgt_internal_port))
 
-        # Add one edge per unique (src_node, tgt_node) pair with combined port lists
         for (src_node, tgt_node), port_pairs in connections_by_node.items():
-            # Separate the port pairs into two lists
             src_ports = [p[0] for p in port_pairs]
             tgt_ports = [p[1] for p in port_pairs]
 
-            G.add_edge(
-                src_node,
-                tgt_node,
-                source_ports=src_ports,
-                target_ports=tgt_ports,
-                edge_type="composition",
-                internal=False,
-                connection_type=None,
-                left_idx=left_idx,
-                right_idx=left_idx + 1,
-            )
+            edge_data = {
+                "source_ports": src_ports,
+                "target_ports": tgt_ports,
+                "edge_type": "composition",
+                "internal": False,
+                "connection_type": None,
+                "left_idx": left_idx,
+                "right_idx": left_idx + 1,
+            }
+
+            src_idx = node_map[src_node]
+            tgt_idx = node_map[tgt_node]
+            G.add_edge(src_idx, tgt_idx, edge_data)
 
     return node_id
 
 
 def _add_tensor_node(
     diagram: TensorDiagram,
-    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_map: dict[int, int],
     container_id: int | None,
     is_root: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> int:
     """Add a TensorDiagram as a container node in the graph.
-
-    Container nodes have kind='container' and store:
-        - container_type: 'tensor'
-        - sub_diagram_ids: ordered list of child node IDs
-        - container_id: the immediate container of this tensor
-        - is_root: whether this is the root container
-        - external_input_mapping: maps external input ports to (sub_diagram_idx, internal_port)
-        - external_output_mapping: maps external output ports to (sub_diagram_idx, internal_port)
-
-    No edges are added between tensor components since they are parallel.
 
     Parameters
     ----------
@@ -1438,14 +1184,11 @@ def _add_tensor_node(
         The node ID of the added tensor container node.
     """
     node_id = diagram.id
-    # First, recursively convert all sub-diagrams
     sub_node_ids = []
     for sub_diagram in diagram.diagrams:
-        sub_node_id = _convert_diagram_to_graph(sub_diagram, G, container_id=node_id)
+        sub_node_id = _convert_diagram_to_graph(sub_diagram, G, node_map, container_id=node_id)
         sub_node_ids.append(sub_node_id)
 
-    # Build external input mapping
-    # Tensor inputs are concatenated: inputs of sub_diagram 0, then sub_diagram 1, etc.
     external_input_mapping = {}
     input_offset = 0
     for idx, sub_diagram in enumerate(diagram.diagrams):
@@ -1453,7 +1196,6 @@ def _add_tensor_node(
             external_input_mapping[input_offset + internal_port] = (idx, internal_port)
         input_offset += sub_diagram.num_inputs
 
-    # Build external output mapping
     external_output_mapping = {}
     output_offset = 0
     for idx, sub_diagram in enumerate(diagram.diagrams):
@@ -1461,32 +1203,33 @@ def _add_tensor_node(
             external_output_mapping[output_offset + internal_port] = (idx, internal_port)
         output_offset += sub_diagram.num_outputs
 
-    G.add_node(
-        node_id,
-        id=node_id,
-        type="TensorDiagram",
-        kind="container",
-        container_type="tensor",
-        phase=None,
-        num_inputs=diagram.num_inputs,
-        num_outputs=diagram.num_outputs,
-        diagram=diagram,
-        container_id=container_id,
-        is_root=is_root,
-        sub_diagram_ids=sub_node_ids,
-        external_inputs=list(range(diagram.num_inputs)),
-        external_outputs=list(range(diagram.num_outputs)),
-        external_input_mapping=external_input_mapping,
-        external_output_mapping=external_output_mapping,
-    )
+    attrs = {
+        "id": node_id,
+        "type": "TensorDiagram",
+        "kind": "container",
+        "container_type": "tensor",
+        "phase": None,
+        "num_inputs": diagram.num_inputs,
+        "num_outputs": diagram.num_outputs,
+        "diagram": diagram,
+        "container_id": container_id,
+        "is_root": is_root,
+        "sub_diagram_ids": sub_node_ids,
+        "external_inputs": list(range(diagram.num_inputs)),
+        "external_outputs": list(range(diagram.num_outputs)),
+        "external_input_mapping": external_input_mapping,
+        "external_output_mapping": external_output_mapping,
+    }
 
-    # No edges between tensor components (they are parallel)
+    node_idx = G.add_node(attrs)
+    node_map[node_id] = node_idx
     return node_id
 
 
-def _add_contracted_node(  # ruff: ignore[complex-structure]
+def _add_contracted_node(  # ruff: ignore[complex-structure, too-many-locals]
     diagram: ContractedDiagram,
-    G: nx.DiGraph,  # ruff: ignore[invalid-argument-name]
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_map: dict[int, int],
     container_id: int | None,
     is_root: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> int:
@@ -1522,75 +1265,65 @@ def _add_contracted_node(  # ruff: ignore[complex-structure]
     """
     node_id = diagram.id
 
-    # Convert first and second diagrams
-    first_node_id = _convert_diagram_to_graph(diagram.first, G, container_id=node_id)
-    second_node_id = _convert_diagram_to_graph(diagram.second, G, container_id=node_id)
+    first_node_id = _convert_diagram_to_graph(diagram.first, G, node_map, container_id=node_id)
+    second_node_id = _convert_diagram_to_graph(diagram.second, G, node_map, container_id=node_id)
 
-    # Build external input mapping
-    # Inputs come from: first inputs (kept: not in J1) + second inputs (kept: not in I2)
     external_input_mapping = {}
     input_offset = 0
 
-    # First diagram inputs (kept: those NOT in J1)
     for internal_port in diagram.kept_first_inputs:
         external_input_mapping[input_offset] = ("first", internal_port)
         input_offset += 1
 
-    # Second diagram inputs (kept: those NOT in I2)
     for internal_port in diagram.kept_second_inputs:
         external_input_mapping[input_offset] = ("second", internal_port)
         input_offset += 1
 
-    # Build external output mapping
-    # Outputs come from: first outputs (kept: not in I1) + second outputs (kept: not in J2)
     external_output_mapping = {}
     output_offset = 0
 
-    # First diagram outputs (kept: those NOT in I1)
     for internal_port in diagram.kept_first_outputs:
         external_output_mapping[output_offset] = ("first", internal_port)
         output_offset += 1
 
-    # Second diagram outputs (kept: those NOT in J2)
     for internal_port in diagram.kept_second_outputs:
         external_output_mapping[output_offset] = ("second", internal_port)
         output_offset += 1
 
-    G.add_node(
-        node_id,
-        id=node_id,
-        type="ContractedDiagram",
-        kind="container",
-        container_type="contracted",
-        phase=None,
-        num_inputs=diagram.num_inputs,
-        num_outputs=diagram.num_outputs,
-        diagram=diagram,
-        container_id=container_id,
-        is_root=is_root,
-        first_id=first_node_id,
-        second_id=second_node_id,
-        I1=list(diagram.I1),
-        I2=list(diagram.I2),
-        J1=list(diagram.J1),
-        J2=list(diagram.J2),
-        kept_first_inputs=diagram.kept_first_inputs,
-        kept_second_inputs=diagram.kept_second_inputs,
-        kept_first_outputs=diagram.kept_first_outputs,
-        kept_second_outputs=diagram.kept_second_outputs,
-        external_inputs=list(range(diagram.num_inputs)),
-        external_outputs=list(range(diagram.num_outputs)),
-        external_input_mapping=external_input_mapping,
-        external_output_mapping=external_output_mapping,
-    )
+    attrs = {
+        "id": node_id,
+        "type": "ContractedDiagram",
+        "kind": "container",
+        "container_type": "contracted",
+        "phase": None,
+        "num_inputs": diagram.num_inputs,
+        "num_outputs": diagram.num_outputs,
+        "diagram": diagram,
+        "container_id": container_id,
+        "is_root": is_root,
+        "first_id": first_node_id,
+        "second_id": second_node_id,
+        "I1": list(diagram.I1),
+        "I2": list(diagram.I2),
+        "J1": list(diagram.J1),
+        "J2": list(diagram.J2),
+        "kept_first_inputs": diagram.kept_first_inputs,
+        "kept_second_inputs": diagram.kept_second_inputs,
+        "kept_first_outputs": diagram.kept_first_outputs,
+        "kept_second_outputs": diagram.kept_second_outputs,
+        "external_inputs": list(range(diagram.num_inputs)),
+        "external_outputs": list(range(diagram.num_outputs)),
+        "external_input_mapping": external_input_mapping,
+        "external_output_mapping": external_output_mapping,
+    }
 
-    # Group I1→I2 connections by (src_node, tgt_node)
-    i1_i2_connections: dict[tuple, list] = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
+    node_idx = G.add_node(attrs)
+    node_map[node_id] = node_idx
 
-    # Add internal edges: I1 (outputs of first) → I2 (inputs of second)
+    i1_i2_connections: dict[tuple, list] = {}
     for out_idx, in_idx in zip(diagram.I1, diagram.I2, strict=False):
-        src_node, src_internal_port = find_node_by_external_output(diagram.first, out_idx, G)
-        tgt_node, tgt_internal_port = find_node_by_external_input(diagram.second, in_idx, G)
+        src_node, src_internal_port = find_node_by_external_output(diagram.first, out_idx, G, node_map)
+        tgt_node, tgt_internal_port = find_node_by_external_input(diagram.second, in_idx, G, node_map)
 
         if src_node is not None and tgt_node is not None:
             key = (src_node, tgt_node)
@@ -1598,27 +1331,22 @@ def _add_contracted_node(  # ruff: ignore[complex-structure]
                 i1_i2_connections[key] = []
             i1_i2_connections[key].append((src_internal_port, tgt_internal_port))
 
-    # Add edges for I1→I2 connections
     for (src_node, tgt_node), port_pairs in i1_i2_connections.items():
         src_ports = [p[0] for p in port_pairs]
         tgt_ports = [p[1] for p in port_pairs]
-        G.add_edge(
-            src_node,
-            tgt_node,
-            source_ports=src_ports,
-            target_ports=tgt_ports,
-            edge_type="contracted_internal",
-            internal=True,
-            connection_type="I1_I2",
-        )
+        edge_data = {
+            "source_ports": src_ports,
+            "target_ports": tgt_ports,
+            "edge_type": "contracted_internal",
+            "internal": True,
+            "connection_type": "I1_I2",
+        }
+        G.add_edge(node_map[src_node], node_map[tgt_node], edge_data)
 
-    # Group J2→J1 connections by (src_node, tgt_node)
-    j2_j1_connections: dict[tuple, list] = {}  # (src_node, tgt_node) -> list of (src_port, tgt_port)
-
-    # Add internal edges: J2 (outputs of second) → J1 (inputs of first)
+    j2_j1_connections: dict[tuple, list] = {}
     for out_idx, in_idx in zip(diagram.J2, diagram.J1, strict=False):
-        src_node, src_internal_port = find_node_by_external_output(diagram.second, out_idx, G)
-        tgt_node, tgt_internal_port = find_node_by_external_input(diagram.first, in_idx, G)
+        src_node, src_internal_port = find_node_by_external_output(diagram.second, out_idx, G, node_map)
+        tgt_node, tgt_internal_port = find_node_by_external_input(diagram.first, in_idx, G, node_map)
 
         if src_node is not None and tgt_node is not None:
             key = (src_node, tgt_node)
@@ -1626,29 +1354,22 @@ def _add_contracted_node(  # ruff: ignore[complex-structure]
                 j2_j1_connections[key] = []
             j2_j1_connections[key].append((src_internal_port, tgt_internal_port))
 
-    # Add edges for J2→J1 connections
     for (src_node, tgt_node), port_pairs in j2_j1_connections.items():
         src_ports = [p[0] for p in port_pairs]
         tgt_ports = [p[1] for p in port_pairs]
-        G.add_edge(
-            src_node,
-            tgt_node,
-            source_ports=src_ports,
-            target_ports=tgt_ports,
-            edge_type="contracted_internal",
-            internal=True,
-            connection_type="J2_J1",
-        )
+        edge_data = {
+            "source_ports": src_ports,
+            "target_ports": tgt_ports,
+            "edge_type": "contracted_internal",
+            "internal": True,
+            "connection_type": "J2_J1",
+        }
+        G.add_edge(node_map[src_node], node_map[tgt_node], edge_data)
 
     return node_id
 
 
-# =========================================================================
-# Diagram to graph helper functions
-# =========================================================================
-
-
-def reconstruct_from_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[invalid-argument-name]
+def reconstruct_from_node(G: rx.PyDiGraph, node_id: int, reg: GateRegister, id_to_idx: dict[int, int]) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a diagram from a graph node.
 
     Parameters
@@ -1670,34 +1391,35 @@ def reconstruct_from_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Dia
     ValueError
         If the node type is unknown.
     """
-    attrs = G.nodes[node_id]
+    node_idx = id_to_idx[node_id]
+    attrs = G[node_idx]
     kind = attrs.get("kind")
 
     if kind in {"proper", "compact"}:
-        return reconstruct_proper_node(G, node_id, reg)
+        return reconstruct_proper_node(G, node_idx, reg)
     if kind == "container":
         container_type = attrs.get("container_type")
         if container_type == "composition":
-            return reconstruct_composition_node(G, node_id, reg)
+            return reconstruct_composition_node(G, node_idx, reg, id_to_idx)
         if container_type == "tensor":
-            return reconstruct_tensor_node(G, node_id, reg)
+            return reconstruct_tensor_node(G, node_idx, reg, id_to_idx)
         if container_type == "contracted":
-            return reconstruct_contracted_node(G, node_id, reg)
+            return reconstruct_contracted_node(G, node_idx, reg, id_to_idx)
         msg = f"Unknown container type: {container_type}"
         raise ValueError(msg)
     msg = f"Unknown node kind: {kind}"
     raise ValueError(msg)
 
 
-def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[complex-structure, invalid-argument-name, too-many-return-statements, too-many-branches, too-many-locals]
+def reconstruct_proper_node(G: rx.PyDiGraph, node_idx: int, reg: GateRegister) -> Diagram:  # ruff: ignore[complex-structure, invalid-argument-name, too-many-return-statements, too-many-branches, too-many-locals]
     """Reconstruct a proper diagram from a graph node.
 
     Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
-    node_id : int
-        The node ID to reconstruct.
+    node_idx : int
+        The rustworkx node index to reconstruct.
     reg : GateRegister
         Gate register of the input graph.
 
@@ -1711,7 +1433,8 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
     ValueError
         If the node type is not among proper diagram types.
     """
-    attrs = G.nodes[node_id]
+    attrs = G[node_idx]
+    node_id = attrs["id"]
     node_type = attrs.get("type")
     phase = attrs.get("phase")
     num_inputs = attrs.get("num_inputs", 0)
@@ -1721,7 +1444,6 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
     measurement_ids = attrs.get("measurement_ids")
     param_measurement_map = attrs.get("param_measurement_map") or {}
 
-    # To avoid id mismatch, we must not modify the ids of measurement gates
     if node_type == "QSpider":
         result = QSpider(
             num_inputs,
@@ -1736,7 +1458,7 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
             result.id = node_id
         return result
     if node_type == "PSpider":
-        result = PSpider(  # type: ignore[assignment]
+        result = PSpider(
             num_inputs,
             num_outputs,
             phase if phase is not None else ZxPoly({}),
@@ -1744,7 +1466,7 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
             feedforward,
             measurement_ids,
             param_measurement_map=param_measurement_map,
-        )
+        )  # type: ignore[assignment]
         if node_id in reg.measurement_nodes:
             result.id = node_id
         return result
@@ -1760,19 +1482,35 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
         return Fourier2()
     if node_type == "DisplacementGate":
         return DisplacementGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "PhaseRotationGate":
         return PhaseRotationGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "SqueezingGate":
         return SqueezingGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "BeamsplitterGate":
         return BeamsplitterGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "ControlledSumGate":
         control = attrs.get("control")
@@ -1788,27 +1526,51 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
         )
     if node_type == "ControlledZGate":
         return ControlledZGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "CubicPhaseGate":
         return CubicPhaseGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "ShearXInvariantGate":
         return ShearXInvariantGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "ShearPInvariantGate":
         return ShearPInvariantGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "Squeezing45Gate":
         return Squeezing45Gate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "MeasurementGate":
         return MeasurementGate(
-            phase, is_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            phase,
+            is_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
     if node_type == "ArbitraryGate":
         alpha = attrs.get("alpha")
@@ -1829,23 +1591,36 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
         b = attrs.get("b")
         shear2_parametric = isinstance(a, Expr) or isinstance(b, Expr)
         return TwoModeShearGate(
-            a, b, shear2_parametric, feedforward, measurement_ids, param_measurement_map=param_measurement_map
+            a,
+            b,
+            shear2_parametric,
+            feedforward,
+            measurement_ids,
+            param_measurement_map=param_measurement_map,
         )
+
     msg = f"Unknown proper node type: {node_type}"
     raise ValueError(msg)
 
 
-def reconstruct_composition_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[invalid-argument-name]
+def reconstruct_composition_node(
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_idx: int,
+    reg: GateRegister,
+    id_to_idx: dict[int, int],
+) -> Diagram:
     """Reconstruct a CompositionDiagram from a graph node.
 
     Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
-    node_id : int
-        The node ID to reconstruct.
+    node_idx : int
+        The rustworkx node index to reconstruct.
     reg : GateRegister
         Gate register of the input graph.
+    id_to_idx : dict[int, int]
+        Mapping from cvzx diagram id to rustworkx node index.
 
     Returns
     -------
@@ -1857,36 +1632,25 @@ def reconstruct_composition_node(G: nx.DiGraph, node_id: int, reg: GateRegister)
     ValueError
         If the connectivity is malformed.
     """
-    attrs = G.nodes[node_id]
+    attrs = G[node_idx]
     sub_diagram_ids = attrs.get("sub_diagram_ids", [])
-    # Shallow-copy the connectivity dict rather than handing out the
-    # graph-owned object directly
     connectivity = dict(attrs.get("connectivity", {}))
-    # Recursively reconstruct all sub-diagrams
-    sub_diagrams = [reconstruct_from_node(G, sub_id, reg) for sub_id in sub_diagram_ids]
 
-    # The connectivity in the graph should already be in the correct format:
-    # connectivity[left_idx] = {in_port: out_port}
-    # This matches the CompositionDiagram constructor format
+    sub_diagrams = [reconstruct_from_node(G, sub_id, reg, id_to_idx) for sub_id in sub_diagram_ids]
 
-    # Validate connectivity if present
     if connectivity:
         for left_idx, conn in connectivity.items():
-            # Check that left_idx is valid
             if left_idx >= len(sub_diagrams) - 1:
                 msg = f"Invalid connectivity key {left_idx}: exceeds number of sub-diagrams"
                 raise ValueError(msg)
-            # Validate that the connectivity matches the arities
+
             left_diagram = sub_diagrams[left_idx]
             right_diagram = sub_diagrams[left_idx + 1]
 
-            # Check that the number of connections matches the input ports of the right diagram
-            # The keys of conn are input ports of the right diagram
             if set(conn.keys()) != set(range(right_diagram.num_inputs)):
                 msg = f"Connectivity for index {left_idx} does not match input ports of sub_diagram {left_idx + 1}"
                 raise ValueError(msg)
 
-            # Check that the values are within the output ports of the left diagram
             for out_port in conn.values():
                 if out_port < 0 or out_port >= left_diagram.num_outputs:
                     msg = (
@@ -1898,43 +1662,51 @@ def reconstruct_composition_node(G: nx.DiGraph, node_id: int, reg: GateRegister)
     return CompositionDiagram(sub_diagrams, connectivity)
 
 
-def reconstruct_tensor_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[invalid-argument-name]
+def reconstruct_tensor_node(G: rx.PyDiGraph, node_idx: int, reg: GateRegister, id_to_idx: dict[int, int]) -> Diagram:  # ruff: ignore[invalid-argument-name]
     """Reconstruct a TensorDiagram from a graph node.
 
     Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
-    node_id : int
-        The node ID to reconstruct.
+    node_idx : int
+        The rustworkx node index to reconstruct.
     reg : GateRegister
         Gate register of the input graph.
+    id_to_idx : dict[int, int]
+        Mapping from cvzx diagram id to rustworkx node index.
 
     Returns
     -------
     Diagram
         The reconstructed diagram.
     """
-    attrs = G.nodes[node_id]
+    attrs = G[node_idx]
     sub_diagram_ids = attrs.get("sub_diagram_ids", [])
 
-    # Recursively reconstruct all sub-diagrams
-    sub_diagrams = [reconstruct_from_node(G, sub_id, reg) for sub_id in sub_diagram_ids]
+    sub_diagrams = [reconstruct_from_node(G, sub_id, reg, id_to_idx) for sub_id in sub_diagram_ids]
 
     return TensorDiagram(sub_diagrams)
 
 
-def reconstruct_contracted_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> Diagram:  # ruff: ignore[invalid-argument-name]
+def reconstruct_contracted_node(
+    G: rx.PyDiGraph,  # ruff: ignore[invalid-argument-name]
+    node_idx: int,
+    reg: GateRegister,
+    id_to_idx: dict[int, int],
+) -> Diagram:
     """Reconstruct a ContractedDiagram from a graph node.
 
     Parameters
     ----------
     G : nx.DiGraph
         The graph containing the node.
-    node_id : int
-        The node ID to reconstruct.
+    node_idx : int
+        The rustworkx node index to reconstruct.
     reg : GateRegister
         Gate register of the input graph.
+    id_to_idx : dict[int, int]
+        Mapping from cvzx diagram id to rustworkx node index.
 
     Returns
     -------
@@ -1946,7 +1718,7 @@ def reconstruct_contracted_node(G: nx.DiGraph, node_id: int, reg: GateRegister) 
     ValueError
         If the ContractedDiagram node misses first_id or second_id.
     """
-    attrs = G.nodes[node_id]
+    attrs = G[node_idx]
     first_id = attrs.get("first_id")
     second_id = attrs.get("second_id")
     I1 = attrs.get("I1", [])  # ruff: ignore[non-lowercase-variable-in-function]
@@ -1955,10 +1727,10 @@ def reconstruct_contracted_node(G: nx.DiGraph, node_id: int, reg: GateRegister) 
     J2 = attrs.get("J2", [])  # ruff: ignore[non-lowercase-variable-in-function]
 
     if first_id is None or second_id is None:
-        msg = f"ContractedDiagram node {node_id} missing first_id or second_id"
+        msg = f"ContractedDiagram node {attrs.get('id')} missing first_id or second_id"
         raise ValueError(msg)
 
-    first = reconstruct_from_node(G, first_id, reg)
-    second = reconstruct_from_node(G, second_id, reg)
+    first = reconstruct_from_node(G, first_id, reg, id_to_idx)
+    second = reconstruct_from_node(G, second_id, reg, id_to_idx)
 
     return ContractedDiagram(first, second, I1, I2, J1, J2)

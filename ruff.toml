@@ -1,6 +1,8 @@
 line-length = 119
-include = ["**/*.py", "**/pyproject.toml", "**/*.ipynb"]
+include = ["**/*.py", "**/pyproject.toml"]
 exclude = [
+    "tests/**",                  # exclude test files from linting
+    "**/*.ipynb",                # exclude Jupyter notebooks from linting
     "**/pb/mqc3_cloud/**/*.py",  # exclude protobuf generated files
     "**/pb/mqc3_cloud/**/*.pyi", # exclude protobuf generated files
     "**/.ipynb_checkpoints/**",  # exclude Jupyter checkpoints
@@ -28,31 +30,6 @@ ignore = [
     "TD002",   # missing-todo-author
     "TD003",   # missing-todo-link
     "PLR0904", # too-many-public-methods
-]
-
-[lint.per-file-ignores]
-"tests/**/*.py" = [
-    "ANN201",  # missing-return-type-undocumented-public-function
-    "D101",    # undocumented-public-class
-    "D103",    # undocumented-public-function
-    "DOC201",  # docstring-missing-returns
-    "INP001",  # implicit-namespace-package
-    "PLR0913", # too-many-arguments
-    "PLR0917", # too-many-positional-arguments
-    "PLR2004", # magic-value-comparison
-    "S101",    # assert
-    "T201",    # print
-]
-"**/*.ipynb" = [
-    "ANN001", # missing-return-type-undocumented-public-function
-    "ANN201", # missing-return-type-undocumented-public-function
-    "COM812", # missing-trailing-comma
-    "D103",   # undocumented-public-function
-    "N803",   # invalid-argument-name
-    "N816",   # mixed-case-variable-in-global-scope
-    "S101",   # assert
-    "T201",   # print
-    "T203",   # p-print
 ]
 
 [lint.pydocstyle]

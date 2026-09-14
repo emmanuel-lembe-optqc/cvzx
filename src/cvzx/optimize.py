@@ -24,8 +24,8 @@ from cvzx.nx_rewrite_rules import (
     IdentityRule,
     RewriteRule,
     TerminalAbsorptionRule,
-    expand_two_mode_gates,
 )
+from cvzx.utils import expand_two_mode_gates
 
 logger = logging.getLogger(__name__)
 

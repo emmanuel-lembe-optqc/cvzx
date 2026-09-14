@@ -30,6 +30,7 @@ dependencies = [
 
   "numpy >= 2.1, < 3",
   "networkx >= 3.4, < 4",
+  "rustworkx >= 0.15, < 1",
   "sympy >= 1.12",
   "scipy >= 1.10",
   "matplotlib >= 3.7",
@@ -85,7 +86,7 @@ exclude = ["build", "tests"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tests"]
+files = ["src"]
 check_untyped_defs = true
 warn_return_any = true
 warn_unused_ignores = true

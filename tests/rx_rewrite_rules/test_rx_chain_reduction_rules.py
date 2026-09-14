@@ -1,6 +1,6 @@
-"""Unit tests for the chain reduction rewrite rule using the graph formalism.
+"""Unit tests for the chain reduction rewrite rule using the rustworkx graph formalism.
 
-These tests verify the ChainReductionRule implementation on graphs, including matching,
+These tests verify the ChainReductionRule implementation on rustworkx graphs, including matching,
 application, flattening, and nested structures. All diagram types from
 `base_gates` are exercised, and both QSpider and PSpider identities are
 covered.
@@ -40,8 +40,8 @@ from cvzx.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
-from cvzx.nx_graph import CVZXGraph, to_diagram, to_graph
-from cvzx.nx_rewrite_rules import ChainReductionRule, IdentityRule
+from cvzx.rx_graph import CVZXGraph, to_diagram, to_graph
+from cvzx.rx_rewrite_rules import ChainReductionRule, IdentityRule, _get_id_map  # ruff: ignore[import-private-name]
 
 
 def _sub(diagram: Diagram, index: int) -> Diagram:
@@ -51,24 +51,15 @@ def _sub(diagram: Diagram, index: int) -> Diagram:
 
 
 def _apply_chain_then_identity(graph: CVZXGraph) -> None:
-    """Apply `ChainReductionRule`, then `IdentityRule`, in that order, in place.
-
-    `ChainReductionRule` reduces each chain to its first member plus one
-    zero-phase identity per other member; `IdentityRule` removes those
-    identities (where they sit in a flat composition) and flattens the
-    resulting compositions. Together they produce the fully-collapsed
-    result the `apply_rule`-level tests assert on. The composition is
-    done here, in the test helper, rather than inside
-    `ChainReductionRule` -- a rule does not call another rule.
-    """
+    """Apply `ChainReductionRule`, then `IdentityRule`, in that order, in place."""
     ChainReductionRule().apply_rule(graph)
     IdentityRule().apply_rule(graph)
 
 
 class TestChainReductionRule(unittest.TestCase):
-    """Test suite for ChainReductionRule."""
+    """Test suite for ChainReductionRule using rustworkx graphs."""
 
-    def setUp(self):  # ruff: ignore[too-many-statements]
+    def setUp(self):
         """Create common objects used in many tests."""
         # Phase polynomials
         self.phase_x2 = ZxPoly({2: 2})
@@ -92,6 +83,7 @@ class TestChainReductionRule(unittest.TestCase):
         self.q_x2_3 = QSpider(1, 1, self.phase_x2_3)
         self.q_x2_2_n32 = QSpider(3, 2, self.phase_x2)
         self.q_x2_3_n23 = QSpider(2, 3, self.phase_x2_3)
+        self.q_x2_3_n23_c = QSpider(2, 3, self.phase_x2_3)
         self.q_x2_3_n34 = QSpider(3, 4, self.phase_x2_3)
         self.q_x2_sum = QSpider(1, 1, self.phase_x2_sum)
 
@@ -115,6 +107,7 @@ class TestChainReductionRule(unittest.TestCase):
         self.p_x2_sum = PSpider(1, 1, self.phase_x2_sum)
 
         self.p_x3_2 = PSpider(1, 1, self.phase_x3)
+        self.p_x3_2_b = PSpider(1, 1, self.phase_x3)
         self.p_x3_4 = PSpider(1, 1, self.phase_x3_4)
         self.p_x3_sum = PSpider(1, 1, self.phase_x3_sum)
 
@@ -131,6 +124,7 @@ class TestChainReductionRule(unittest.TestCase):
         self.swap = Swap()
 
         self.ph_rot1 = PhaseRotationGate(pi / 4)
+        self.ph_rot1_c = PhaseRotationGate(pi / 4)
         self.ph_rot2 = PhaseRotationGate(pi / 3)
         self.ph_rot_sum = PhaseRotationGate(7 * pi / 12)
 
@@ -172,17 +166,17 @@ class TestChainReductionRule(unittest.TestCase):
             self.q_x2_3_n23,
             TensorDiagram([
                 self.bs1,
-                CompositionDiagram([self.ph_rot_sum, self.id_q]),
+                self.ph_rot_sum,
             ]),
         ])
         self.comp3 = CompositionDiagram([
-            self.q_x2_3_n23,
+            self.q_x2_3_n23_c,
             self.p_x2_3_n34,
             TensorDiagram([
                 CompositionDiagram([self.bs3, self.bs2]),
                 TensorDiagram([
-                    CompositionDiagram([self.p_x3_2, self.disp3, self.disp1, self.disp2, self.p_x3_2]),
-                    self.ph_rot1,
+                    CompositionDiagram([self.p_x3_2, self.disp3, self.disp1, self.disp2, self.p_x3_2_b]),
+                    self.ph_rot1_c,
                 ]),
             ]),
         ])
@@ -270,13 +264,14 @@ class TestChainReductionRule(unittest.TestCase):
         self.rule = ChainReductionRule()
 
     # -------------------------------------------------------------------------
-    # 1. Testing _get_gate_info()  (unchanged)
+    # 1. Testing _get_gate_info()
     # -------------------------------------------------------------------------
 
     def test_get_gate_info_q_spider_monomial(self):
         """Q-spider with monomial phase returns ('Q', phase, arities)."""
         graph = to_graph(self.q_x2_2)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.q_x2_2.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, id_map, self.q_x2_2.id)
         assert gate_info is not None
         assert gate_type == "Q"
         assert value == self.phase_x2
@@ -284,7 +279,8 @@ class TestChainReductionRule(unittest.TestCase):
         assert gate_info["num_outputs"] == 1
 
         graph = to_graph(self.q_x2_3_n23)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.q_x2_3_n23.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, id_map, self.q_x2_3_n23.id)
         assert gate_info is not None
         assert gate_type == "Q"
         assert value == self.phase_x2_3
@@ -294,7 +290,8 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_q_spider_mixed(self):
         """Q-spider with mixed phase returns ('Q', phase, arities)."""
         graph = to_graph(self.q_mixed)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.q_mixed.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, id_map, self.q_mixed.id)
         assert gate_info is not None
         assert gate_type == "Q"
         assert value == self.phase_mixed
@@ -304,7 +301,8 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_p_spider_monomial(self):
         """P-spider with monomial phase returns ('P', phase, arities)."""
         graph = to_graph(self.p_x2_2)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.p_x2_2.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, id_map, self.p_x2_2.id)
         assert gate_info is not None
         assert gate_type == "P"
         assert value == self.phase_x2
@@ -314,7 +312,8 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_p_spider_mixed(self):
         """P-spider with mixed phase returns ('P', phase, arities)."""
         graph = to_graph(self.p_mixed)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.p_mixed.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, id_map, self.p_mixed.id)
         assert gate_info is not None
         assert gate_type == "P"
         assert value == self.phase_mixed
@@ -324,63 +323,72 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_phase_rotation(self):
         """PhaseRotationGate returns ('R', theta)."""
         graph = to_graph(self.ph_rot1)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.ph_rot1.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.ph_rot1.id)
         assert gate_type == "R"
         assert isclose(value, pi / 4)
 
     def test_get_gate_info_beamsplitter(self):
         """BeamsplitterGate returns ('BS', theta)."""
         graph = to_graph(self.bs1)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.bs1.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.bs1.id)
         assert gate_type == "BS"
         assert isclose(value, pi / 4)
 
     def test_get_gate_info_squeezing(self):
         """SqueezingGate returns ('Sq', tau)."""
         graph = to_graph(self.sq1)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.sq1.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.sq1.id)
         assert gate_type == "Sq"
         assert isclose(value, 2.0)
 
     def test_get_gate_info_displacement(self):
         """DisplacementGate returns ('D', alpha)."""
         graph = to_graph(self.disp1)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.disp1.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.disp1.id)
         assert gate_type == "D"
-        assert value == 1.0 + 0.5j  # ruff: ignore[float-equality-comparison]
+        assert value == 1.0 + 0.5j
 
     def test_get_gate_info_fourier(self):
         """Fourier returns ('F', 'F')."""
         graph = to_graph(self.fourier)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.fourier.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.fourier.id)
         assert gate_type == "F"
         assert value == "F"
 
     def test_get_gate_info_fourier_inv(self):
         """FourierInv returns ('F', 'Finv')."""
         graph = to_graph(self.fourier_inv)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.fourier_inv.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.fourier_inv.id)
         assert gate_type == "F"
         assert value == "Finv"
 
     def test_get_gate_info_fourier2(self):
         """Fourier2 returns ('F2', 'F2')."""
         graph = to_graph(self.fourier2)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.fourier2.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.fourier2.id)
         assert gate_type == "F2"
         assert value == "F2"
 
     def test_get_gate_info_swap_returns_none(self):
         """Swap returns None (not reducible)."""
         graph = to_graph(self.swap)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.swap.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.swap.id)
         assert gate_type is None
         assert value is None
 
     def test_get_gate_info_csum(self):
         """CSum gate returns ('CSUM', gain, control/target)."""
         graph = to_graph(self.cs)
-        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, self.cs.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, gate_info = self.rule.get_gate_info(graph.graph, id_map, self.cs.id)
         assert gate_info is not None
         assert gate_type == "CSUM"
         assert value == self.cs.gain
@@ -390,12 +398,13 @@ class TestChainReductionRule(unittest.TestCase):
     def test_get_gate_info_cz(self):
         """CZ gate returns ('CZ', gain)."""
         graph = to_graph(self.cz1)
-        gate_type, value, _ = self.rule.get_gate_info(graph.graph, self.cz1.id)
+        id_map = {graph.graph[i]["id"]: i for i in graph.graph.node_indices()}
+        gate_type, value, _ = self.rule.get_gate_info(graph.graph, id_map, self.cz1.id)
         assert gate_type == "CZ"
         assert value == self.cz1.gain
 
     # -------------------------------------------------------------------------
-    # 2. Testing match()  (unchanged)
+    # 2. Testing match()
     # -------------------------------------------------------------------------
 
     def test_match_q_spider_same_degree(self):
@@ -687,7 +696,7 @@ class TestChainReductionRule(unittest.TestCase):
         matches = self.rule.match(graph)
         assert matches == []
 
-    def test_match_compos_in_tensor(self):  # ruff: ignore[complex-structure, too-many-branches]
+    def test_match_compos_in_tensor(self):
         """Chains inside compositions inside a tensor are matched."""
         graph = to_graph(self.tensor1)
         matches1 = self.rule.match(graph)
@@ -772,7 +781,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert matches[0]["node_ids"] == [self.p_x2_2.id, self.p_x2_3.id]
         assert matches[0]["gate_info"]["num_outputs"] == 1
 
-    def test_match_contracted_nested(self):  # ruff: ignore[complex-structure]
+    def test_match_contracted_nested(self):
         """Chain inside a composition inside a ContractedDiagram is found (nested)."""
         q_spider = QSpider(10, 10, self.phase_x2)
         contracted1 = ContractedDiagram(self.tensor2, q_spider, [1, 2, 3], [4, 5, 6], [0, 1, 2, 5], [1, 3, 5, 7])
@@ -819,7 +828,7 @@ class TestChainReductionRule(unittest.TestCase):
                 assert match == self.match6
 
     # -------------------------------------------------------------------------
-    # 3. Testing reduce_chain()  (unchanged)
+    # 3. Testing reduce_chain()
     # -------------------------------------------------------------------------
 
     def test_reduce_q_chain(self):
@@ -906,7 +915,7 @@ class TestChainReductionRule(unittest.TestCase):
         result = self.rule.reduce_chain("D", values)
         assert result is not None
         assert result["type"] == "DisplacementGate"
-        assert result["alpha"] == 3.0 + 1.5j  # ruff: ignore[float-equality-comparison]
+        assert result["alpha"] == 3.0 + 1.5j
 
     def test_reduce_f_chain_two(self):
         """F ∘ F → F²."""
@@ -981,8 +990,6 @@ class TestChainReductionRule(unittest.TestCase):
         }
         graph = to_graph(comp)
         self.rule.apply_single(graph, match)
-        # Intermediate state: the composition keeps all three slots; the
-        # second chain member is a zero-phase identity.
         mid = to_diagram(graph)
         assert isinstance(mid, CompositionDiagram)
         assert len(mid.diagrams) == 3
@@ -991,7 +998,6 @@ class TestChainReductionRule(unittest.TestCase):
         assert isinstance(mid.diagrams[2], QSpider)
         assert mid.diagrams[2].phase == ZxPoly({})
 
-        # Collapsed state after IdentityRule.
         graph.rebuild_registry()
         IdentityRule().apply_rule(graph)
         result = to_diagram(graph)
@@ -1184,10 +1190,6 @@ class TestChainReductionRule(unittest.TestCase):
         graph.rebuild_registry()
         IdentityRule().apply_rule(graph)
         result = to_diagram(graph)
-        # `BS(θ) ∘ BS(-θ)` reduces to `BS(0)`, a `(2,2)` zero-phase QSpider.
-        # The reset second member is also a `(2,2)` zero-phase QSpider. Neither
-        # is a `(1,1)` identity, so `IdentityRule` leaves the composition with
-        # both slots intact.
         assert isinstance(result, CompositionDiagram)
         assert len(result.diagrams) == 2
         assert isinstance(result.diagrams[0], QSpider)
@@ -1326,7 +1328,6 @@ class TestChainReductionRule(unittest.TestCase):
         assert result.diagrams[1].diagrams[2] == self.sq2
         assert result.diagrams[1].diagrams[3] == self.q_x2_sum
 
-        # Execute apply single a second time on another match
         self.rule.apply_single(graph, self.match1)
         graph.rebuild_registry()
         IdentityRule().apply_rule(graph)
@@ -1381,9 +1382,6 @@ class TestChainReductionRule(unittest.TestCase):
         graph = to_graph(comp)
         _apply_chain_then_identity(graph)
         result = to_diagram(graph)
-        # `q_pos ∘ q_neg` reduces to a zero-phase `(1,1)` QSpider, which
-        # `IdentityRule` removes. The composition collapses to the surviving
-        # rotation alone.
         assert result == self.ph_rot1
 
     def test_apply_rule_fourier_chain(self):
@@ -1437,12 +1435,10 @@ class TestChainReductionRule(unittest.TestCase):
         theta = pi / 4 + pi / 6
         comp3_red = _sub(result, 5)
         assert isinstance(comp3_red, CompositionDiagram)
-        assert comp3_red.diagrams[:2] == [self.q_x2_3_n23, self.p_x2_3_n34]
+        assert comp3_red.diagrams[:2] == [self.q_x2_3_n23_c, self.p_x2_3_n34]
         bs_tensor = _sub(comp3_red, 2)
         assert isinstance(bs_tensor, TensorDiagram)
-        # The BS chain's reset member is a `(2,2)` zero-phase QSpider, which
-        # `IdentityRule` leaves in place -- so the surviving BeamsplitterGate
-        # and its wide identity sit together in a small composition.
+
         bs_slot = bs_tensor.diagrams[0]
         assert isinstance(bs_slot, CompositionDiagram)
         assert len(bs_slot.diagrams) == 2
@@ -1452,19 +1448,19 @@ class TestChainReductionRule(unittest.TestCase):
         assert bs_slot.diagrams[1].num_inputs == 2
         assert bs_slot.diagrams[1].num_outputs == 2
         assert bs_slot.diagrams[1].phase == ZxPoly({})
-        # The remaining lanes are untouched.
+
         assert bs_tensor.diagrams[1] == CompositionDiagram([
             self.p_x3_2,
             DisplacementGate(8.0 + 2.5j),
-            self.p_x3_2,
+            self.p_x3_2_b,
         ])
-        assert bs_tensor.diagrams[2] == self.ph_rot_sum
+        assert bs_tensor.diagrams[2] == self.ph_rot1_c
 
     def test_apply_rule_compos_in_contracted(self):
         """Chain inside a composition that is inside a ContractedDiagram."""
         q_spider = QSpider(10, 10, self.phase_x2)
         contracted1 = ContractedDiagram(self.tensor1, q_spider, [1], [0], [0], [1])
-        contracted2 = ContractedDiagram(q_spider, self.tensor2, [4, 5, 6], [1, 2, 3], [1, 3, 5, 7], [0, 1, 2, 5])
+        contracted2 = ContractedDiagram(q_spider, self.tensor3, [4, 5, 6], [1, 2, 3], [1, 3, 5, 7], [0, 1, 2, 5])
         graph1 = to_graph(contracted1)
         _apply_chain_then_identity(graph1)
         result1 = to_diagram(graph1)
@@ -1478,12 +1474,10 @@ class TestChainReductionRule(unittest.TestCase):
         assert result2.num_inputs == contracted2.num_inputs
         assert result2.num_outputs == contracted2.num_outputs
 
-        inner_tensor = result2.second  # type: ignore[attr-defined]
+        inner_tensor = result2.second
         assert isinstance(inner_tensor, TensorDiagram)
-        # First lane: comp1, reduced.
         assert inner_tensor.diagrams[0] == self.q_x4_1
         assert inner_tensor.diagrams[1] == self.comp1_red
-        # Third lane: unchanged p_x2_3_n23.
         assert inner_tensor.diagrams[2] == self.p_x2_3_n23
         comp2_red = inner_tensor.diagrams[3]
         assert isinstance(comp2_red, CompositionDiagram)
@@ -1564,12 +1558,12 @@ class TestChainReductionRule(unittest.TestCase):
         graph2 = to_graph(result)
         assert len(self.rule.match(graph2)) == 0
 
-        rotations = [d for d in result.diagrams[0].diagrams[0].diagrams if isinstance(d, PhaseRotationGate)]  # type: ignore[attr-defined]
+        rotations = [d for d in result.diagrams[0].diagrams[0].diagrams if isinstance(d, PhaseRotationGate)]
         assert len(rotations) == 1
         assert isclose(cast("float", rotations[0].theta), pi / 6 + pi / 4)
-        assert result.diagrams[1].diagrams[1] == filler3  # type: ignore[attr-defined]
+        assert result.diagrams[1].diagrams[1] == filler3
 
-    def test_match_cross_container_chain_with_swap_and_identities(self):  # ruff: ignore[too-many-locals]
+    def test_match_cross_container_chain_with_swap_and_identities(self):
         """Cross-container chain with identities and a Swap."""
         r1 = PhaseRotationGate(pi / 6)
         r2 = PhaseRotationGate(pi / 4)
@@ -1596,7 +1590,7 @@ class TestChainReductionRule(unittest.TestCase):
         assert id_a.id not in matches[0]["identity_chain"]
         assert matches[0]["same_parent"] is False
 
-    def test_apply_rule_cross_container_chain_with_swap_and_identities(self):  # ruff: ignore[too-many-locals]
+    def test_apply_rule_cross_container_chain_with_swap_and_identities(self):
         """A single `apply_rule` call folds both chains crossing the `Swap`."""
         r1 = PhaseRotationGate(pi / 6)
         r2 = PhaseRotationGate(pi / 4)
@@ -1620,14 +1614,14 @@ class TestChainReductionRule(unittest.TestCase):
         result = to_diagram(graph)
         assert len(self.rule.match(to_graph(result))) == 0
 
-        lane1_result = result.diagrams[0]  # type: ignore[attr-defined]
+        lane1_result = result.diagrams[0]
         inner_result = lane1_result.diagrams[0]
         rotations = [d for d in inner_result.diagrams if isinstance(d, PhaseRotationGate)]
         assert len(rotations) == 1
         assert isclose(cast("float", rotations[0].theta), pi / 6 + pi / 4)
         assert isinstance(lane1_result.diagrams[1], Fourier2)
 
-    def test_apply_rule_chain_through_swap_nested_in_tensor_lane(self):  # ruff: ignore[too-many-locals]
+    def test_apply_rule_chain_through_swap_nested_in_tensor_lane(self):
         """The chase compensates correctly when the `Swap` sits inside a `TensorDiagram`."""
         r1 = PhaseRotationGate(pi / 6)
         r2 = PhaseRotationGate(pi / 4)
@@ -1653,239 +1647,40 @@ class TestChainReductionRule(unittest.TestCase):
         result = to_diagram(graph)
         assert len(self.rule.match(to_graph(result))) == 0
 
-        pad_lane = result.diagrams[0].diagrams[0]  # type: ignore[attr-defined]
+        pad_lane = result.diagrams[0].diagrams[0]
         assert isinstance(pad_lane, PhaseRotationGate)
         assert isclose(cast("float", pad_lane.theta), 0.111 + 0.222 + 0.333 + 0.444)
 
-        inner_result = result.diagrams[0].diagrams[1]  # type: ignore[attr-defined]
+        inner_result = result.diagrams[0].diagrams[1]
         rotations = [d for d in inner_result.diagrams if isinstance(d, PhaseRotationGate)]
         assert len(rotations) == 1
         assert isclose(cast("float", rotations[0].theta), pi / 6 + pi / 4)
 
-        assert isinstance(result.diagrams[0].diagrams[2], Fourier2)  # type: ignore[attr-defined]
+        assert isinstance(result.diagrams[0].diagrams[2], Fourier2)
 
 
 class TestChainReductionResetToIdentityClearsParamMeasurementMap(unittest.TestCase):
     """Test that `_reset_to_identity` clears `param_measurement_map` (Phase 3 fix).
 
-    A node reset to identity by chain reduction (every chain member other
-    than the survivor) must lose its feedforward provenance entirely, not
-    just have its phase zeroed while a stale map lingers.
+    Mirrors `tests/rewrite_rules/test_nx_chain_reduction_rules.py::
+    TestChainReductionResetToIdentityClearsParamMeasurementMap`. A node
+    reset to identity by chain reduction (every chain member other than
+    the survivor) must lose its feedforward provenance entirely, not just
+    have its phase zeroed while a stale map lingers.
     """
 
     def test_reset_to_identity_clears_param_measurement_map(self):
         """A feedforward node with a param_measurement_map is fully cleared on reset."""
         m = symbols("m", real=True)
         spider = QSpider(1, 1, ZxPoly({1: m}), parametric=True, param_measurement_map={m: {7}})
-        graph = to_graph(spider)
+        cvzx_graph = to_graph(spider)
+        id_map = _get_id_map(cvzx_graph.graph)
 
-        ChainReductionRule._reset_to_identity(graph.graph, spider.id)  # ruff: ignore[private-member-access]
+        ChainReductionRule._reset_to_identity(cvzx_graph.graph, id_map, spider.id)  # ruff: ignore[private-member-access]
 
-        attrs = graph.graph.nodes[spider.id]
+        attrs = cvzx_graph.graph[id_map[spider.id]]
         assert attrs["param_measurement_map"] == {}
         assert attrs["feedforward"] is None
         assert attrs["measurement_ids"] is None
         assert attrs["phase"] == ZxPoly({})
         assert attrs["type"] == "QSpider"
-
-
-if __name__ == "__main__":
-    # Create output directory for visualizations
-
-    from cvzx.base_gates import Diagram
-    from cvzx.nx_graph import to_diagram, to_graph
-    from cvzx.visualize_base_gates import visualize_before_after
-
-    # Create rule instance and test objects
-    rule_name = "Chain Reduction Rule"
-    rule = ChainReductionRule()
-    zero_phase = ZxPoly({})
-    phase_x2 = ZxPoly({2: 2})
-    phase_x2_3 = ZxPoly({2: 3})
-    phase_x2_sum = ZxPoly({2: 5})
-    phase_x3 = ZxPoly({3: 2})
-    phase_x4 = ZxPoly({4: 1})
-
-    q1 = QSpider(1, 1, phase_x2)
-    q2 = QSpider(1, 1, phase_x2_3)
-    q3 = QSpider(1, 1, phase_x3)
-    q_x4 = QSpider(1, 1, phase_x4)
-    q_3x2 = QSpider(3, 2, phase_x2)
-    q_2x3 = QSpider(2, 3, phase_x2_3)
-
-    p1 = PSpider(1, 1, phase_x2)
-    p2 = PSpider(1, 1, phase_x2_3)
-
-    fourier = Fourier()
-    fourier2 = Fourier2()
-    fourier_inv = FourierInv()
-    swap = Swap()
-
-    ph_rot1 = PhaseRotationGate(pi / 4)
-    ph_rot2 = PhaseRotationGate(pi / 3)
-    ph_rot_sum = PhaseRotationGate(7 * pi / 12)
-
-    bs1 = BeamsplitterGate(pi / 4)
-    bs2 = BeamsplitterGate(pi / 6)
-
-    sq1 = SqueezingGate(2.0)
-    sq2 = SqueezingGate(3.0)
-
-    disp1 = DisplacementGate(1.0 + 0.5j)
-    disp2 = DisplacementGate(2.0 + 1.0j)
-
-    cs1 = ControlledSumGate(gain=1.0, control=1, target=2)
-    cs2 = ControlledSumGate(gain=2.0, control=1, target=2)
-    cs3 = ControlledSumGate(gain=2.0, control=2, target=1)
-
-    cz1 = ControlledZGate(gain=1.0)
-    cz2 = ControlledZGate(gain=2.0)
-
-    # Helper function to apply rule (with IdentityRule cleanup) and visualize
-    def apply_and_visualize(diagram: Diagram, test_name: str, title_prefix: str = "") -> Diagram:
-        """Apply chain reduction rule followed by identity cleanup, then visualize."""
-        graph = to_graph(diagram)
-        rule.apply_rule(graph)
-        IdentityRule().apply_rule(graph)
-        result = to_diagram(graph)
-        visualize_before_after(diagram, result, f"{title_prefix}{test_name}", rule_name)
-        return result
-
-    # Test 1: Simple Q-spider chain
-    comp1 = CompositionDiagram([q1, q2])
-    apply_and_visualize(comp1, "Simple Q Spider Chain")
-
-    # Test 2: Simple P-spider chain
-    comp2 = CompositionDiagram([p1, p2])
-    apply_and_visualize(comp2, "Simple P Spider Chain")
-
-    # Test 3: Rotation chain
-    comp3 = CompositionDiagram([ph_rot1, ph_rot2])
-    apply_and_visualize(comp3, "Rotation Chain")
-
-    # Test 4: Squeezing chain
-    comp4 = CompositionDiagram([sq1, sq2])
-    apply_and_visualize(comp4, "Squeezing Chain")
-
-    # Test 5: Displacement chain
-    comp5 = CompositionDiagram([disp1, disp2])
-    apply_and_visualize(comp5, "Displacement Chain")
-
-    # Test 6: Beamsplitter chain
-    comp6 = CompositionDiagram([bs1, bs2])
-    apply_and_visualize(comp6, "Beamsplitter Chain")
-
-    # Test 7: Fourier chain (F ∘ F → F²)
-    comp7 = CompositionDiagram([fourier, Fourier()])
-    apply_and_visualize(comp7, "Fourier Chain (F ∘ F)")
-
-    # Test 8: Fourier pair (F ∘ Finv → Identity)
-    comp8 = CompositionDiagram([fourier, fourier_inv])
-    apply_and_visualize(comp8, "Fourier Pair (F ∘ Finv)")
-
-    # Test 9: Multiple chains in one composition
-    comp9 = CompositionDiagram([q1, q2, ph_rot1, ph_rot2, sq1, sq2])
-    apply_and_visualize(comp9, "Multiple Chains")
-
-    # Test 10: CSUM pair with compatible target and control parameters
-    comp10 = CompositionDiagram([swap, cs1, cs2])
-    apply_and_visualize(comp10, "CSUM chain")
-
-    # Test 11: CSUM pair with incompatible target/control parameters
-    comp11 = CompositionDiagram([cs1, cs3, swap])
-    apply_and_visualize(comp11, "CSUM chain-No reduction")
-
-    # Test 12: CZ chain
-    comp12 = CompositionDiagram([swap, cz1, cz2])
-    apply_and_visualize(comp12, "CZ chain")
-
-    # Test 13: Mixed Q and P spiders (different types - no chain)
-    comp13 = CompositionDiagram([q1, p1])
-    apply_and_visualize(comp13, "Mixed Q and P (No Chain)")
-
-    # Test 14: Nested composition inside tensor
-    inner_comp = CompositionDiagram([q1, q2])
-    tensor = TensorDiagram([inner_comp, sq1, ph_rot1])
-    apply_and_visualize(tensor, "Nested Composition in Tensor")
-
-    # Test 15: ContractedDiagram with composition containing chain
-    comp_for_contracted = CompositionDiagram([q1, q2, ph_rot1, ph_rot2])
-    tensor = TensorDiagram([comp_for_contracted, swap])
-    q_spider_large = QSpider(3, 3, phase_x2)
-    contracted = ContractedDiagram(tensor, q_spider_large, [0, 1], [1, 2], [0], [1])
-    apply_and_visualize(contracted, "Contracted with Composition")
-
-    # Test 16: Chain with different arities (compatible)
-    comp15 = CompositionDiagram([q_3x2, q_2x3])
-    apply_and_visualize(comp15, "Different Arities (Compatible)")
-
-    # Test 17: Two rotations separated by one identity spider still chain
-    id_between = QSpider(1, 1, zero_phase)
-    comp16 = CompositionDiagram([ph_rot1, id_between, ph_rot2])
-    apply_and_visualize(comp16, "Through Identity Spider")
-
-    # Test 18: Chain across a TensorDiagram/CompositionDiagram boundary
-    r1_cross = PhaseRotationGate(pi / 6)
-    r2_cross = PhaseRotationGate(pi / 12)
-    inner_comp_cross = CompositionDiagram([Fourier(), r1_cross])
-    lane1_cross = TensorDiagram([inner_comp_cross, Fourier()])
-    lane2_cross = TensorDiagram([r2_cross, QSpider(1, 1, phase_x3)])
-    comp17 = CompositionDiagram([lane1_cross, lane2_cross])
-    apply_and_visualize(comp17, "Cross-Container Chain")
-
-    # Test 19: Cross-container chain, also crossing one identity, a Swap
-    # (with an unrelated wire on its other two ports), and one more identity.
-    r1_swap = PhaseRotationGate(pi / 6)
-    r2_swap = PhaseRotationGate(pi / 12)
-    id_after_r1 = QSpider(1, 1, zero_phase)
-    id_a = PSpider(1, 1, zero_phase)
-    id_b = QSpider(1, 1, zero_phase)
-    inner_comp_swap = CompositionDiagram([Fourier(), r1_swap, id_after_r1])
-    lane1_swap = TensorDiagram([inner_comp_swap, Fourier()])
-    swap_cross = Swap()
-    mid_swap = TensorDiagram([id_a, id_b])
-    lane2_swap = TensorDiagram([Fourier(), r2_swap])
-    comp18 = CompositionDiagram([lane1_swap, swap_cross, mid_swap, lane2_swap])
-    apply_and_visualize(comp18, "Cross-Container Chain Through Swap And Identities")
-
-    # Test 20: Complex Swap network
-    bloc1 = TensorDiagram([
-        CompositionDiagram([DisplacementGate(2), QSpider(1, 1, zero_phase), QSpider(1, 1, zero_phase)]),
-        CompositionDiagram([QSpider(0, 1, zero_phase), SqueezingGate(2.5), PSpider(1, 1, zero_phase)]),
-        CompositionDiagram([PhaseRotationGate(4), PhaseRotationGate(8)]),
-    ])
-    bloc2 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
-    bloc3 = TensorDiagram([SqueezingGate(2.5), DisplacementGate(-1), QSpider(1, 1, zero_phase)])
-    bloc4 = TensorDiagram([QSpider(1, 1, zero_phase), Swap()])
-    bloc5 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
-    bloc6 = TensorDiagram([
-        PhaseRotationGate(10),
-        SqueezingGate(2.5),
-        CompositionDiagram([DisplacementGate(-1), QSpider(1, 0, zero_phase)]),
-    ])
-    comp19 = CompositionDiagram([bloc1, bloc2, bloc3, bloc4, bloc5, bloc6])
-    apply_and_visualize(comp19, "Complex Cross-Container Chain Through Swap And Identities")
-
-    # Test 21: Complex Swap network 2
-    zero_phase = ZxPoly({})
-    bloc1 = TensorDiagram([
-        CompositionDiagram([
-            QSpider(0, 1, zero_phase),
-            DisplacementGate(2),
-            QSpider(1, 1, zero_phase),
-            QSpider(1, 1, zero_phase),
-        ]),
-        CompositionDiagram([QSpider(0, 1, zero_phase), SqueezingGate(2.5), PSpider(1, 1, zero_phase)]),
-        CompositionDiagram([PhaseRotationGate(4), PhaseRotationGate(8)]),
-    ])
-    bloc2 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
-    bloc3 = TensorDiagram([SqueezingGate(2.5), DisplacementGate(-1), QSpider(1, 1, zero_phase)])
-    bloc4 = TensorDiagram([QSpider(1, 1, zero_phase), Swap()])
-    bloc5 = TensorDiagram([Swap(), QSpider(1, 1, zero_phase)])
-    bloc6 = TensorDiagram([
-        PhaseRotationGate(10),
-        SqueezingGate(2.5),
-        CompositionDiagram([DisplacementGate(-1), QSpider(1, 0, ZxPoly({1: 1}))]),
-    ])
-    comp20 = CompositionDiagram([bloc1, bloc2, bloc3, bloc4, bloc5, bloc6])
-    apply_and_visualize(comp20, "Complex Cross-Container Chain Through Swap And Identities 2")

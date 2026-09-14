@@ -74,6 +74,37 @@ development on `main` to date, grouped by area rather than by commit.
   publishing) on every CI run.
 - A `docs` extras group (`pyproject.toml`) for just the documentation
   build dependencies, pulled in by `dev` as well.
+- **Feedforward provenance** (`base_gates.py`, `gates.py`): a universal
+  `param_measurement_map: dict[Symbol, set[int]]` attribute on `QSpider`,
+  `PSpider`, and every `CompactDiagram` gate subclass, linking a symbolic
+  parameter to the specific measurement node ID(s) whose outcome it
+  depends on. Backed by a shared `Parametrized` mixin providing
+  `get_parameters()`, an `is_parametric` property, `substitute_parameters()`/
+  `evaluate()`, and `slice_param_map()` (used by `expand()` to hand each
+  spawned sub-spider/sub-gate exactly its own share of the map); validated
+  with subset semantics (`param_measurement_map.keys() <= get_parameters()`)
+  so a symbolic-but-not-feedforward object stays legal. `conjugate()` and
+  `expand()` across all 13 gates now thread/slice this map correctly
+  instead of silently dropping it.
+- **`rustworkx` as a core dependency** (`pyproject.toml`, and the `mypy`
+  pre-commit hook's `additional_dependencies`), alongside `networkx`.
+- **Dual-backend parameter registry & validation** (`nx_graph.py`,
+  `rx_graph.py`): `GateRegister` gained `parametric_nodes`,
+  `feedforward_nodes`, `symbol_registry` (symbol -> node IDs), and
+  `measurement_to_feedforward_map` (measurement node ID -> dependent node
+  IDs), kept in O(1)-lookup sync with the graph via `add_node`/
+  `remove_node`/`clear`/`copy` on both backends; and
+  `CVZXGraph.validate_parameter_consistency()` (backed by a pure
+  `parameter_consistency_violations()`), checking that a symbol shared by
+  multiple nodes binds to the same measurement IDs everywhere, and that
+  every referenced measurement ID is a real registered measurement node.
+  `param_measurement_map` round-trips losslessly through graph
+  conversion and is cleared alongside `feedforward`/`measurement_ids`
+  wherever a rewrite rule resets a node to identity.
+- A shared/mirrored parity test suite for all of the above: AST-level
+  tests (`test_base_gates.py`, `test_gates.py`) plus matching nx/rx
+  backend tests (`tests/nx_graph`, `tests/rx_graph`,
+  `tests/rewrite_rules`, `tests/rx_rewrite_rules`).
 
 ### Changed
 
@@ -119,6 +150,31 @@ development on `main` to date, grouped by area rather than by commit.
   `circuit_to_diagram`/`diagram_to_circuit` without updating every
   reference), which made those test files fail to collect at all.
 - Docstring citation markers in `base_gates.py`/`gates.py`/
-  `nx_rewrite_rules.py` incorrectly numbered `[3]` throughout, corrected
+  `nx_rewrite_rules.py` incorrectly numbered `[1]` throughout, corrected
   to `[1]` to match the single paper reference these docstrings actually
   cite.
+- A handful of latent bugs surfaced while building the feedforward-provenance
+  work above: `QSpider`/`PSpider` reconstruction (`nx_graph.py`,
+  `rx_graph.py`) returning `feedforward=None` instead of `False` when a
+  node never had the attribute explicitly set; `ZxPoly.coeffs` crashing
+  with `TypeError` on a genuinely complex coefficient; `QSpider`/
+  `PSpider.conjugate()` dropping the `parametric` flag; the `rustworkx`
+  backend's node reconstruction not forwarding `parametric`/`feedforward`/
+  `measurement_ids` at all; three gates' `expand()`
+  (`CubicPhaseGate`/`ShearXInvariantGate`/`ShearPInvariantGate`) not
+  threading `is_parametric` into their spawned sub-spider; several other
+  gates' `expand()` blindly copying the parent's `parametric` flag onto
+  sub-objects instead of each sub-value's own state;
+  `DisplacementGate.substitute_parameters` crashing on a complex result;
+  `ControlledSumGate.substitute_parameters` silently dropping `control`/
+  `target`; and `nx_graph.py`'s `GateRegister.clear()` omitting
+  `void_nodes.clear()`.
+- A dropped `node_map` parameter on `rx_graph.py`'s `_add_proper_node` and
+  an undefined `_has_node` reference in `rx_rewrite_rules.py`, both
+  `NameError`/`TypeError` crashes that silently broke the majority of the
+  `rustworkx`-backend test suite.
+- The `mypy` pre-commit hook's isolated environment missing `rustworkx`
+  from its `additional_dependencies`, which made it unable to resolve
+  `rustworkx`'s types (surfacing as `import-not-found` and a downstream
+  `no-any-return` in `rx_graph.py`/`rx_rewrite_rules.py`) even though
+  `pyproject.toml` already listed it as a real dependency.
