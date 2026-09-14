@@ -31,6 +31,6 @@ This documentation has three parts:
 theory
 user_guide/index
 dev_guide/index
-api_reference
+api/index
 references
 ```
