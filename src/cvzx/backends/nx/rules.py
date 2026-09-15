@@ -2293,7 +2293,7 @@ class PassthroughRule(RewriteRule):
         return {"a_id": a_id, "b_id": b_id, "a_tensor_id": a_tensor_id, "b_tensor_id": b_tensor_id}
 
     def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
-        """Find `ContractedDiagram`s eligible for the disguised-composition rewrite.
+        """Find `ContractedDiagram` nodes eligible for the disguised-composition rewrite.
 
         Returns
         -------
