@@ -227,7 +227,7 @@ class _ProperDiagramMixin:
                 output_positions = [() for i in range(diagram.num_outputs)]  # type: ignore[misc]
         elif isinstance(diagram, Swap):
             output_positions, init_input_positions, radius = self._draw_swap(
-                ax, x, y, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs
+                ax, x, y, diagram, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs
             )
         elif isinstance(diagram, (Fourier, FourierInv, Fourier2)):
             output_positions, init_input_positions, radius = self._draw_fourier(

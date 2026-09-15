@@ -31,6 +31,7 @@ from cvzx.ir.base import (
     Fourier2,
     PSpider,
     QSpider,
+    Swap,
     TensorDiagram,
     ZxPoly,
 )
@@ -422,14 +423,27 @@ class TestOptimizeInfiniteSqueezing(unittest.TestCase):
         twice = to_diagram(twice_graph)
         assert once == twice
 
-    def test_expansion_not_committed_without_further_benefit(self):
-        """A bare BS with nothing attached is never gratuitously expanded.
+    def test_bare_bs_not_committed_but_bare_csum_reduces_to_swap(self):
+        """A bare BS's expansion is discarded (no benefit); a bare CSUM's collapses to Swap.
 
-        Even with `assume_infinite_squeezing=True`, expanding BS/CSUM only
-        happens if doing so unlocks at least one rule match; expanding a
-        gate with no states/other structure to react with wouldn't
-        simplify anything, so the round is discarded and the gate stays
-        compact.
+        `BeamsplitterGate.expand()` decomposes into two
+        `Contract(QSpider, PSpider, I1=[1], I2=[0], J1=[], J2=[])`-shaped
+        `ContractedDiagram`s (both spiders zero-phase -- `PassthroughRule`'s
+        disguised-composition shape, case C), each flanked by the *other*
+        Contract's own `Tensor([SqueezingGate, SqueezingGate])` -- a real
+        gate, not a `VoidDiagram` -- on its far side. `PassthroughRule`
+        only rewrites once the two outer connections it would repurpose are
+        already proven dead (see its class docstring), so neither Contract
+        is eligible here and the whole expansion is discarded as
+        not-beneficial, leaving the gate compact -- exactly like before
+        `PassthroughRule` existed.
+
+        `ControlledSumGate.expand()` (gain 1), by contrast, decomposes into
+        a *single*, unwrapped `Contract(...)` of the same shape with
+        nothing attached on either side at all -- a root-level
+        `ContractedDiagram` is trivially eligible (nothing outside it
+        depends on either connection), so it always collapses to a bare
+        `Swap()`.
         """
         bs = BeamsplitterGate(pi / 4)
         graph, _ = optimize(bs, assume_infinite_squeezing=True)
@@ -439,7 +453,9 @@ class TestOptimizeInfiniteSqueezing(unittest.TestCase):
         csum = ControlledSumGate(control=2, target=1)
         graph_csum, _ = optimize(csum, assume_infinite_squeezing=True)
         result_csum = to_diagram(graph_csum)
-        assert isinstance(result_csum, ControlledSumGate)
+        assert result_csum == Swap()
+        assert _no_matches_left(graph_csum, assume_infinite_squeezing=True)
+        assert _no_matches_left(graph_csum, assume_infinite_squeezing=True)
 
 
 class TestOptimizeRobustness(unittest.TestCase):

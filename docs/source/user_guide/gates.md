@@ -86,8 +86,11 @@ D_num = D_sym.substitute_parameters({a: 0.5, b: 0.3})   # -> non-parametric Disp
 
 ## Feedforward
 
-A gate whose parameter depends on an earlier measurement outcome is marked
-`feedforward=True` with the measuring leaf's `.id` recorded in `measurement_ids`:
+A gate whose parameter depends on an earlier measurement outcome carries that
+provenance in `param_measurement_map`: a `dict` mapping each symbol to the set of
+measuring leaves' `.id`s it depends on. `feedforward`/`measurement_ids` are derived
+from it automatically — pass `param_measurement_map`, not `feedforward`/
+`measurement_ids` directly:
 
 ```python
 from sympy import symbols
@@ -99,11 +102,13 @@ meas_leaf = QSpider(1, 0, ZxPoly({1: m}))  # a measurement effect producing outc
 R = PhaseRotationGate(
     theta=m,
     parametric=True,
-    feedforward=True,
-    measurement_ids={meas_leaf.id},
+    param_measurement_map={m: {meas_leaf.id}},
 )
+R.feedforward       # True -- derived
+R.measurement_ids   # {meas_leaf.id} -- derived
 ```
 
-Constructing a `feedforward=True` gate with no `measurement_ids` (or an empty set) raises
-`ValueError` — see `tests/utils/test_visualize_gates.py::feedforward_params_all_gates_test` for a
-sweep over every gate class checking exactly this.
+Constructing a gate with `feedforward=True` or a non-empty `measurement_ids` but an
+empty `param_measurement_map` raises `ValueError` — provenance is required, not
+optional. See `tests/visualization/test_visualize_gates.py::feedforward_params_all_gates_test`
+for a sweep over every gate class checking exactly this.

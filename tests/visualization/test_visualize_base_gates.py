@@ -644,5 +644,35 @@ def test_phase_no_overflow_unchanged():
         plt.close(fig)
 
 
+def test_swap_draws_both_diagonals_and_all_four_arrows():
+    """A bare, unmarked `Swap` draws its full X and both input/output arrow pairs."""
+    fig = DiagramVisualizer().visualize(Swap())
+    try:
+        ax = fig.axes[0]
+        assert len(ax.lines) == 2
+        assert len(ax.patches) == 4
+    finally:
+        plt.close(fig)
+
+
+def test_marked_swap_hides_the_void_bound_leg():
+    """A marked `Swap` draws only one diagonal and one input/output arrow pair.
+
+    `void_input_port` records which leg's whole path is known to dead-end
+    in `VoidDiagram` filler (see `FusionRule`'s disguised-composition
+    rewrite) -- drawing it would only clutter the figure with an
+    uninteresting wire, so `_draw_swap` omits that leg's diagonal and its
+    paired input/output arrows entirely.
+    """
+    for port in (0, 1):
+        fig = DiagramVisualizer().visualize(Swap(void_input_port=port))
+        try:
+            ax = fig.axes[0]
+            assert len(ax.lines) == 1
+            assert len(ax.patches) == 2
+        finally:
+            plt.close(fig)
+
+
 if __name__ == "__main__":
     run_graphical_tests()

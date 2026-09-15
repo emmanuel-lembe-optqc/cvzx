@@ -643,7 +643,9 @@ def feedforward_test():  # ruff: ignore[too-many-locals]
     meas_diag2 = QSpider(1, 0, ZxPoly({1: -m2}), True)
     tensor3 = TensorDiagram([
         DisplacementGate(
-            m1 + I * m2, parametric=True, feedforward=True, measurement_ids={meas_diag1.id, meas_diag2.id}
+            m1 + I * m2,
+            parametric=True,
+            param_measurement_map={m1: {meas_diag1.id}, m2: {meas_diag2.id}},
         ),
         SqueezingGate(0.5),
         SqueezingGate(0.5),
@@ -657,7 +659,9 @@ def feedforward_test():  # ruff: ignore[too-many-locals]
         SqueezingGate(0.5),
         SqueezingGate(0.5),
         DisplacementGate(
-            m1 + I * m2, parametric=True, feedforward=True, measurement_ids={meas_diag1.id, meas_diag2.id}
+            m1 + I * m2,
+            parametric=True,
+            param_measurement_map={m1: {meas_diag1.id}, m2: {meas_diag2.id}},
         ),
     ])
     tensor6 = TensorDiagram([
@@ -834,16 +838,18 @@ def mqc3_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-stru
 
 
 def feedforward_params_all_gates_test():
-    """Every parametrized gate accepts `feedforward`/`measurement_ids` with the same validation.
+    """Every parametrized gate accepts `param_measurement_map` with the same validation.
 
-    Follows the same pattern `DisplacementGate` established:
-    `feedforward=True` requires a non-empty `measurement_ids` set.
+    Follows the same pattern `DisplacementGate` established: `feedforward`/
+    `measurement_ids` are derived from a non-empty `param_measurement_map`,
+    and never independently settable without one.
 
     Raises
     ------
     AssertionError
-        If any gate class fails to reject `feedforward=True` with no
-        (or empty) `measurement_ids`.
+        If any gate class fails to derive `feedforward`/`measurement_ids`
+        from `param_measurement_map`, or fails to reject `feedforward=True`
+        / non-empty `measurement_ids` with no (or empty) `param_measurement_map`.
     """
     print("Testing feedforward/measurement_ids on all parametrized gates...")
     m = symbols("m", real=True)
@@ -866,20 +872,22 @@ def feedforward_params_all_gates_test():
     ]
 
     for cls, kwargs in gate_specs:
-        gate = cls(feedforward=True, measurement_ids={meas_leaf.id}, **kwargs)
+        gate = cls(param_measurement_map={m: {meas_leaf.id}}, **kwargs)
         assert gate.feedforward is True
         assert gate.measurement_ids == {meas_leaf.id}
+        assert gate.param_measurement_map == {m: {meas_leaf.id}}
 
         default_gate = cls(**kwargs)
         assert default_gate.feedforward is False
         assert default_gate.measurement_ids is None
+        assert default_gate.param_measurement_map == {}
 
         try:
             cls(feedforward=True, **kwargs)
         except ValueError:
             pass
         else:
-            msg = f"{cls.__name__} should reject feedforward=True with no measurement_ids"
+            msg = f"{cls.__name__} should reject feedforward=True with no measurement_ids/param_measurement_map"
             raise AssertionError(msg)
 
         try:
@@ -890,7 +898,15 @@ def feedforward_params_all_gates_test():
             msg = f"{cls.__name__} should reject feedforward=True with empty measurement_ids"
             raise AssertionError(msg)
 
-    print(f"✅ feedforward/measurement_ids verified on all {len(gate_specs)} gates")
+        try:
+            cls(feedforward=True, measurement_ids={meas_leaf.id}, **kwargs)
+        except ValueError:
+            pass
+        else:
+            msg = f"{cls.__name__} should reject feedforward=True/measurement_ids with no param_measurement_map"
+            raise AssertionError(msg)
+
+    print(f"✅ feedforward/measurement_ids/param_measurement_map verified on all {len(gate_specs)} gates")
 
 
 class _Feedforwardable(Protocol):

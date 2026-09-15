@@ -579,3 +579,43 @@ class TestParametrizedMixin:
 
         conjugated = spider.conjugate()
         assert conjugated.param_measurement_map == {a: {3}}
+
+    def test_feedforward_without_param_measurement_map_raises(self):
+        """feedforward=True with an empty param_measurement_map is illegal.
+
+        Provenance is required, not optional -- feedforward/measurement_ids
+        must always be backed by a param_measurement_map entry, never set
+        independently of it.
+        """
+        a = symbols("a", real=True)
+        phase = ZxPoly({1: a})
+
+        with pytest.raises(ValueError, match="empty param_measurement_map"):
+            QSpider(1, 1, phase, True, feedforward=True, measurement_ids={5})
+
+    def test_measurement_ids_alone_without_param_measurement_map_raises(self):
+        """A non-empty measurement_ids with feedforward=False is also illegal."""
+        a = symbols("a", real=True)
+        phase = ZxPoly({1: a})
+
+        with pytest.raises(ValueError, match="empty param_measurement_map"):
+            QSpider(1, 1, phase, True, measurement_ids={5})
+
+    def test_substitute_parameters_clears_feedforward_when_map_becomes_empty(self):
+        """Substituting away the only provenance entry must clear feedforward/measurement_ids too.
+
+        `_rebuild` must not blindly carry `feedforward`/`measurement_ids`
+        forward from before the substitution once the sliced
+        `param_measurement_map` no longer backs them -- that would
+        reconstruct exactly the illegal state
+        `test_feedforward_without_param_measurement_map_raises` checks for.
+        """
+        a = symbols("a", real=True)
+        phase = ZxPoly({1: a})
+        spider = QSpider(1, 1, phase, True, param_measurement_map={a: {5}})
+
+        result = spider.substitute_parameters({a: 2.0})
+
+        assert result.param_measurement_map == {}
+        assert result.feedforward is False
+        assert result.measurement_ids is None

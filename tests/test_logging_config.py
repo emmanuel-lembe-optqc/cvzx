@@ -5,7 +5,22 @@ from pathlib import Path
 
 from cvzx.logging_config import setup_file_logging
 
-_LOGGER_NAMES = ("cvzx.passes.normalize", "cvzx.backends.nx.rules", "cvzx.passes.optimize")
+_LOGGER_NAMES = (
+    "cvzx.passes.normalize",
+    "cvzx.backends.nx.rules",
+    "cvzx.backends.rx.rules",
+    "cvzx.passes.optimize",
+)
+
+# Expected log file stem per logger -- the two backends' rule modules share
+# their last dotted component ("rules"), so `setup_file_logging` folds the
+# backend name in to keep their files distinct (see `_log_file_name`).
+_EXPECTED_LOG_FILE_NAMES = {
+    "cvzx.passes.normalize": "normalize",
+    "cvzx.backends.nx.rules": "nx_rules",
+    "cvzx.backends.rx.rules": "rx_rules",
+    "cvzx.passes.optimize": "optimize",
+}
 
 
 def _remove_file_handlers() -> None:
@@ -25,8 +40,7 @@ def test_creates_log_directory_and_one_file_per_pipeline_logger(tmp_path: Path):
 
         assert log_dir.is_dir()
         for name in _LOGGER_NAMES:
-            short_name = name.rsplit(".", 1)[-1]
-            assert (log_dir / f"{short_name}.log").exists()
+            assert (log_dir / f"{_EXPECTED_LOG_FILE_NAMES[name]}.log").exists()
 
         logging.getLogger("cvzx.passes.optimize").debug("hello from a test")
         assert "hello from a test" in (log_dir / "optimize.log").read_text()

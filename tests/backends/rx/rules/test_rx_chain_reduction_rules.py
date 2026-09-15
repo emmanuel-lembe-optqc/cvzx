@@ -1309,9 +1309,9 @@ class TestChainReductionRule(unittest.TestCase):
 
     def test_apply_single_disp(self):
         """Displacement chain: survivor + identity, then IdentityRule collapses."""
-        a, b = symbols("a b", real=True)
-        alpha_sym = cos(a) + exp(I * b)
-        disp1 = DisplacementGate(alpha_sym, parametric=True, feedforward=True, measurement_ids={self.meas.id})
+        a, b, m = symbols("a b m", real=True)
+        alpha_sym = cos(a) + exp(I * b) + m
+        disp1 = DisplacementGate(alpha_sym, parametric=True, param_measurement_map={m: {self.meas.id}})
         disp2 = DisplacementGate(2)
         comp = CompositionDiagram([self.fourier2, disp1, disp2, self.meas])
         match = {

@@ -1294,6 +1294,7 @@ def _add_proper_node(  # ruff: ignore[complex-structure, too-many-branches]
             # Store external port mappings
             external_inputs=list(range(diagram.num_inputs)),
             external_outputs=list(range(diagram.num_outputs)),
+            void_input_port=getattr(diagram, "void_input_port", None),
         )
     return node_id
 
@@ -1783,7 +1784,7 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
             result.id = node_id
         return result
     if node_type == "Swap":
-        return Swap()
+        return Swap(void_input_port=attrs.get("void_input_port"))
     if node_type == "VoidDiagram":
         return VoidDiagram(num_inputs, num_outputs)
     if node_type == "Fourier":

@@ -449,7 +449,7 @@ class TestGraphConversion:
         self.p_param = PSpider(1, 1, ZxPoly({1: a, 2: b}), True)
         self.disp_param = DisplacementGate(alpha=1.0 + c * I, parametric=True)
         self.meas = QSpider(1, 0, ZxPoly({1: m}), True)
-        self.disp_ff = DisplacementGate(alpha=m**2, parametric=True, feedforward=True, measurement_ids={self.meas.id})
+        self.disp_ff = DisplacementGate(alpha=m**2, parametric=True, param_measurement_map={m: {self.meas.id}})
         self.ph_rot_param = PhaseRotationGate(theta, parametric=True)
         self.sq_gate_param = SqueezingGate(tau, parametric=True)
         self.ctrl_sum_gate_param = ControlledSumGate(gain=g1, control=1, target=2, parametric=True)
@@ -1397,8 +1397,9 @@ class TestToGraphDoesNotMutateInput:
 
     def test_to_graph_does_not_mutate_a_flat_diagram(self):
         """A single composed gate, including a feedforward/measurement_ids leaf."""
-        meas = QSpider(1, 0, ZxPoly({1: 2.0}))
-        gate = DisplacementGate(alpha=1.0 + 0.5j, feedforward=True, measurement_ids={meas.id})
+        m = symbols("m", real=True)
+        meas = QSpider(1, 0, ZxPoly({1: m}), True)
+        gate = DisplacementGate(alpha=m**2, parametric=True, param_measurement_map={m: {meas.id}})
         diagram = CompositionDiagram([QSpider(1, 1, ZxPoly({2: 2.0})), gate])
 
         before = self._snapshot(diagram)

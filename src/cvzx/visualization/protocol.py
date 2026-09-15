@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     import matplotlib.pyplot as plt
     from matplotlib.text import Text
 
-    from cvzx.ir.base import CompositionDiagram, ContractedDiagram, Diagram, ProperDiagram, TensorDiagram, ZxPoly
+    from cvzx.ir.base import CompositionDiagram, ContractedDiagram, Diagram, ProperDiagram, Swap, TensorDiagram, ZxPoly
     from cvzx.ir.gates import CompactDiagram
     from cvzx.visualization.core import VisualizerConfig
     from cvzx.visualization.geometry import Position
@@ -120,6 +120,7 @@ class Visualizer(Protocol):
         ax: plt.Axes,
         x: float,
         y: float,
+        diagram: Swap | None = None,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
         input_positions: list[Position] | None = None,

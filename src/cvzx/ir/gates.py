@@ -340,7 +340,7 @@ class DisplacementGate(CompactDiagram):
     >>> from base_gates import QSpider, ZxPoly
     >>> m = symbols('m', real=True)
     >>> meas = QSpider(1, 0, ZxPoly({1: m}), True)
-    >>> D = Displacement(m + I*2, parametric=True, feedforward=True, measurement_ids = {meas.id})
+    >>> D = Displacement(m + I*2, parametric=True, param_measurement_map={m: {meas.id}})
 
     """
 
@@ -408,7 +408,6 @@ class DisplacementGate(CompactDiagram):
             new_alpha,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -612,7 +611,6 @@ class PhaseRotationGate(CompactDiagram):
             new_theta,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -790,7 +788,6 @@ class SqueezingGate(CompactDiagram):
             new_tau,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -1017,7 +1014,6 @@ class ControlledSumGate(CompactDiagram):
             target=self.target,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -1225,7 +1221,6 @@ class ControlledZGate(CompactDiagram):
             gain=new_gain,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -1377,11 +1372,11 @@ class BeamsplitterGate(CompactDiagram):
         # Full decomposition from [1] Appendix A.1.f
         if self.parametric:
             tan_theta = tan(self.theta)
-            sin2_theta = sin(2 * self.theta)
+            sin2_theta = sin(self.theta) ** 2
             cos_theta = cos(self.theta)
         else:
             tan_theta = np.tan(self.theta)
-            sin2_theta = np.sin(2 * self.theta)
+            sin2_theta = np.sin(self.theta) ** 2
             cos_theta = np.cos(self.theta)
 
         sq1 = _build_gate(self, SqueezingGate, "tau", 1 / tan_theta)
@@ -1406,7 +1401,6 @@ class BeamsplitterGate(CompactDiagram):
             new_theta,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -1543,7 +1537,6 @@ class CubicPhaseGate(CompactDiagram):
             new_gamma,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -1661,7 +1654,6 @@ class ShearXInvariantGate(CompactDiagram):
             new_kappa,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -1778,7 +1770,6 @@ class ShearPInvariantGate(CompactDiagram):
             new_eta,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -1919,7 +1910,6 @@ class ArbitraryGate(CompactDiagram):
             new_lam,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -2064,7 +2054,6 @@ class Squeezing45Gate(CompactDiagram):
             new_theta,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -2201,7 +2190,6 @@ class TwoModeShearGate(CompactDiagram):
             new_b,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> CompactDiagram:
@@ -2338,7 +2326,6 @@ class MeasurementGate(CompactDiagram):
             new_theta,
             parametric=parametric,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
     def conjugate(self) -> Diagram:

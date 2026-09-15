@@ -1073,6 +1073,7 @@ def _add_proper_node(  # ruff: ignore[complex-structure]
         "container_id": container_id,
         "external_inputs": list(range(diagram.num_inputs)),
         "external_outputs": list(range(diagram.num_outputs)),
+        "void_input_port": getattr(diagram, "void_input_port", None),
     }
 
     if isinstance(diagram, DisplacementGate):
@@ -1506,7 +1507,7 @@ def reconstruct_proper_node(G: rx.PyDiGraph, node_idx: int, reg: GateRegister) -
             result.id = node_id
         return result
     if node_type == "Swap":
-        return Swap()
+        return Swap(void_input_port=attrs.get("void_input_port"))
     if node_type == "VoidDiagram":
         return VoidDiagram(num_inputs, num_outputs)
     if node_type == "Fourier":

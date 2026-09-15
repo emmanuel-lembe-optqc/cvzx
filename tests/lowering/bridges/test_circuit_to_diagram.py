@@ -199,6 +199,57 @@ def test_feedforward_parameter_reconstructs_measurement_symbol():
     (symbol,) = p_effects[0].phase.get_parameters()
     assert rotations[0].parametric
     assert rotations[0].theta.free_symbols == {symbol}
+    # The downstream gate's provenance must be populated and correct, not
+    # just the shared symbol -- feedforward/measurement_ids are derived
+    # from this map, so an empty one would make the gate invisible to any
+    # scheduler that orders on classical dependencies (see
+    # `lowering/dag.py`).
+    assert rotations[0].param_measurement_map == {symbol: {p_effects[0].id}}
+    assert rotations[0].feedforward
+    assert rotations[0].measurement_ids == {p_effects[0].id}
+
+
+def test_feedforward_multi_parameter_gate_tracks_distinct_measurements():
+    """A gate with two feedforward-derived parameters gets one map entry per measurement.
+
+    `TwoModeShearGate(a, b)` takes its two parameters from two different
+    `intrinsic.Measurement` operations -- `param_measurement_map` must
+    bind each symbol to its own originating measurement, not merge or
+    drop either, exercising `_pmm_for`'s union-merge across multiple
+    parameters.
+    """
+    from cvzx.ir.gates import TwoModeShearGate  # ruff: ignore[import-outside-top-level]
+
+    circuit = CircuitRepr("multi-feedforward")
+    measured_a: MeasuredVariable = circuit.Q(2) | intrinsic.Measurement(np.pi / 2)
+    measured_b: MeasuredVariable = circuit.Q(3) | intrinsic.Measurement(np.pi / 2)
+    circuit.Q(0, 1) | intrinsic.TwoModeShear(FeedForward(measured_a), FeedForward(measured_b))
+
+    diagram = from_circuit_repr(circuit)
+
+    leaves = []
+
+    def _collect(d):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        if hasattr(d, "diagrams"):
+            for child in d.diagrams:
+                _collect(child)
+        else:
+            leaves.append(d)
+
+    _collect(diagram)
+
+    from cvzx.ir.base import QSpider  # ruff: ignore[import-outside-top-level]
+
+    q_effects = [leaf for leaf in leaves if isinstance(leaf, QSpider) and leaf.num_inputs == 1 and leaf.num_outputs == 0]
+    shears = [leaf for leaf in leaves if isinstance(leaf, TwoModeShearGate)]
+    assert len(q_effects) == 2
+    assert len(shears) == 1
+    shear = shears[0]
+    id_a, id_b = q_effects[0].id, q_effects[1].id
+    assert shear.param_measurement_map.keys() == {*shear.a.free_symbols, *shear.b.free_symbols}
+    assert set().union(*shear.param_measurement_map.values()) == {id_a, id_b}
+    assert shear.feedforward
+    assert shear.measurement_ids == {id_a, id_b}
 
 
 def test_empty_circuit_raises():

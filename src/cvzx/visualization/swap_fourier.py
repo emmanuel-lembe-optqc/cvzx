@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 from matplotlib import patches
 
-from cvzx.ir.base import Diagram, Fourier2, FourierInv
+from cvzx.ir.base import Diagram, Fourier2, FourierInv, Swap
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -19,11 +19,12 @@ if TYPE_CHECKING:
 class _SwapFourierMixin:
     """Draws `Swap`, `Fourier`/`Fourier2`/`FourierInv`, and feedforward arrows."""
 
-    def _draw_swap(  # ruff: ignore[complex-structure, too-many-arguments, too-many-positional-arguments]
+    def _draw_swap(  # ruff: ignore[complex-structure, too-many-arguments, too-many-positional-arguments, too-many-branches]
         self: Visualizer,
         ax: plt.Axes,
         x: float,
         y: float,
+        diagram: Swap | None = None,
         comp_idx: int | None = None,
         sub_comp_idx: int | None = None,
         input_positions: list[Position] | None = None,
@@ -41,6 +42,12 @@ class _SwapFourierMixin:
             First coordinate of the diagram
         y: float
             Second coordinate of the diagram
+        diagram: Swap | None
+            The `Swap` instance being drawn. When its `void_input_port` is
+            set, the diagonal/arrows for that port are omitted -- that
+            port's whole path is known to dead-end in `VoidDiagram` filler
+            (see `FusionRule`'s disguised-composition rewrite), so drawing
+            it would only clutter the figure with an uninteresting wire.
         comp_idx: int | None
             Index of a sub-diagram inside a composition. In a composition,
             we don't need to draw the input/output wires of all sub-diagrams.
@@ -80,9 +87,14 @@ class _SwapFourierMixin:
         if radius is None:
             radius = self.config.node_radius
         arrow_length = 2 * radius
-        # Draw X shape
-        ax.plot([x - radius, x + radius], [y - radius, y + radius], "k-", linewidth=self.config.wire_width)
-        ax.plot([x - radius, x + radius], [y + radius, y - radius], "k-", linewidth=self.config.wire_width)
+        void_input_port = diagram.void_input_port if diagram is not None else None
+        # Draw X shape -- line below connects input1<->output0 (skip when
+        # `void_input_port == 1`), the one after connects input0<->output1
+        # (skip when `void_input_port == 0`).
+        if void_input_port != 1:
+            ax.plot([x - radius, x + radius], [y - radius, y + radius], "k-", linewidth=self.config.wire_width)
+        if void_input_port != 0:
+            ax.plot([x - radius, x + radius], [y + radius, y - radius], "k-", linewidth=self.config.wire_width)
         # We will draw input and output wires depending of the block is part of
         # a composition diagram
         draw_in_wires = True
@@ -95,6 +107,12 @@ class _SwapFourierMixin:
             draw_kept_inputs = [0, 1]
         if draw_kept_outputs is None:
             draw_kept_outputs = [0, 1]
+        if void_input_port is not None:
+            # The void-bound port's own input arrow, and the paired output
+            # arrow its diagonal used to feed (input0<->output1,
+            # input1<->output0), both lead nowhere interesting.
+            draw_kept_inputs = [p for p in draw_kept_inputs if p != void_input_port]
+            draw_kept_outputs = [p for p in draw_kept_outputs if p != 1 - void_input_port]
         # Draw inputs arrows
         init_input_positions = [
             (x + radius + arrow_length, y - radius),
@@ -105,7 +123,14 @@ class _SwapFourierMixin:
                 # input_positions is empty only for the first element of a composition
                 # or a single Swap diagram
                 input_positions = init_input_positions
-            if 0 in draw_kept_inputs:
+            # A hack to not draw incoming arrows from void diagrams (mirrors
+            # `_draw_proper_diagram`'s own `if input_pos:` guard): a
+            # position can be `()` -- VoidDiagram's own drawing forces its
+            # output positions to empty tuples -- even when `void_input_port`
+            # itself wasn't set or doesn't line up, since which position
+            # ends up void here depends on the *predecessor*'s own layout,
+            # not anything this `Swap` (or its constructor) controls.
+            if 0 in draw_kept_inputs and input_positions[0]:
                 input1 = patches.FancyArrowPatch(
                     input_positions[0],
                     (x + radius, y - radius),
@@ -115,7 +140,7 @@ class _SwapFourierMixin:
                     linewidth=self.config.wire_width,
                 )
                 ax.add_patch(input1)
-            if 1 in draw_kept_inputs:
+            if 1 in draw_kept_inputs and input_positions[1]:
                 input2 = patches.FancyArrowPatch(
                     input_positions[1],
                     (x + radius, y + radius),
@@ -257,7 +282,9 @@ class _SwapFourierMixin:
         if draw_in_wires:
             if input_positions is None:
                 input_positions = init_input_positions
-            if 0 in draw_kept_inputs:
+            # A hack to not draw incoming arrows from void diagrams -- mirrors
+            # `_draw_proper_diagram`'s own `if input_pos:` guard, see `_draw_swap`.
+            if 0 in draw_kept_inputs and input_positions[0]:
                 input1 = patches.FancyArrowPatch(
                     input_positions[0],
                     (x + radius, y),
@@ -289,7 +316,7 @@ class _SwapFourierMixin:
         ax : plt.Axes
             Matplotlib axes
         """
-        for node_id in self.reg.displacement_gates:
+        for node_id in self.reg.feedforward_nodes:
             if self.graph.nodes[node_id]["feedforward"]:
                 x2, y2 = self.graph.nodes[node_id]["pos"]
                 r2 = self.graph.nodes[node_id]["radius"]

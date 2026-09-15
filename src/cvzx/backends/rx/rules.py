@@ -1634,7 +1634,7 @@ class FusionRule(RewriteRule):
             msg = f"FusionRule.apply_single: unknown match shape {shape!r}"
             raise RuleApplicationError(msg)
 
-    def _apply_contracted(self, cvzx_graph: CVZXGraph, match: dict) -> None:  # ruff: ignore[too-many-locals, complex-structure, too-many-branches, too-many-statements]
+    def _apply_contracted(self, cvzx_graph: CVZXGraph, match: dict) -> None:  # ruff: ignore[too-many-locals, too-many-statements, complex-structure, too-many-branches]
         """Fuse two same-color spiders in a ContractedDiagram in-place.
 
         `first_id` survives; the fused spider is wrapped in a fresh
@@ -1829,6 +1829,662 @@ class FusionRule(RewriteRule):
             "type": "VoidDiagram",
             "phase": None,
         })
+
+
+class PassthroughRule(RewriteRule):
+    """Rewrites a disguised-composition `ContractedDiagram` into `Compose`/`Tensor`/`Swap`.
+
+    A `ContractedDiagram(first, second, I1, I2, J1, J2)` whose two halves
+    are bare, different-color spiders (or one buried as the last slot of a
+    `TensorDiagram` -- the shape `CopyRule` leaves behind when it copies a
+    spider across a contraction boundary), linked by a single one-way wire
+    -- forward (`I1`/`I2`) or feedback (`J1`/`J2`) -- with each side's kept
+    arity exactly `(1, 1)`, is mathematically just a composition, not a
+    genuine partial trace (a phase-0 spider with kept arity `(1, 1)` is a
+    ZX-calculus identity, since a phase-0 spider forces all of its legs
+    equal).
+
+    Call the output-owning half `a` (`I1`'s or `J2`'s owner) and the
+    input-owning half `b` (`I2`'s or `J1`'s owner) -- `a` is `first` for a
+    forward link, `second` for a feedback one (and vice versa for `b`).
+    Rewriting this into `Compose`/`Tensor`/`Swap` is only *safe* once the
+    two "outer" connections it would repurpose -- whatever receives `a`'s
+    own kept output, and whatever feeds `b`'s own kept input -- are
+    *already* proven dead (absent, or a genuine `VoidDiagram`), not merely
+    a not-yet-simplified identity spider that might still matter. This
+    eligibility check is why the rewrite lives in its own rule rather than
+    inside `FusionRule`: it must be re-verified on every pass (so it only
+    fires once the surrounding diagram has actually settled into a
+    provably-safe shape), not assumed once from phase alone.
+
+    Dispatches on each spider's phase once eligible:
+
+    - Both non-zero: not yet implemented -- left as a genuine
+      `ContractedDiagram` (a verified, non-lossy port routing for this
+      case isn't in place yet).
+    - `b` zero (`a` survives): ``Compose([Tensor([a(1, 1), Void(1, 1)]), Swap()])``.
+    - `a` zero (`b` survives): ``Compose([Swap(), Tensor([b(1, 1), Void(1, 1)])])``.
+    - Both zero: bare, possibly-marked ``Swap()``.
+
+    Whichever of `a`/`b` survives is placed with arity `(1, 1)` -- not its
+    raw `(1, 2)`/`(2, 1)` shape -- as a freshly minted node (same
+    type/phase, reduced arity), paired with a same-shaped `(1, 1)` `Void`
+    occupying the other slot of whichever `Tensor` sits next to the
+    `Swap`. Because `Void` always sits in a fixed, known slot next to the
+    `Swap` by construction, `void_input_port` is set deterministically
+    (not by checking any pre-existing outer connection) -- the leg
+    touching `Void` is known dead-content filler regardless of what (if
+    anything) is attached beyond it.
+    """
+
+    @staticmethod
+    def _resolve_spider(
+        graph: rx.PyDiGraph, id_map: dict[int, int], node_id: int, node_type: str | None
+    ) -> tuple[int | None, int | None]:
+        """Resolve a `ContractedDiagram` half down to its bare spider, if possible.
+
+        Returns
+        -------
+        tuple[int | None, int | None]
+            `(spider_id, tensor_id)` -- `tensor_id` is `None` unless
+            `node_id` was itself a `TensorDiagram` and the spider was
+            extracted from its last slot (`CopyRule` debris); either is
+            `None` if `node_id` isn't (or doesn't resolve to) a bare
+            `QSpider`/`PSpider`.
+        """
+        if node_type in {"QSpider", "PSpider"}:
+            return node_id, None
+        if node_type == "TensorDiagram":
+            if node_id not in id_map:
+                return None, None
+            sub_ids = graph[id_map[node_id]].get("sub_diagram_ids", [])
+            if not sub_ids:
+                return None, None
+            candidate = sub_ids[-1]
+            if candidate not in id_map or graph[id_map[candidate]].get("type") not in {"QSpider", "PSpider"}:
+                return None, None
+            return candidate, node_id
+        return None, None
+
+    def _match_shape(  # ruff: ignore[too-many-arguments, too-many-positional-arguments, too-many-return-statements, complex-structure, too-many-locals]
+        self,
+        graph: rx.PyDiGraph,
+        id_map: dict[int, int],
+        first_id: int,
+        second_id: int,
+        first_type: str | None,
+        second_type: str | None,
+        I1: list[int],  # ruff: ignore[invalid-argument-name]
+        J1: list[int],  # ruff: ignore[invalid-argument-name]
+    ) -> dict | None:
+        """Detect the eligible disguised-composition shape, either link direction.
+
+        Returns
+        -------
+        dict | None
+            `{"a_id", "b_id", "a_tensor_id", "b_tensor_id"}` if eligible
+            (see class docstring), else `None`.
+        """
+        if len(I1) == 1 and len(J1) == 0:
+            a_raw_id, a_raw_type = first_id, first_type
+            b_raw_id, b_raw_type = second_id, second_type
+            expected_connection_type = "I1_I2"
+        elif len(J1) == 1 and len(I1) == 0:
+            a_raw_id, a_raw_type = second_id, second_type
+            b_raw_id, b_raw_type = first_id, first_type
+            expected_connection_type = "J2_J1"
+        else:
+            return None
+
+        a_id, a_tensor_id = self._resolve_spider(graph, id_map, a_raw_id, a_raw_type)
+        b_id, b_tensor_id = self._resolve_spider(graph, id_map, b_raw_id, b_raw_type)
+        if a_id is None or b_id is None:
+            return None
+        # Both sides buried in TensorDiagrams isn't this shape at all --
+        # neither side is directly a bare spider, so there is no plain
+        # composition link to expose here.
+        if a_tensor_id is not None and b_tensor_id is not None:
+            return None
+
+        a_type = graph[id_map[a_id]].get("type")
+        b_type = graph[id_map[b_id]].get("type")
+        if a_type == b_type:
+            # Same-color pairs fuse correctly via ordinary phase addition
+            # (FusionRule) -- this shape is only needed for different colors.
+            return None
+
+        if not _has_edge(graph, id_map, a_id, b_id):
+            return None
+        edge_attrs = graph.get_edge_data(id_map[a_id], id_map[b_id])
+        if edge_attrs.get("edge_type") != "contracted_internal" or edge_attrs.get("connection_type") != (
+            expected_connection_type
+        ):
+            return None
+
+        a_attrs = graph[id_map[a_id]]
+        b_attrs = graph[id_map[b_id]]
+        if a_attrs.get("num_inputs") != 1 or a_attrs.get("num_outputs") != 2:  # ruff: ignore[magic-value-comparison]
+            return None
+        if b_attrs.get("num_inputs") != 2 or b_attrs.get("num_outputs") != 1:  # ruff: ignore[magic-value-comparison]
+            return None
+
+        # Eligibility: successor(a) and predecessor(b) -- the two "outer"
+        # connections this rewrite would repurpose -- must already be
+        # proven dead: absent, or a genuine VoidDiagram. See class docstring.
+        consumed_a_port = edge_attrs["source_ports"][0]
+        consumed_b_port = edge_attrs["target_ports"][0]
+        kept_a_port = 1 - consumed_a_port
+        kept_b_port = 1 - consumed_b_port
+
+        def is_void_or_absent(node_id: int | None) -> bool:
+            return node_id is None or node_id not in id_map or graph[id_map[node_id]].get("type") == "VoidDiagram"
+
+        a_output_neighbor, _ = self._composition_step(graph, id_map, a_id, kept_a_port, forward=True)
+        b_input_neighbor, _ = self._composition_step(graph, id_map, b_id, kept_b_port, forward=False)
+        if not (is_void_or_absent(a_output_neighbor) and is_void_or_absent(b_input_neighbor)):
+            return None
+
+        return {"a_id": a_id, "b_id": b_id, "a_tensor_id": a_tensor_id, "b_tensor_id": b_tensor_id}
+
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
+        """Find `ContractedDiagram`s eligible for the disguised-composition rewrite.
+
+        Returns
+        -------
+        list[dict]
+            Matches for `apply_single`.
+        """
+        graph = cvzx_graph.graph
+        registry = cvzx_graph.registry
+        id_map = _get_id_map(graph)
+        matches = []
+
+        for node in sorted(registry.contracted_diagrams):
+            if node not in id_map:
+                continue
+            attrs = graph[id_map[node]]
+            first_id = attrs.get("first_id")
+            second_id = attrs.get("second_id")
+            if first_id is None or second_id is None or first_id not in id_map or second_id not in id_map:
+                continue
+
+            first_type = graph[id_map[first_id]].get("type")
+            second_type = graph[id_map[second_id]].get("type")
+            J1 = attrs.get("J1", [])  # ruff: ignore[non-lowercase-variable-in-function]
+            I1 = attrs.get("I1", [])  # ruff: ignore[non-lowercase-variable-in-function]
+
+            shape_info = self._match_shape(graph, id_map, first_id, second_id, first_type, second_type, I1, J1)
+            if shape_info is None:
+                continue
+
+            match = {"contracted_id": node}
+            match.update(shape_info)
+            matches.append(match)
+
+        return matches
+
+    @staticmethod
+    def _recompute_tensor_bookkeeping(graph: rx.PyDiGraph, id_map: dict[int, int], tensor_id: int) -> None:
+        """Recompute a `TensorDiagram` container's own arity/port mappings.
+
+        Call after splicing a new entry into `sub_diagram_ids` whose own
+        arity differs from what it replaced -- mirrors `_add_tensor_node`'s
+        own concatenation formula (each slot's ports, in order), just
+        reading each slot's *current* graph attrs instead of a live
+        `Diagram` object.
+
+        Parameters
+        ----------
+        graph : rx.PyDiGraph
+            The graph to modify.
+        id_map : dict[int, int]
+            Mapping from cvzx diagram id to rustworkx node index.
+        tensor_id : int
+            The `TensorDiagram` container node whose `sub_diagram_ids` was
+            just spliced.
+        """
+        attrs = graph[id_map[tensor_id]]
+        sub_ids = attrs.get("sub_diagram_ids", [])
+        external_input_mapping = {}
+        input_offset = 0
+        for idx, sub_id in enumerate(sub_ids):
+            sub_num_inputs = graph[id_map[sub_id]].get("num_inputs", 0)
+            for internal_port in range(sub_num_inputs):
+                external_input_mapping[input_offset + internal_port] = (idx, internal_port)
+            input_offset += sub_num_inputs
+
+        external_output_mapping = {}
+        output_offset = 0
+        for idx, sub_id in enumerate(sub_ids):
+            sub_num_outputs = graph[id_map[sub_id]].get("num_outputs", 0)
+            for internal_port in range(sub_num_outputs):
+                external_output_mapping[output_offset + internal_port] = (idx, internal_port)
+            output_offset += sub_num_outputs
+
+        attrs.update({
+            "num_inputs": input_offset,
+            "num_outputs": output_offset,
+            "external_inputs": list(range(input_offset)),
+            "external_outputs": list(range(output_offset)),
+            "external_input_mapping": external_input_mapping,
+            "external_output_mapping": external_output_mapping,
+        })
+
+    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:  # ruff: ignore[too-many-locals, complex-structure, too-many-statements]
+        """Replace an eligible disguised-composition `ContractedDiagram` with `Compose`/`Tensor`/`Swap`.
+
+        Parameters
+        ----------
+        cvzx_graph : CVZXGraph
+            The graph to modify.
+        match : dict
+            Match from `match`.
+        """
+        graph = cvzx_graph.graph
+        id_map = _get_id_map(graph)
+        contracted_id = match["contracted_id"]
+        a_id = match["a_id"]
+        b_id = match["b_id"]
+        a_tensor_id = match["a_tensor_id"]
+        b_tensor_id = match["b_tensor_id"]
+
+        if a_id not in id_map or b_id not in id_map:
+            return
+
+        a_phase = graph[id_map[a_id]].get("phase")
+        b_phase = graph[id_map[b_id]].get("phase")
+        if a_phase is None or b_phase is None:
+            return
+
+        a_zero = bool(a_phase.is_zero)
+        b_zero = bool(b_phase.is_zero)
+
+        if not a_zero and not b_zero:
+            # Neither spider is droppable. The literal `Tensor`/`Swap`/`Tensor`
+            # construction this shape would otherwise dispatch to needs a
+            # verified, non-lossy port routing that isn't in place yet --
+            # leave the ContractedDiagram untouched rather than risk
+            # silently discarding information.
+            return
+
+        contracted_attrs = graph[id_map[contracted_id]]
+        parent_container_id = contracted_attrs.get("container_id")
+        is_root = contracted_attrs.get("is_root", False)
+
+        # Shape 2 (one side extracted from a `TensorDiagram`): the freshly
+        # built top-level node lands *inside* that tensor, not in
+        # `contracted_id`'s own outer slot -- `tensor_container_id` itself
+        # is what later takes over `contracted_id`'s slot (see the
+        # placement step at the end of this method).
+        tensor_container_id = a_tensor_id if a_tensor_id is not None else b_tensor_id
+        top_container_id = tensor_container_id if tensor_container_id is not None else parent_container_id
+        top_is_root = False if tensor_container_id is not None else is_root
+
+        edge_attrs = graph.get_edge_data(id_map[a_id], id_map[b_id])
+        consumed_a_port = edge_attrs["source_ports"][0]
+        consumed_b_port = edge_attrs["target_ports"][0]
+        kept_a_port = 1 - consumed_a_port
+        kept_b_port = 1 - consumed_b_port
+
+        # Capture every pre-existing outer connection on a kept port before
+        # anything is removed/deleted -- `a`'s own input (its only one,
+        # always kept since J1 is empty) and `b`'s own output (its only
+        # one, always kept since J2 is empty) never move; `a`'s kept output
+        # and `b`'s kept input are the ones a new outer edge gets pointed
+        # at below.
+        a_input_neighbor, a_input_neighbor_port = self._composition_step(graph, id_map, a_id, 0, forward=False)
+        a_output_neighbor, a_output_neighbor_port = self._composition_step(
+            graph, id_map, a_id, kept_a_port, forward=True
+        )
+        b_input_neighbor, b_input_neighbor_port = self._composition_step(
+            graph, id_map, b_id, kept_b_port, forward=False
+        )
+        b_output_neighbor, b_output_neighbor_port = self._composition_step(graph, id_map, b_id, 0, forward=True)
+
+        _remove_edge(graph, id_map, a_id, b_id)
+
+        def redirect(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
+            old_u: int | None,
+            old_v: int | None,
+            new_u: int | None,
+            new_v: int | None,
+            source_port: int | None,
+            target_port: int | None,
+        ) -> None:
+            if old_u is None or old_v is None or new_u is None or new_v is None:
+                return
+            if source_port is None or target_port is None:
+                return
+            _remove_edge(graph, id_map, old_u, old_v)
+            graph.add_edge(
+                id_map[new_u],
+                id_map[new_v],
+                {
+                    "source_ports": [source_port],
+                    "target_ports": [target_port],
+                    "edge_type": "composition",
+                    "internal": False,
+                    "connection_type": None,
+                },
+            )
+
+        if a_zero and b_zero:
+            # Case: both vanish -- a bare (unmarked) Swap.
+            top_id = max(id_map.keys()) + 1 if id_map else 0
+            attrs = {
+                "id": top_id,
+                "type": "Swap",
+                "kind": "proper",
+                "phase": None,
+                "feedforward": None,
+                "measurement_ids": None,
+                "param_measurement_map": {},
+                "num_inputs": 2,
+                "num_outputs": 2,
+                "container_id": top_container_id,
+                "is_root": top_is_root,
+                "external_inputs": [0, 1],
+                "external_outputs": [0, 1],
+                "void_input_port": None,
+            }
+            idx = graph.add_node(attrs)
+            id_map[top_id] = idx
+
+            redirect(a_input_neighbor, a_id, a_input_neighbor, top_id, a_input_neighbor_port, 0)
+            redirect(b_input_neighbor, b_id, b_input_neighbor, top_id, b_input_neighbor_port, 1)
+            redirect(a_id, a_output_neighbor, top_id, a_output_neighbor, 1, a_output_neighbor_port)
+            redirect(b_id, b_output_neighbor, top_id, b_output_neighbor, 0, b_output_neighbor_port)
+            _remove_node(graph, id_map, a_id)
+            _remove_node(graph, id_map, b_id)
+
+        elif b_zero:
+            # Case: `a` survives -- Compose([Tensor([a(1,1), Void(1,1)]), Swap()]).
+            a_type = graph[id_map[a_id]].get("type")
+            a_phase_value = graph[id_map[a_id]].get("phase")
+            a_reduced_id = max(id_map.keys()) + 1 if id_map else 0
+            void_id = a_reduced_id + 1
+            swap_id = void_id + 1
+            tensor_id = swap_id + 1
+            compose_id = tensor_id + 1
+
+            idx = graph.add_node({
+                "id": a_reduced_id,
+                "type": a_type,
+                "kind": "proper",
+                "phase": a_phase_value,
+                "num_inputs": 1,
+                "num_outputs": 1,
+                "container_id": tensor_id,
+                "external_inputs": [0],
+                "external_outputs": [0],
+            })
+            id_map[a_reduced_id] = idx
+            idx = graph.add_node({
+                "id": void_id,
+                "type": "VoidDiagram",
+                "kind": "proper",
+                "phase": None,
+                "num_inputs": 1,
+                "num_outputs": 1,
+                "container_id": tensor_id,
+                "external_inputs": [0],
+                "external_outputs": [0],
+            })
+            id_map[void_id] = idx
+            idx = graph.add_node({
+                "id": swap_id,
+                "type": "Swap",
+                "kind": "proper",
+                "phase": None,
+                "feedforward": None,
+                "measurement_ids": None,
+                "param_measurement_map": {},
+                "num_inputs": 2,
+                "num_outputs": 2,
+                "container_id": compose_id,
+                "external_inputs": [0, 1],
+                "external_outputs": [0, 1],
+                # Visualization-only: `_draw_tensor` draws its
+                # `sub_diagram_ids` top-to-bottom but numbers the returned
+                # `output_positions` bottom-to-top (it prepends each
+                # sub-diagram's position onto the accumulator), so as seen
+                # by this `Swap`, drawing-index 0 is actually
+                # `sub_diagram_ids[-1]` (void) and index 1 is
+                # `sub_diagram_ids[0]` (a_reduced). The void slot is
+                # therefore at input position 0 here, not 1 -- the
+                # underlying graph wiring (`compose_id`'s
+                # `external_output_mapping`) is unaffected and already
+                # routes the real value correctly.
+                "void_input_port": 0,
+            })
+            id_map[swap_id] = idx
+            idx = graph.add_node({
+                "id": tensor_id,
+                "type": "TensorDiagram",
+                "kind": "container",
+                "container_type": "tensor",
+                "phase": None,
+                "num_inputs": 2,
+                "num_outputs": 2,
+                "container_id": compose_id,
+                "is_root": False,
+                "sub_diagram_ids": [a_reduced_id, void_id],
+                "external_inputs": [0, 1],
+                "external_outputs": [0, 1],
+                "external_input_mapping": {0: (0, 0), 1: (1, 0)},
+                "external_output_mapping": {0: (0, 0), 1: (1, 0)},
+            })
+            id_map[tensor_id] = idx
+            idx = graph.add_node({
+                "id": compose_id,
+                "type": "CompositionDiagram",
+                "kind": "container",
+                "container_type": "composition",
+                "phase": None,
+                "num_inputs": 2,
+                "num_outputs": 2,
+                "container_id": top_container_id,
+                "is_root": top_is_root,
+                "sub_diagram_ids": [tensor_id, swap_id],
+                "connectivity": {0: {0: 0, 1: 1}},
+                "external_inputs": [0, 1],
+                "external_outputs": [0, 1],
+                "external_input_mapping": {0: (0, 0), 1: (0, 1)},
+                "external_output_mapping": {0: (1, 0), 1: (1, 1)},
+            })
+            id_map[compose_id] = idx
+
+            redirect(a_input_neighbor, a_id, a_input_neighbor, a_reduced_id, a_input_neighbor_port, 0)
+            graph.add_edge(
+                id_map[a_reduced_id],
+                id_map[swap_id],
+                {
+                    "source_ports": [0],
+                    "target_ports": [0],
+                    "edge_type": "composition",
+                    "internal": False,
+                    "connection_type": None,
+                },
+            )
+            graph.add_edge(
+                id_map[void_id],
+                id_map[swap_id],
+                {
+                    "source_ports": [0],
+                    "target_ports": [1],
+                    "edge_type": "composition",
+                    "internal": False,
+                    "connection_type": None,
+                },
+            )
+            redirect(b_input_neighbor, b_id, b_input_neighbor, void_id, b_input_neighbor_port, 0)
+            redirect(a_id, a_output_neighbor, swap_id, a_output_neighbor, 1, a_output_neighbor_port)
+            redirect(b_id, b_output_neighbor, swap_id, b_output_neighbor, 0, b_output_neighbor_port)
+
+            _remove_node(graph, id_map, a_id)
+            _remove_node(graph, id_map, b_id)
+            top_id = compose_id
+
+        else:
+            # Case: `b` survives -- Compose([Swap(), Tensor([b(1,1), Void(1,1)])]).
+            b_type = graph[id_map[b_id]].get("type")
+            b_phase_value = graph[id_map[b_id]].get("phase")
+            swap_id = max(id_map.keys()) + 1 if id_map else 0
+            b_reduced_id = swap_id + 1
+            void_id = b_reduced_id + 1
+            tensor_id = void_id + 1
+            compose_id = tensor_id + 1
+
+            idx = graph.add_node({
+                "id": swap_id,
+                "type": "Swap",
+                "kind": "proper",
+                "phase": None,
+                "feedforward": None,
+                "measurement_ids": None,
+                "param_measurement_map": {},
+                "num_inputs": 2,
+                "num_outputs": 2,
+                "container_id": compose_id,
+                "external_inputs": [0, 1],
+                "external_outputs": [0, 1],
+                # Logically, swap input 1 (predecessor(b), proven void by
+                # eligibility) is always the dead leg here -- deterministic,
+                # not an outward check. Visualization-only caveat: unlike
+                # the "`a` survives" branch (where the Swap's predecessor is
+                # this rule's own freshly-built Tensor, so which drawn
+                # *position* is void is fully known), here the Swap is
+                # first in its Compose, so its predecessor is whatever
+                # externally precedes the original ContractedDiagram --
+                # `_draw_tensor`'s bottom-to-top-numbered/top-to-bottom-drawn
+                # convention means the drawn position of the void slot
+                # depends on that external structure's own layout, which
+                # isn't knowable here. `1` is this method's best-effort
+                # guess (the logically-void port); `_draw_swap`/`_draw_fourier`
+                # guard with `if input_positions[i]:` so a wrong guess never
+                # crashes, only occasionally mis-hides the wrong diagonal.
+                "void_input_port": 1,
+            })
+            id_map[swap_id] = idx
+            idx = graph.add_node({
+                "id": b_reduced_id,
+                "type": b_type,
+                "kind": "proper",
+                "phase": b_phase_value,
+                "num_inputs": 1,
+                "num_outputs": 1,
+                "container_id": tensor_id,
+                "external_inputs": [0],
+                "external_outputs": [0],
+            })
+            id_map[b_reduced_id] = idx
+            idx = graph.add_node({
+                "id": void_id,
+                "type": "VoidDiagram",
+                "kind": "proper",
+                "phase": None,
+                "num_inputs": 1,
+                "num_outputs": 1,
+                "container_id": tensor_id,
+                "external_inputs": [0],
+                "external_outputs": [0],
+            })
+            id_map[void_id] = idx
+            idx = graph.add_node({
+                "id": tensor_id,
+                "type": "TensorDiagram",
+                "kind": "container",
+                "container_type": "tensor",
+                "phase": None,
+                "num_inputs": 2,
+                "num_outputs": 2,
+                "container_id": compose_id,
+                "is_root": False,
+                "sub_diagram_ids": [b_reduced_id, void_id],
+                "external_inputs": [0, 1],
+                "external_outputs": [0, 1],
+                "external_input_mapping": {0: (0, 0), 1: (1, 0)},
+                "external_output_mapping": {0: (0, 0), 1: (1, 0)},
+            })
+            id_map[tensor_id] = idx
+            idx = graph.add_node({
+                "id": compose_id,
+                "type": "CompositionDiagram",
+                "kind": "container",
+                "container_type": "composition",
+                "phase": None,
+                "num_inputs": 2,
+                "num_outputs": 2,
+                "container_id": top_container_id,
+                "is_root": top_is_root,
+                "sub_diagram_ids": [swap_id, tensor_id],
+                "connectivity": {0: {0: 0, 1: 1}},
+                "external_inputs": [0, 1],
+                "external_outputs": [0, 1],
+                "external_input_mapping": {0: (0, 0), 1: (0, 1)},
+                "external_output_mapping": {0: (1, 0), 1: (1, 1)},
+            })
+            id_map[compose_id] = idx
+
+            # Crossing: swap input0 (predecessor(a), real -- the internal
+            # link's value, since a is being eliminated and forces its own
+            # legs equal) produces swap output1; swap input1
+            # (predecessor(b), void by eligibility) produces swap output0.
+            # `b_reduced` -- which needs the real internal-link value, not
+            # its own (void) predecessor(b) -- must take swap output1, and
+            # `void_id` takes the already-dead swap output0.
+            graph.add_edge(
+                id_map[swap_id],
+                id_map[b_reduced_id],
+                {
+                    "source_ports": [1],
+                    "target_ports": [0],
+                    "edge_type": "composition",
+                    "internal": False,
+                    "connection_type": None,
+                },
+            )
+            graph.add_edge(
+                id_map[swap_id],
+                id_map[void_id],
+                {
+                    "source_ports": [0],
+                    "target_ports": [0],
+                    "edge_type": "composition",
+                    "internal": False,
+                    "connection_type": None,
+                },
+            )
+            redirect(a_input_neighbor, a_id, a_input_neighbor, swap_id, a_input_neighbor_port, 0)
+            redirect(b_input_neighbor, b_id, b_input_neighbor, swap_id, b_input_neighbor_port, 1)
+            redirect(a_id, a_output_neighbor, void_id, a_output_neighbor, 0, a_output_neighbor_port)
+            redirect(b_id, b_output_neighbor, b_reduced_id, b_output_neighbor, 0, b_output_neighbor_port)
+
+            _remove_node(graph, id_map, a_id)
+            _remove_node(graph, id_map, b_id)
+            top_id = compose_id
+
+        # Placement: either splice into the enclosing TensorDiagram that
+        # `node_to_contract` (the surviving/absorbed half not passed in
+        # directly) came from, or replace `contracted_id` directly in its
+        # own parent -- never both.
+        tensor_container_id = a_tensor_id if a_tensor_id is not None else b_tensor_id
+        if tensor_container_id is not None:
+            sub_ids = graph[id_map[tensor_container_id]]["sub_diagram_ids"]
+            node_to_contract_id = b_id if a_tensor_id is not None else a_id
+            sub_ids[sub_ids.index(node_to_contract_id)] = top_id
+            graph[id_map[top_id]]["container_id"] = tensor_container_id
+            self._recompute_tensor_bookkeeping(graph, id_map, tensor_container_id)
+            top_id = tensor_container_id
+
+        if parent_container_id is not None and parent_container_id in id_map:
+            self._replace_in_parent(graph, id_map, parent_container_id, contracted_id, top_id)
+        else:
+            graph[id_map[top_id]]["is_root"] = True
+            graph[id_map[top_id]]["container_id"] = None
+
+        if contracted_id in id_map:
+            _remove_node(graph, id_map, contracted_id)
 
 
 class ChainReductionRule(RewriteRule):

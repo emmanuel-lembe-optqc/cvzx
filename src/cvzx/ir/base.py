@@ -1400,9 +1400,11 @@ class Parametrized:
             one of this object's own parameters.
         ValueError
             If any of `param_measurement_map`'s values is not a non-empty
-            `set`, or if the legacy `feedforward`/`measurement_ids`
-            fields are inconsistent with each other (only checked when
-            `param_measurement_map` is empty).
+            `set`, or if `feedforward` is True (or `measurement_ids` is
+            set) while `param_measurement_map` is empty -- provenance is
+            required, not optional: `feedforward`/`measurement_ids` are
+            derived from `param_measurement_map`, never set independently
+            of it.
         """
         if not isinstance(self.param_measurement_map, dict):
             msg = f"The param_measurement_map attribute must be a dict, got {type(self.param_measurement_map)}."
@@ -1424,13 +1426,14 @@ class Parametrized:
             self.feedforward = bool(self.measurement_ids)
             return
 
-        if self.feedforward:
-            if not isinstance(self.measurement_ids, set):
-                msg = f"The measurement_ids attribute must be a set, got {type(self.measurement_ids)}."
-                raise ValueError(msg)
-            if not self.measurement_ids:
-                msg = "The measurement_ids attribute can not be empty."
-                raise ValueError(msg)
+        if self.feedforward or self.measurement_ids:
+            msg = (
+                f"{type(self).__name__} has feedforward={self.feedforward!r} / "
+                f"measurement_ids={self.measurement_ids!r} but an empty param_measurement_map -- "
+                "pass a non-empty param_measurement_map (symbol -> measurement ids) instead; "
+                "feedforward/measurement_ids are derived from it, not set independently."
+            )
+            raise ValueError(msg)
 
     def slice_param_map(self, params: set[Symbol]) -> dict[Symbol, set[int]]:
         """Restrict `param_measurement_map` to a subset of symbols.
@@ -1449,20 +1452,6 @@ class Parametrized:
             A fresh dict (values copied, not aliased) restricted to `params`.
         """
         return {symbol: set(ids) for symbol, ids in self.param_measurement_map.items() if symbol in params}
-
-    def _legacy_feedforward_kwargs(self) -> dict[str, Any]:
-        """Carry forward `feedforward`/`measurement_ids` for a rebuild.
-
-        These stay meaningful independently of `param_measurement_map`
-        when the map is empty (see `_sync_feedforward_state`), so a
-        rebuilt instance must start from the same legacy values before
-        `__post_init__` re-derives them from any surviving map entries.
-
-        Returns
-        -------
-        dict[str, Any]
-        """
-        return {"feedforward": self.feedforward, "measurement_ids": self.measurement_ids}
 
     def substitute_parameters(self, mapping: dict[Symbol, Any]) -> "Parametrized":
         """Substitute symbolic parameters with concrete or other symbolic values.
@@ -1601,7 +1590,6 @@ class QSpider(ProperDiagram, Parametrized):
             _num_inputs=self.num_inputs,
             _num_outputs=self.num_outputs,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
 
@@ -1689,7 +1677,6 @@ class PSpider(ProperDiagram, Parametrized):
             _num_inputs=self.num_inputs,
             _num_outputs=self.num_outputs,
             param_measurement_map=new_map,
-            **self._legacy_feedforward_kwargs(),
         )
 
 
@@ -1715,6 +1702,12 @@ class Swap(ProperDiagram):
 
     _num_inputs: int = field(default=2, init=False)
     _num_outputs: int = field(default=2, init=False)
+    void_input_port: int | None = None
+    """Visualization-only marker: which input port (0 or 1) is the one whose
+    diagonal, once followed outward through the rest of the diagram, dead-ends
+    in `VoidDiagram` filler. `None` for an ordinary/unmarked `Swap`. Does not
+    affect the diagram's semantics -- only `_draw_swap` reads it, to skip
+    drawing that uninteresting leg."""
 
     def conjugate(self) -> Diagram:
         """Swap is self-conjugate.
@@ -1722,9 +1715,9 @@ class Swap(ProperDiagram):
         Returns
         -------
         Swap
-            New Swap instance.
+            New Swap instance, preserving `void_input_port`.
         """
-        return Swap()
+        return Swap(void_input_port=self.void_input_port)
 
     def __repr__(self) -> str:
         """Return string representation of the swap diagram.
@@ -1732,8 +1725,10 @@ class Swap(ProperDiagram):
         Returns
         -------
         str
-            "Swap()"
+            "Swap()", or "Swap(void_input_port=<n>)" when marked.
         """
+        if self.void_input_port is not None:
+            return f"Swap(void_input_port={self.void_input_port})"
         return "Swap()"
 
 

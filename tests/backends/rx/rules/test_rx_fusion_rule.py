@@ -8,6 +8,8 @@ application, flattening, and nested structures. All diagram types from
 import math
 import unittest
 
+from cvzx.backends.rx.graph import to_diagram, to_graph
+from cvzx.backends.rx.rules import FusionRule, apply_rule_to_diagram
 from cvzx.ir.base import (
     CompositionDiagram,
     ContractedDiagram,
@@ -27,8 +29,6 @@ from cvzx.ir.gates import (
     PhaseRotationGate,
     SqueezingGate,
 )
-from cvzx.backends.rx.graph import to_diagram, to_graph
-from cvzx.backends.rx.rules import FusionRule, apply_rule_to_diagram
 
 
 class TestFusionRule(unittest.TestCase):
