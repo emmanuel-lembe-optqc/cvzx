@@ -20,7 +20,7 @@ class ZxPoly(Poly):
     coefficients are omitted from `.coeffs`. Coefficients may be numeric or symbolic. See
     :doc:`../dev_guide/architecture` for the representation choices and worked examples.
 
-    Parameters
+    Attributes
     ----------
     coeffs : dict[int, float | Expr]
         Dictionary mapping degree → coefficient. For numeric coefficients,
@@ -1661,7 +1661,7 @@ class VoidDiagram(ProperDiagram):
     every one (and any leftover identity wires) for good. See :doc:`../dev_guide/architecture`
     for the motivating cross-container rewrite case and its visualization behavior.
 
-    Parameters
+    Attributes
     ----------
     _num_inputs : int
         Number of input wires, matching whatever this slot replaced.

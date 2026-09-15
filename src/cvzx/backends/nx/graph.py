@@ -117,24 +117,38 @@ class GateRegister:
     nothing does this automatically. See :doc:`../../dev_guide/architecture` for what each index
     is used for.
 
-    Parameters
+    Attributes
     ----------
-        squeezing_gates set[int]: Node IDs of squeezing gates (Sq)
-        displacement_gates set[int]: Node IDs of displacement gates (D)
-        rotation_gates set[int]: Node IDs of phase rotation gates (R)
-        fourier_gates set[int]: Node IDs of Fourier gates (F, F†, F²)
-        identity_spiders set[int]: Node IDs of identity spiders (zero phase, 1→1)
-        input_states set[int]: Node IDs of input states (0 inputs, 1 output)
-        measurement_nodes set[int]: Node IDs of measurements (1 input, 0 outputs)
-        contracted_diagrams set[int]: Node IDs of ContractedDiagram containers
-        tensor_nodes set[int]: Node IDs of TensorDiagram containers
-        composition_nodes set[int]: Node IDs of CompositionDiagram containers
-        void_nodes set[int]: Node IDs of VoidDiagram placeholders
-        parametric_nodes set[int]: Node IDs carrying at least one free symbol
-        feedforward_nodes set[int]: Node IDs with feedforward=True
-        symbol_registry dict[Symbol, set[int]]: Symbol -> node IDs using it
-        measurement_to_feedforward_map dict[int, set[int]]: Measurement node ID ->
-            node IDs whose measurement_ids includes it
+    squeezing_gates : set[int]
+        Node IDs of squeezing gates (Sq).
+    displacement_gates : set[int]
+        Node IDs of displacement gates (D).
+    rotation_gates : set[int]
+        Node IDs of phase rotation gates (R).
+    fourier_gates : set[int]
+        Node IDs of Fourier gates (F, F†, F²).
+    identity_spiders : set[int]
+        Node IDs of identity spiders (zero phase, 1→1).
+    input_states : set[int]
+        Node IDs of input states (0 inputs, 1 output).
+    measurement_nodes : set[int]
+        Node IDs of measurements (1 input, 0 outputs).
+    contracted_diagrams : set[int]
+        Node IDs of ContractedDiagram containers.
+    tensor_nodes : set[int]
+        Node IDs of TensorDiagram containers.
+    composition_nodes : set[int]
+        Node IDs of CompositionDiagram containers.
+    void_nodes : set[int]
+        Node IDs of VoidDiagram placeholders.
+    parametric_nodes : set[int]
+        Node IDs carrying at least one free symbol.
+    feedforward_nodes : set[int]
+        Node IDs with feedforward=True.
+    symbol_registry : dict[Symbol, set[int]]
+        Symbol -> node IDs using it.
+    measurement_to_feedforward_map : dict[int, set[int]]
+        Measurement node ID -> node IDs whose measurement_ids includes it.
     """
 
     def __init__(self) -> None:

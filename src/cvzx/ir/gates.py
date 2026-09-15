@@ -297,7 +297,7 @@ class DisplacementGate(CompactDiagram):
     Represents the displacement operator D(a) = exp(a â† - a* â).
     Decomposes into a q-spider and a p-spider as shown in [1] Eq. (57).
 
-    Parameters
+    Attributes
     ----------
     alpha : float | int | complex | Expr
         Displacement amplitude. Can be numeric or symbolic.
@@ -487,7 +487,7 @@ class PhaseRotationGate(CompactDiagram):
     Represents the phase rotation operator R(θ) = exp(iθ â† â).
     Decomposes into three quadratic q-spiders as shown in [1] Eq. (58).
 
-    Parameters
+    Attributes
     ----------
     theta : float | int | Expr
         Rotation angle in radians. Can be numeric or symbolic.
@@ -648,7 +648,7 @@ class SqueezingGate(CompactDiagram):
     standard squeezing). Decomposes into four quadratic spiders as shown in
     [1] Eq. (59).
 
-    Parameters
+    Attributes
     ----------
     tau : float | int | Expr
         Squeezing parameter. τ > 0 for squeezing, τ < 0 for anti-squeezing.
@@ -804,7 +804,7 @@ class ControlledSumGate(CompactDiagram):
     (CV analogue of CNOT). Decomposes into q-spider and p-spider
     with a contraction as shown in [1] Eq. (61)-(62).
 
-    Parameters
+    Attributes
     ----------
     gain : float | int | Expr
         Gain parameter g. Default is 1 (unbiased CSUM).
@@ -1004,7 +1004,7 @@ class ControlledZGate(CompactDiagram):
 
     Represents the operation exp(-i g q̂₁ q̂₂).
 
-    Parameters
+    Attributes
     ----------
     gain : float | int | Expr
         Gain parameter g. Default is 1 (unbiased CZ).
@@ -1164,7 +1164,7 @@ class BeamsplitterGate(CompactDiagram):
     Represents the operation exp(-iθ (q̂₁ p̂₂ - p̂₁ q̂₂)). Decomposes into
     squeezing gates and CSUM gates as shown in [1] Eq. (66).
 
-    Parameters
+    Attributes
     ----------
     theta : float | int | Expr
         Beamsplitter angle. θ = π/4 gives a 50:50 beamsplitter.
@@ -1330,7 +1330,7 @@ class CubicPhaseGate(CompactDiagram):
     Represents the non-Gaussian operation exp(iy x̂³). This is a native
     non-Gaussian gate represented by a single q-spider with cubic phase.
 
-    Parameters
+    Attributes
     ----------
     gamma : float | int | Expr
         Cubic phase strength parameter.
@@ -1434,7 +1434,7 @@ class ShearXInvariantGate(CompactDiagram):
     used inside `PhaseRotationGate`/`SqueezingGate` -- so `expand()` needs
     no composition, just one spider.
 
-    Parameters
+    Attributes
     ----------
     kappa : float | int | Expr
         Shear strength parameter.
@@ -1540,7 +1540,7 @@ class ShearPInvariantGate(CompactDiagram):
     catalog table for the full Heisenberg action). A quadratic-phase
     p-spider *is* this shear directly, symmetric to `ShearXInvariantGate`.
 
-    Parameters
+    Attributes
     ----------
     eta : float | int | Expr
         Shear strength parameter.
@@ -1653,7 +1653,7 @@ class ArbitraryGate(CompactDiagram):
     :doc:`../user_guide/gates` for the full derivation and the
     `conjugate()` formula's justification.
 
-    Parameters
+    Attributes
     ----------
     alpha : float | int | Expr
         Final rotation angle.
@@ -1807,7 +1807,7 @@ class Squeezing45Gate(CompactDiagram):
     See :doc:`../user_guide/gates` for how `tan(theta)` follows from mqc3's
     `S_V(cot theta)` convention.
 
-    Parameters
+    Attributes
     ----------
     theta : float | int | Expr
         Squeezing angle parameter (mqc3 convention).
@@ -1930,7 +1930,7 @@ class TwoModeShearGate(CompactDiagram):
     `ControlledZGate(gain=-b)` for the cross term -- see
     :doc:`../user_guide/gates` for why the CZ gain is `-b` and not `b`.
 
-    Parameters
+    Attributes
     ----------
     a : float | int | Expr
         Diagonal (single-mode) shear strength, applied to both modes.
@@ -2064,7 +2064,7 @@ class MeasurementGate(CompactDiagram):
     different shape, so it cannot be wrapped back into this same compact
     gate class the way every other gate in this module does.
 
-    Parameters
+    Attributes
     ----------
     theta : float | int | Expr
         Measured quadrature angle.
