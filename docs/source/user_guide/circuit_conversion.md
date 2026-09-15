@@ -152,6 +152,17 @@ Each of these is the algebraic inverse of the corresponding formula above:
 - `ControlledZGate(gain=g)` -> `intrinsic.ControlledZ(-g)`.
 - `BeamsplitterGate(theta)` -> `intrinsic.BeamSplitter(sqrt_r, 0)` with `sqrt_r = cos(theta)` —
   the `theta_rel = 0` special case of the general formula above.
+- `ControlledSumGate(gain=g, control=c, target=t)` has no bare mqc3 primitive (mqc3's intrinsic
+  set has `ControlledZ` but no CSUM/CNOT-style analogue). cvzx's `ControlledSumGate(g)` is
+  `exp(-i g q̂_c p̂_t)` and `ControlledZGate(g)` is `exp(-i g q̂₁ q̂₂)` — conjugating `ControlledZ`
+  by a Fourier rotation on the *target* mode converts CZ's q-q coupling into CSUM's q-p
+  coupling: `CZ(g) = (I ⊗ F_t†) CSUM_{c→t}(g) (I ⊗ F_t)`, i.e.
+  `CSUM_{c→t}(g) = (I ⊗ F_t) CZ(g) (I ⊗ F_t†)`. Emitted as three ops on `(mode_a, mode_b)`:
+  `intrinsic.PhaseRotation(-pi/2)` on the target mode (= `FourierInv`), then
+  `intrinsic.ControlledZ(-g)` on both modes, then `intrinsic.PhaseRotation(pi/2)` on the target
+  mode (= `Fourier`) — verified via the Heisenberg-picture (classical Hamiltonian flow)
+  transform of `(q_c, p_c, q_t, p_t)` under each side independently; both sides give
+  `q_c' = q_c`, `p_c' = p_c - g p_t`, `q_t' = q_t + g q_c`, `p_t' = p_t`.
 - A bare zero-phase state leaf (`QSpider(0, 1, 0)`) -> a mode with
   `HardwareConstrainedSqueezedState(phi=0)`; the `PSpider` counterpart -> `phi = pi/2`
   (mirroring the `QSpider`-is-x-type/`PSpider`-is-p-type convention used throughout this
@@ -180,8 +191,7 @@ nonlinearly on its symbol, raises `NotImplementedError` (first and third cases) 
 
 ### Not (yet) supported -- raises `NotImplementedError`
 
-- `ControlledSumGate` and `CubicPhaseGate` (the latter is a genuinely non-Gaussian gate; mqc3's
-  intrinsic set is Gaussian-only).
+- `CubicPhaseGate`: a genuinely non-Gaussian gate; mqc3's intrinsic set is Gaussian-only.
 - Any state/effect leaf with a nonzero phase polynomial, other than the single
   measurement-effect shape described above.
 - A symbolic (parametric, unresolved) gate parameter that isn't a tracked feedforward symbol as

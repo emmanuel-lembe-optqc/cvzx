@@ -5,14 +5,16 @@ tests check what can actually be checked without one: that a `Diagram`
 produced by `cvzx.lowering.bridges.mqc3.from_circuit_repr` round-trips back into
 a well-formed `CircuitRepr` (right survivor count, and constructs a real
 mqc3 `DependencyDAG` without error -- the actual downstream consumer of
-a `CircuitRepr`), and that every documented unsupported case
-(`ControlledSumGate`, `CubicPhaseGate`, a nonzero-phase state/effect
+a `CircuitRepr`), that `ControlledSumGate` emits the exact Fourier-conjugated
+`ControlledZ` sequence it's documented to, and that every remaining
+documented unsupported case (`CubicPhaseGate`, a nonzero-phase state/effect
 leaf, a symbolic gate parameter, a `Diagram` with external inputs, and
 any `ContractedDiagram`) raises rather than silently mistranslating.
 """
 
 from __future__ import annotations
 
+import numpy as np
 import sympy
 from mqc3.circuit import CircuitRepr
 from mqc3.circuit.ops import intrinsic
@@ -87,28 +89,57 @@ def test_simple_single_mode_round_trip():
     DependencyDAG(circuit2)
 
 
-def test_controlled_sum_gate_raises():
-    """Reject `ControlledSumGate` rather than silently mistranslating it.
+def _csum_diagram(gain: float, control: int, target: int) -> CompositionDiagram:
+    two_vac = TensorDiagram([QSpider(0, 1, ZxPoly({})), QSpider(0, 1, ZxPoly({}))])
+    return CompositionDiagram([two_vac, ControlledSumGate(gain, control=control, target=target)])
 
-    It is a `CompactDiagram` leaf with no bare mqc3 intrinsic
-    equivalent; it survives `normalize_diagram` as an atomic leaf (not
-    decomposed further) and must be rejected rather than silently
-    dropped or mistranslated.
 
-    Raises
-    ------
-    AssertionError
-        If `to_circuit_repr` does not raise `NotImplementedError`.
+def test_controlled_sum_gate_emits_fourier_conjugated_controlled_z():
+    """`ControlledSumGate` has no bare mqc3 primitive -- it's emitted as
+    `ControlledZ` conjugated by a Fourier rotation on the target mode (see
+    the user guide's "Converting to and from mqc3 circuits" page for the
+    Heisenberg-picture derivation: `CSUM(g) = (I ⊗ F_t) CZ(g) (I ⊗ F_t†)`).
+
+    Checks the exact three-op emission (angles, gain sign, and which
+    mode gets the Fourier pair) for both `target=1` and `target=2`, and
+    that mqc3's own `DependencyDAG` accepts the result.
     """
-    vac = QSpider(0, 1, ZxPoly({}))
-    two_vac = TensorDiagram([vac, QSpider(0, 1, ZxPoly({}))])
-    csum_diagram = CompositionDiagram([two_vac, ControlledSumGate(1.0)])
-    try:
-        to_circuit_repr(csum_diagram)
-    except NotImplementedError:
-        return
-    msg = "expected NotImplementedError for ControlledSumGate"
-    raise AssertionError(msg)
+    circuit = to_circuit_repr(_csum_diagram(0.7, control=1, target=2))
+    ops = list(circuit)
+    assert len(ops) == 3
+
+    rot1, cz, rot2 = ops
+    assert type(rot1).__name__ == "PhaseRotation"
+    assert type(cz).__name__ == "ControlledZ"
+    assert type(rot2).__name__ == "PhaseRotation"
+
+    target_mode = rot1.opnd().get_ids()[0]
+    assert rot2.opnd().get_ids()[0] == target_mode
+    assert rot1.parameters() == [-np.pi / 2]
+    assert rot2.parameters() == [np.pi / 2]
+    assert cz.parameters() == [-0.7]
+
+    control_target_modes = set(cz.opnd().get_ids())
+    assert target_mode in control_target_modes
+    assert len(control_target_modes) == 2  # noqa: PLR2004
+
+    DependencyDAG(circuit)
+
+
+def test_controlled_sum_gate_target_mode_selection():
+    """Same as above with `target=1` instead of `target=2`, to exercise
+    the other branch of the target-mode selection."""
+    circuit_a = to_circuit_repr(_csum_diagram(0.5, control=1, target=2))
+    circuit_b = to_circuit_repr(_csum_diagram(0.5, control=2, target=1))
+
+    rot_a = list(circuit_a)[0]
+    rot_b = list(circuit_b)[0]
+    # Different physical mode gets the Fourier pair depending on which
+    # gate-local mode is the target.
+    assert rot_a.opnd().get_ids()[0] != rot_b.opnd().get_ids()[0]
+
+    DependencyDAG(circuit_a)
+    DependencyDAG(circuit_b)
 
 
 def test_cubic_phase_gate_raises():

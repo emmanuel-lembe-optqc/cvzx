@@ -220,6 +220,25 @@ development on `main` to date, grouped by area rather than by commit.
   `is_parametric()` — for an already fully-numeric phase there is nothing
   to simplify, and the round-trip risks changing the underlying
   `sympy.Poly`'s domain (exact integers becoming floats) for zero benefit.
+- **`ControlledSumGate` now converts to mqc3** (`cvzx.lowering.bridges.mqc3`,
+  `_apply_2mode_leaf`): mqc3's intrinsic set has no CSUM/CNOT-style
+  primitive, only `ControlledZ`, so a `Diagram` containing a CSUM leaf
+  previously raised `NotImplementedError` in `to_circuit_repr` (cvzx ->
+  mqc3) unconditionally. Since `ControlledSumGate(g)` is
+  `exp(-i g q̂_c p̂_t)` and `ControlledZGate(g)` is `exp(-i g q̂₁ q̂₂)`,
+  conjugating `ControlledZ` by a Fourier rotation on CSUM's *target* mode
+  converts CZ's q-q coupling into CSUM's q-p coupling:
+  `CSUM_{c→t}(g) = (I ⊗ F_t) CZ(g) (I ⊗ F_t†)`, emitted as
+  `intrinsic.PhaseRotation(-π/2)` (target mode) ->
+  `intrinsic.ControlledZ(-g)` (both modes) -> `intrinsic.PhaseRotation(π/2)`
+  (target mode). Verified via the Heisenberg-picture (classical
+  Hamiltonian-flow) transform of `(q_c, p_c, q_t, p_t)` under each side
+  independently -- both give `q_c' = q_c`, `p_c' = p_c - g p_t`,
+  `q_t' = q_t + g q_c`, `p_t' = p_t` -- rather than by inspection, since
+  this codebase has no numeric Gaussian simulation backend to check
+  against directly. See `docs/source/user_guide/circuit_conversion.md`
+  for the full derivation. `CubicPhaseGate` (genuinely non-Gaussian)
+  remains the only unsupported compact gate.
 
 ### Changed
 

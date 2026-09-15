@@ -54,8 +54,8 @@ float -- the algebraic inverse of `from_circuit_repr`'s reconstruction above.
 
 Not (yet) supported -- raises `NotImplementedError`
 -----------------------------------------------------
-- `ControlledSumGate` and `CubicPhaseGate` (the latter is a genuinely
-  non-Gaussian gate; mqc3's intrinsic set is Gaussian-only).
+- `CubicPhaseGate`: a genuinely non-Gaussian gate; mqc3's intrinsic set
+  is Gaussian-only.
 - Any state/effect leaf with a nonzero phase polynomial, other than the
   single measurement-effect shape described above.
 - A symbolic (parametric, unresolved) gate parameter that isn't a
@@ -98,6 +98,7 @@ from cvzx.ir.base import (
 from cvzx.ir.gates import (
     ArbitraryGate,
     BeamsplitterGate,
+    ControlledSumGate,
     ControlledZGate,
     DisplacementGate,
     MeasurementGate,
@@ -1047,6 +1048,18 @@ def _apply_2mode_leaf(
         gain = _resolve_scalar(elt.gain, "ControlledZGate", measurement_ops)
         gain = -gain if isinstance(gain, float) else _negate_feedforward(gain)
         circuit.Q(mode_a, mode_b) | intrinsic.ControlledZ(gain)
+        return
+    if isinstance(elt, ControlledSumGate):
+        # No direct mqc3 primitive: conjugating ControlledZ by a Fourier
+        # rotation on the target mode converts CZ's q-q coupling into
+        # CSUM's q-p coupling -- see :doc:`../user_guide/circuit_conversion`
+        # for the derivation and its Heisenberg-picture verification.
+        gain = _resolve_scalar(elt.gain, "ControlledSumGate", measurement_ops)
+        gain = -gain if isinstance(gain, float) else _negate_feedforward(gain)
+        target_mode = mode_a if elt.target == 1 else mode_b
+        circuit.Q(target_mode) | intrinsic.PhaseRotation(-np.pi / 2)
+        circuit.Q(mode_a, mode_b) | intrinsic.ControlledZ(gain)
+        circuit.Q(target_mode) | intrinsic.PhaseRotation(np.pi / 2)
         return
     if isinstance(elt, BeamsplitterGate):
         theta = _as_real(elt.theta, "BeamsplitterGate")
