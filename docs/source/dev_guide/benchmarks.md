@@ -14,7 +14,13 @@ visualization cost, none of which this page covers.
 Every metric is computed on a `CVZXGraph` (the same representation
 `optimize()` itself works on), via one entry point,
 `cvzx.utils.metrics.compute_metrics(diagram)`, returning a `DiagramMetrics`
-snapshot:
+snapshot. Every counting function is built on `iter_leaf_attrs()` rather
+than `cvzx.backends.{nx,rx}.graph.get_proper_nodes()`: that helper's own
+`kind` filter differs between the two backend modules (nx: `kind ==
+"proper"` only; rx: `kind in {"proper", "compact"}`), so using it directly
+here would silently change what "generator count" means depending on
+which backend happens to be installed -- `iter_leaf_attrs()` is the one
+place that inconsistency is worked around, uniformly.
 
 | Metric | Meaning |
 |---|---|

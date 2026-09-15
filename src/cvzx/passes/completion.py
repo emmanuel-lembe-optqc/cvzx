@@ -1,50 +1,15 @@
 """Close a diagram's open output boundary with symbolic measurement effects.
 
-An `optimize()`d diagram destined for physical mqc3 execution generally
-still has open output ports (unmeasured modes) -- `optimize()` and the
-rewrite rules it runs deliberately never terminate a wire on their own,
-since a boundary state/effect sitting in the graph would otherwise block
-spider fusion, chain reduction, and identity removal during the rewrite
-loop itself. `complete_diagram()` is the dedicated post-`optimize()` pass
-that closes those open ports: it appends one fresh, symbolically-labeled
-measurement effect per open output port, so the result is ready to feed
-into `cvzx.lowering.bridges.mqc3.to_circuit_repr`.
-
-Each appended effect is a `(1, 0)` `QSpider`/`PSpider` with phase
-`ZxPoly({1: -m})` for a fresh `sympy.Symbol` `m` -- the standard CV-ZX
-notation for "the idealized homodyne effect whose own outcome is `m`"
-(see e.g. `MeasurementGate`'s own docstring for the same `QSpider(1, 0, 0)`
-convention at a *fixed* outcome). `QSpider` measures the x-quadrature
-(mqc3 `intrinsic.Measurement(theta=pi/2)`); `PSpider` measures the
-p-quadrature (`theta=0`) -- see `cvzx.lowering.bridges.mqc3`'s own
-`_apply_1mode_leaf` for that exact mapping.
-
-Why this doesn't need special-case handling for a straddling 2-mode gate
-------------------------------------------------------------------------
-A boundary-completing layer is built the same way any other closing layer
-in this codebase is: a `TensorDiagram` of one 1-mode effect per output
-port, composed onto `diagram`. `Diagram.compose()`/`TensorDiagram`
-construction already validate that the closing layer's total input arity
-matches `diagram`'s total output arity port-for-port (see
-`cvzx.exceptions.ArityMismatchError`) -- so whether a given output port
-came from a 1-mode gate or is one of a 2-mode gate's two outputs makes no
-difference here: each port still gets exactly one effect, and the
-existing arity system rejects any mismatch outright rather than silently
-misattributing a port.
-
-Downstream feedforward relinking
----------------------------------
-Each output port's fresh symbol `m` is known (via the returned
-`CompletionResult.bindings`) only *after* `complete_diagram()` runs, since
-that's when the measurement leaf (and its node id) is actually created.
-The recommended flow is to build any feedforward-dependent gate (e.g.
-`DisplacementGate(m, param_measurement_map={m: {node_id}})`) using
-`bindings` *after* calling `complete_diagram()`. If a gate was already
-built earlier referencing a symbol that turns out to need re-pointing at
-a different measurement node id (e.g. because the diagram was assembled
-in pieces), use `relink_measurement_symbol()` to repoint every graph node
-that cites that symbol and resynchronize the registry (both backends) in
-one step, rather than mutating node attributes by hand.
+`optimize()`'s rewrite rules deliberately never terminate a wire on their
+own, so a diagram destined for `cvzx.lowering.bridges.mqc3.to_circuit_repr`
+generally still has open output ports. `complete_diagram()` closes each
+one with a fresh, symbolically-labeled `(1, 0)` `QSpider`/`PSpider`
+measurement effect (`ZxPoly({1: -m})` for a fresh symbol `m`);
+`complete_boundaries()` additionally closes any open input ports with a
+fresh idealized state first. See :doc:`../user_guide/circuit_conversion`
+for the effect-leaf convention, why a straddling 2-mode gate needs no
+special-case handling, and the recommended feedforward-relinking flow via
+`relink_measurement_symbol()`.
 """
 
 from itertools import count
@@ -210,15 +175,12 @@ def complete_boundaries(
 ) -> BoundaryCompletionResult:
     """Close both open input and output ports of `diagram`.
 
-    Every open input port gets a fresh idealized (zero-phase) state
-    leaf -- there's no outcome to name, so unlike the output side no
-    symbol is minted for it. Every open output port gets a fresh
-    symbolic measurement effect exactly as `complete_diagram()` produces.
-    The result is a diagram every `GateRegister.input_states` and
-    `GateRegister.measurement_nodes` entry bounds a complete wire for --
-    the precondition `cvzx.lowering.dag.extract_dependency_dag()` (a
-    single deterministic forward sweep anchored at `input_states`) relies
-    on.
+    Every open input port gets a fresh idealized (zero-phase) state leaf
+    (no symbol minted, since a state has no outcome); every open output
+    port gets a fresh symbolic measurement effect exactly as
+    `complete_diagram()` produces. The result is what
+    `cvzx.lowering.dag.extract_dependency_dag()`'s forward sweep requires
+    -- see :doc:`../user_guide/circuit_conversion` for the full mechanics.
 
     Parameters
     ----------
@@ -287,18 +249,12 @@ def _node_attrs(cvzx_graph: "NxCVZXGraph | RxCVZXGraph", node_id: int) -> dict:
 def relink_measurement_symbol(cvzx_graph: "NxCVZXGraph | RxCVZXGraph", symbol: Symbol, node_id: int) -> None:
     """Repoint every node whose `param_measurement_map` cites `symbol` to `node_id`.
 
-    For every node currently indexed under `symbol` in
-    `cvzx_graph.registry.symbol_registry` (i.e. every node whose own
-    parameters mention `symbol`) that also has a `param_measurement_map`
-    entry for `symbol`, rewrites that entry to `{node_id}` and re-derives
-    `feedforward`/`measurement_ids` accordingly, then rebuilds the
-    registry (both backends use the same `rebuild_registry()` API) so
-    `symbol_registry`/`measurement_to_feedforward_map` reflect the change.
-
-    A node's `param_measurement_map` is the SAME dict object as the
-    underlying `Diagram` instance's own attribute (not a copy) -- this
-    intentionally also updates that `Diagram` object in place, so a
-    diagram built from the same objects stays consistent with the graph.
+    For every node indexed under `symbol` in
+    `cvzx_graph.registry.symbol_registry` that also has a
+    `param_measurement_map` entry for it, rewrites that entry to
+    `{node_id}`, re-derives `feedforward`/`measurement_ids`, and rebuilds
+    the registry. See :doc:`../user_guide/circuit_conversion` for the
+    recommended relinking flow and an aliasing note worth knowing about.
 
     Parameters
     ----------

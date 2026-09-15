@@ -2,13 +2,13 @@
 
 `from_circuit_repr` converts an mqc3 `CircuitRepr` into a canonical cvzx `Diagram`;
 `to_circuit_repr` is the reverse direction. The two are algebraic inverses of each
-other throughout -- each one's per-leaf formulas and feedforward handling
-cross-reference the other's below.
+other throughout. See :doc:`../user_guide/circuit_conversion` for the exact
+per-gate/per-leaf formulas, feedforward handling, and the full
+not-yet-supported list -- only the key steps are kept here.
 
-## `CircuitRepr` -> `Diagram`
-Convert an mqc3 `CircuitRepr` into a canonical cvzx `Diagram`.
-
-This module implements the "naive translate, then normalize" architecture:
+`CircuitRepr` -> `Diagram`
+---------------------------
+`from_circuit_repr` implements a "naive translate, then normalize" architecture:
 
 1. `_naive_translate` walks the mqc3 `CircuitRepr` in time order (via
    `CircuitRepr.__iter__`, after `convert_std_ops_to_intrinsic()` has
@@ -17,186 +17,40 @@ This module implements the "naive translate, then normalize" architecture:
    the circuit -- one flat `CompositionDiagram` of per-operation
    `TensorDiagram` layers, threaded together with explicit `connectivity`
    dicts so that a 2-mode operation touching two non-adjacent rows never
-   needs an explicit `Swap`: each layer is free to place its rows in
-   whatever order is convenient (touched modes first), and the
-   connectivity dict maps that layer's inputs back to wherever the
-   previous layer actually produced them. This is exactly the kind of
+   needs an explicit `Swap`. This is exactly the kind of
    "natural"/arbitrarily-shaped diagram `normalize_diagram` (see
    `cvzx.passes.normalize`) is designed to consume.
 2. `from_circuit_repr` (the public entry point) calls `_naive_translate`
    and then `normalize_diagram` on the result, returning the canonical
    alternating type-1/type-2 form.
 
-Parameter-convention notes
+Every mode's `InitialState` becomes an idealized (infinitely squeezed) CV-ZX
+state leaf, optionally rotated to set the squeezing axis. A measurement some
+later operation's `FeedForward` depends on is reconstructed as a
+`QSpider`/`PSpider` effect carrying that dependency in its own
+`param_measurement_map`, and the referencing operation's parameter is
+recovered from the feedforward function's affine coefficients -- the
+algebraic inverse of `to_circuit_repr`'s own feedforward resolution below.
+
+`Diagram` -> `CircuitRepr`
 ---------------------------
-Every gate conversion below was derived from mqc3's own docstrings (see
-`mqc3.circuit.ops.intrinsic`) and numerically verified against cvzx's
-own gate matrices. A short summary:
+`to_circuit_repr` is the reverse direction: it walks an already-canonical
+(or canonicalizable) `Diagram` -- the alternating type-1/type-2 stages
+`normalize_diagram` produces -- and emits the equivalent sequence of mqc3
+intrinsic operations, translating each primitive leaf independently rather
+than pattern-matching compositions back into a single composite op (e.g. a
+round-tripped `BeamSplitter` is not necessarily *op-for-op* identical to the
+original, just semantically equivalent -- see the user guide for a worked
+example). The input `Diagram` must not already be the target of
+`optimize()`'s algebraic spider-fusion rewrites (as opposed to
+`normalize_diagram`'s purely structural ones): a fused spider's phase
+polynomial may no longer match any primitive shape this module recognizes.
 
-- `intrinsic.PhaseRotation(phi)` -> `PhaseRotationGate(-phi)`.
-- `intrinsic.ControlledZ(g)` -> `ControlledZGate(gain=-g)`.
-- `intrinsic.ShearXInvariant`, `ShearPInvariant`, `Squeezing45`,
-  `Arbitrary`, `TwoModeShear`, `Measurement` all map 1:1 onto the
-  correspondingly-named cvzx gate with the *same* parameter(s) -- the
-  sign corrections are already baked into each gate's own `expand()`.
-- `intrinsic.Displacement(x, p)` -> `DisplacementGate(alpha)` with
-  `alpha = (x + 1j*p) / sqrt(2)`. Derived from `D(a) = exp(a a^dag - a*
-  a)` with `a = (x_hat + i p_hat) / sqrt(2)`, giving the standard result
-  `D^dagger(a) (x_hat + i p_hat) D(a) = x_hat + i p_hat + sqrt(2) a`.
-- `intrinsic.Squeezing(theta)` (mqc3: `R(-pi/2) . S_V(cot theta)`) has no
-  direct 1:1 cvzx gate; it is translated as the 2-step composition
-  `[SqueezingGate(tan(theta)), PhaseRotationGate(pi/2)]`.
-- `intrinsic.BeamSplitter(sqrt_r, theta_rel)` has no direct 1:1 cvzx
-  gate either. Its 4x4 matrix, worked out via the complex mode
-  `z = x + i*p`, is `exp(i*theta_rel) * [[sqrt_r, -i*sqrt(1-sqrt_r**2)],
-  [-i*sqrt(1-sqrt_r**2), sqrt_r]]` -- an overall phase times a
-  sigma_x-generated beamsplitter, whereas cvzx's own `BeamsplitterGate`
-  is sigma_y-generated. Conjugating by a +-pi/2 rotation on mode 2
-  converts between the two, giving (with `eta = arccos(sqrt_r)`)::
-
-      [TensorDiagram([identity, PhaseRotationGate(-pi/2)]),   # mode2 only
-       BeamsplitterGate(eta),
-       TensorDiagram([PhaseRotationGate(-theta_rel),
-                      PhaseRotationGate(pi/2 - theta_rel)])]
-
-  Both formulas were checked numerically against mqc3's exact docstring
-  matrices to machine precision across many random parameter values.
-- `intrinsic.Manual` has no known CV-ZX decomposition yet and is
-  intentionally out of scope -- converting a circuit that uses it (or a
-  `std.*` operation, such as `std.BeamSplitter`, that lowers to it via
-  `convert_std_ops_to_intrinsic()`) raises `NotImplementedError`.
-
-Initial states
---------------
-Every mode's `InitialState` is translated into an idealized (infinitely
-squeezed) CV-ZX state leaf, `QSpider(0, 1, ZxPoly({}))`, optionally
-rotated by a `PhaseRotationGate` to set the squeezing axis -- this
-matches how the rest of this codebase already represents resource
-states (see e.g. `MeasurementGate.conjugate()`), and how CV-ZX calculus
-treats such states in the idealized/infinite-squeezing limit generally
-(finite squeezing has no representation anywhere in this codebase).
-Supported initial states:
-
-- `HardwareConstrainedSqueezedState(phi)`: rotated ideal state, using
-  the same `R(phi)` sign convention as everywhere else in this module.
-- `BosonicState` with exactly one peak and zero mean, provided its
-  Gaussian component's covariance matrix is that of a pure
-  (minimum-uncertainty) squeezed/vacuum state -- the squeezing axis
-  `phi` is recovered from the covariance matrix's eigenvectors.
-
-Any other initial state (a genuine multi-peak/non-Gaussian
-superposition, a displaced state, or a mixed covariance) raises
-`NotImplementedError` rather than being silently approximated.
-
-Feedforward on ingestion
-------------------------
-An `intrinsic.Measurement` operation that some later operation's
-`FeedForward[MeasuredVariable]` parameter references is reconstructed as
-`QSpider`/`PSpider(1, 0, ZxPoly({1: -m}))` (the same leaf shape
-`cvzx.passes.completion.complete_diagram()` produces) for a fresh symbol `m`,
-chosen by the measured quadrature (`theta` close to `pi/2` -> `QSpider`,
-close to `0` -> `PSpider`); any other angle falls back to a plain
-`MeasurementGate(theta)` -- only the two canonical angles have a
-Q/P-spider representation to reconstruct into. The referencing
-operation's own parameter is recovered as `slope*m + intercept`
-(evaluating the `FeedForwardFunction` numerically at `0.0` and `1.0` to
-recover that affine relationship) and threaded into the corresponding
-cvzx gate as a symbolic (`parametric=True`) parameter -- the exact
-algebraic inverse of `to_circuit_repr`'s own feedforward
-resolution (`_resolve_scalar`). A `FeedForward` depending on more than
-one measurement symbol, or a nonlinear function of one (mqc3's
-`FeedForwardFunction` supports arbitrary Python callables; only the
-affine case is inverted here), is not supported and raises
-`NotImplementedError`. The reconstructed cvzx gate also carries
-`param_measurement_map={m: {measurement_leaf.id}}` -- the `GateRegister`-
-traceable binding from the symbol back to the measurement leaf that
-produces it -- so `feedforward`/`measurement_ids` are always correctly
-derived rather than left unset. A downstream gate with more than one
-feedforward-derived parameter (e.g. `ArbitraryGate`, `TwoModeShearGate`)
-gets one entry per measurement symbol its own parameters actually
-reference. Note: `_translate_measurement`'s own `theta` parameter could
-itself be feedforward-dependent on an *earlier* measurement (nested/
-adaptive feedforward) via `_resolve_param`, but its canonical-angle check
-(`np.isclose`) does not handle a symbolic `theta` -- this is a
-pre-existing, separate limitation, out of scope here.
-
-## `Diagram` -> `CircuitRepr`
-Convert a canonical cvzx `Diagram` into an mqc3 `CircuitRepr`.
-
-This is the reverse direction of `from_circuit_repr` above: where that function
-naively translates an mqc3 `CircuitRepr` into a cvzx `Diagram` and then
-canonicalizes it, this module walks an already-canonical (or
-canonicalizable) `Diagram` -- the alternating type-1/type-2 stages
-`normalize_diagram` produces -- and emits the equivalent sequence of
-mqc3 intrinsic operations.
-
-Why walk the *canonical* form and not an arbitrary one
--------------------------------------------------------
-`normalize_diagram` decomposes every diagram to the same flat set of
-primitive leaves regardless of how they were originally grouped, so this
-module translates each primitive leaf independently rather than pattern-
-matching compositions back into, e.g., a single `BeamSplitter` op -- the
-result is semantically equivalent to the original circuit but not
-necessarily *op-for-op* identical (see the user guide, "Converting to and
-from mqc3 circuits", for a worked example). The input `Diagram` must also
-not already be the target of `optimize()`'s algebraic spider-fusion
-rewrites (as opposed to `normalize_diagram`'s purely structural ones): a
-fused spider's phase polynomial may no longer match any primitive shape
-this module recognizes, in which case conversion raises
-`NotImplementedError` rather than silently producing something else.
-
-Per-leaf conversion formulas
------------------------------
-Each of these is the algebraic inverse of the corresponding formula in
-`from_circuit_repr` above (see that function's docstring for the derivations):
-
-- `PhaseRotationGate(theta)` -> `intrinsic.PhaseRotation(-theta)`.
-- `Fourier()` -> `intrinsic.PhaseRotation(pi/2)`; `FourierInv()` ->
-  `intrinsic.PhaseRotation(-pi/2)`; `Fourier2()` ->
-  `intrinsic.PhaseRotation(pi)`.
-- `ShearXInvariantGate(kappa)`, `ShearPInvariantGate(eta)`,
-  `ArbitraryGate(alpha, beta, lam)`, `Squeezing45Gate(theta)`,
-  `TwoModeShearGate(a, b)`, `MeasurementGate(theta)` all map 1:1 onto
-  their correspondingly-named mqc3 op with the *same* parameter(s).
-- `SqueezingGate(tau)` has no bare mqc3 primitive (mqc3's `Squeezing`
-  op has a different, fixed-rotation definition -- see
-  `circuit_to_diagram`); it is instead expressed via `ArbitraryGate`'s own
-  `alpha = beta = 0` special case: `intrinsic.Arbitrary(0, 0, ln(tau))`.
-- `DisplacementGate(alpha)` -> `intrinsic.Displacement(x, p)` with
-  `x = sqrt(2)*Re(alpha)`, `p = sqrt(2)*Im(alpha)`.
-- `ControlledZGate(gain=g)` -> `intrinsic.ControlledZ(-g)`.
-- `BeamsplitterGate(theta)` -> `intrinsic.BeamSplitter(sqrt_r, 0)` with
-  `sqrt_r = cos(theta)` -- the `theta_rel = 0` special case of the
-  general formula derived in `circuit_to_diagram`.
-- A bare zero-phase state leaf (`QSpider(0, 1, 0)`) -> a mode with
-  `HardwareConstrainedSqueezedState(phi=0)`; the `PSpider` counterpart
-  -> `phi = pi/2` (mirroring the `QSpider`-is-x-type/`PSpider`-is-p-
-  type convention used throughout this codebase). A bare zero-phase
-  effect leaf (`QSpider(1, 0, 0)` / `PSpider(1, 0, 0)`) -> a plain
-  `intrinsic.Measurement(pi/2)` / `Measurement(0)` (measuring x or p
-  directly) -- these arise if `diagram` contains an already-`.expand()`-
-  ed `MeasurementGate`/state rather than the compact form, which is
-  otherwise handled directly.
-
-Feedforward on emission
-------------------------
-A `(1, 0)` `QSpider`/`PSpider` effect with phase *exactly* `ZxPoly({1: -m})`
-for a single symbol `m` -- the leaf shape `cvzx.passes.completion.
-complete_diagram()` produces to close an open output port -- is
-recognized specially: it becomes a plain `intrinsic.Measurement`
-(`pi/2`/`0` for `QSpider`/`PSpider`, same as the bare zero-phase case
-above), and the resulting mqc3 `Operation` is tracked against `m` for the
-rest of the walk. Any later leaf whose own parameter is affine
-(`slope*m + intercept`, for that same single symbol `m`) in a tracked
-symbol has that parameter translated into an mqc3
-`FeedForward[MeasuredVariable]` (via `mqc3.feedforward.
-ff_to_mul_constant`/`ff_to_add_constant`, composed to match the affine
-relationship) instead of a plain float -- the exact algebraic inverse of
-`from_circuit_repr`'s own feedforward reconstruction. A parameter
-depending on more than one symbol, on a symbol with no tracked
-measurement, or nonlinearly on its symbol, raises (`NotImplementedError`
-for the first and third cases; `cvzx.exceptions.UnboundMeasurementError`
-for the second).
+A measurement-effect leaf with the feedforward shape above becomes a plain
+`intrinsic.Measurement` and is tracked against its symbol for the rest of
+the walk; any later leaf whose parameter is affine in a tracked symbol is
+re-emitted as an mqc3 `FeedForward[MeasuredVariable]` instead of a plain
+float -- the algebraic inverse of `from_circuit_repr`'s reconstruction above.
 
 Not (yet) supported -- raises `NotImplementedError`
 -----------------------------------------------------
@@ -213,6 +67,8 @@ Not (yet) supported -- raises `NotImplementedError`
   from a state leaf.
 - `ContractedDiagram` anywhere in `diagram` (same limitation
   `normalize_diagram` itself documents).
+- `intrinsic.Manual` (reached directly, or indirectly via a `std.*`
+  operation that lowers to it) has no known CV-ZX decomposition yet.
 """
 
 from __future__ import annotations
@@ -805,11 +661,11 @@ def _naive_translate(circuit: CircuitRepr) -> Diagram:  # ruff: ignore[too-many-
 def from_circuit_repr(circuit: CircuitRepr, *, normalize: bool = True) -> Diagram:
     """Translate an mqc3 `CircuitRepr` into a cvzx `Diagram`.
 
-    Naively translates every operation and initial state (see the module
-    docstring for the exact per-gate/per-state conversion formulas) into
-    a compact-form `Diagram`, then -- unless `normalize=False` -- rewrites
-    it into canonical alternating type-1/type-2 stages via
-    `cvzx.passes.normalize.normalize_diagram`.
+    Naively translates every operation and initial state (see
+    :doc:`../user_guide/circuit_conversion` for the exact per-gate/per-state
+    conversion formulas) into a compact-form `Diagram`, then -- unless
+    `normalize=False` -- rewrites it into canonical alternating type-1/type-2
+    stages via `cvzx.passes.normalize.normalize_diagram`.
 
     Parameters
     ----------
@@ -829,8 +685,9 @@ def from_circuit_repr(circuit: CircuitRepr, *, normalize: bool = True) -> Diagra
         `_naive_translate` raises `NotImplementedError` if `circuit`
         uses the `Manual` gate (directly, or indirectly via a `std.*`
         operation that lowers to it), a feedforward parameter, or an
-        initial state outside the supported set (see the module
-        docstring), and `ValueError` if `circuit` has no modes.
+        initial state outside the supported set (see
+        :doc:`../user_guide/circuit_conversion`), and `ValueError` if
+        `circuit` has no modes.
     """
     diagram = _naive_translate(circuit)
     if normalize:
@@ -1283,9 +1140,10 @@ def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr
     `diagram` is canonicalized via `normalize_diagram` first (a no-op if
     it already is canonical), then walked stage by stage -- each stage's
     rows are processed left to right, each row's own leaf (or chain of
-    1-mode leaves) is translated independently (see the module docstring
-    for the exact per-leaf formulas), and mode ids are threaded across
-    stage boundaries via the diagram's own `connectivity` dicts.
+    1-mode leaves) is translated independently (see
+    :doc:`../user_guide/circuit_conversion` for the exact per-leaf
+    formulas), and mode ids are threaded across stage boundaries via the
+    diagram's own `connectivity` dicts.
 
     Parameters
     ----------
@@ -1300,8 +1158,8 @@ def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr
     CircuitRepr
         The translated circuit. Raises `NotImplementedError` if
         `diagram` contains a leaf, state, or effect this module does
-        not recognize (see the module docstring), or a `ContractedDiagram`
-        anywhere.
+        not recognize (see :doc:`../user_guide/circuit_conversion`), or a
+        `ContractedDiagram` anywhere.
 
     Raises
     ------

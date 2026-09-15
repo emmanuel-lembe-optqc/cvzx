@@ -106,10 +106,14 @@ def _collect_symbols(attrs: dict) -> set[Symbol]:
 
 
 class GateRegister:
-    """Registry for tracking specific gate types and nodes in a CV ZX graph.
+    """Registry indexing a CV ZX graph's nodes by gate type/category, for O(1) `match()` lookups.
 
-    The GateRegister maintains sets of node IDs (original diagram IDs) for
-    different gate types, enabling O(1) lookups instead of scanning the graph.
+    Maintains sets of node IDs (original diagram IDs, not `rx` node indices) for gate types,
+    terminals, containers, and symbolic-parameter/feedforward provenance (`parametric_nodes`,
+    `symbol_registry`, `feedforward_nodes`, `measurement_to_feedforward_map`). Must be kept in
+    sync with the graph manually -- `add_node()`/`remove_node()` on every mutation, or a full
+    `build_from_graph()` rebuild; nothing does this automatically. See
+    :doc:`../../dev_guide/architecture` for what each index is used for.
 
     Parameters
     ----------
@@ -390,6 +394,12 @@ class GateRegister:
 
 class CVZXGraph:
     """A CV ZX diagram represented as a rustworkx PyDiGraph, paired with its registry.
+
+    Bundles the ``rx.PyDiGraph`` produced by :func:`to_graph` together with the
+    :class:`GateRegister` that indexes it, so code working on a diagram's graph representation
+    does not have to thread the two through separately. A thin, mutable wrapper: it does not
+    change how the graph or registry are built, read, or kept in sync -- see
+    :doc:`../../dev_guide/architecture` for the two-representation design this is part of.
 
     Parameters
     ----------

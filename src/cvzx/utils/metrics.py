@@ -1,34 +1,15 @@
 """Optimization-quality metrics for CV ZX diagrams.
 
-Measures how much `cvzx.passes.optimize.optimize()` shrinks a diagram, in
-terms that matter for circuit complexity rather than raw graph bookkeeping:
+Measures how much `cvzx.passes.optimize.optimize()` shrinks a diagram:
 generator counts (spiders, surviving compact gates), the non-Gaussian
-("non-Clifford"-analogue) resource count, and stage depth. See the dev
-guide ("Benchmarking optimization quality") for the rationale behind each
-metric and worked examples.
-
-All functions here are read-only analysis, backend-agnostic (`networkx` or
-`rustworkx`, see `cvzx.config.Backend`), and deliberately avoid
-`cvzx.backends.{nx,rx}.graph.get_proper_nodes()`: that helper's `kind`
-filter differs between the two backend modules (nx: `kind == "proper"`
-only; rx: `kind in {"proper", "compact"}`), so using it here would silently
-change what "generator count" means depending on which backend happens to
-be installed. `iter_leaf_attrs()` is the one place that inconsistency is
-worked around; every counting function below is built on it.
-
-`count_spiders`/`count_generators` additionally exclude two shapes of pure
-bookkeeping leaf (see `is_bookkeeping_leaf`): identity/wiring spiders and
-`VoidDiagram` placeholders. This matters more than it sounds like it should
--- confirmed empirically while building this module, not just from reading
-docstrings: `optimize()` always hands back `OptimizeResult.diagram` as the
-diagram converted from the graph *right before* its own end-of-pipeline
-cleanup pass strips exactly these two things (see `optimize()`'s and
-`VoidDiagram`'s docstrings). Counting them as "real" leaves means a
-diagram's own `normalize_diagram`-inserted row filler and CopyRule's
-same-arity dead placeholders get compared against a hand-built "before"
-diagram that never had any -- inflating "after" counts enough to make a
-diagram that `optimize()` genuinely simplified (fewer gates, ancillas
-eliminated) look like it grew.
+("non-Clifford"-analogue) resource count, and stage depth -- all
+read-only, backend-agnostic analysis built on `iter_leaf_attrs()`, which
+works around a `kind`-filter inconsistency between the nx/rx backends'
+own `get_proper_nodes()` helpers. `count_spiders`/`count_generators`
+additionally exclude bookkeeping leaves (`is_bookkeeping_leaf`: identity
+spiders, `VoidDiagram` placeholders) so a diagram `optimize()` genuinely
+simplified can't appear to have grown. See :doc:`../dev_guide/benchmarks`
+for the rationale behind each metric and worked examples.
 """
 
 from __future__ import annotations
@@ -234,15 +215,12 @@ def count_non_clifford_phases(
     """Count leaves whose phase-polynomial degree is >= `degree_threshold`.
 
     The CV-ZX analogue of qubit ZX calculus's T-count: a `QSpider`/`PSpider`
-    leaf's degree is read directly off its `ZxPoly` phase attribute (a real
-    `ZxPoly`, untouched by `to_graph()`'s attribute cleanup); an un-expanded
-    compact gate's degree is looked up by its `type` name in
-    `_NON_GAUSSIAN_COMPACT_DEGREE` (see module docstring for why this reads
-    `type` rather than the gate's own `phase` attribute, which for a
-    compact gate holds its raw parameter, e.g. `gamma`, not a `ZxPoly`).
-    Leaves with no phase at all, or a gate `type` absent from that table
-    (`Swap`, `Fourier*`, every Gaussian gate, measurement effects), never
-    count, regardless of threshold.
+    leaf's degree is read directly off its `ZxPoly` phase attribute; an
+    un-expanded compact gate's degree is looked up by its `type` name in
+    `_NON_GAUSSIAN_COMPACT_DEGREE` instead (its `phase` graph attribute
+    holds a raw parameter, not a `ZxPoly`). See
+    :doc:`../dev_guide/benchmarks` for the full lookup mechanics and the
+    default threshold's rationale.
 
     Parameters
     ----------
@@ -250,9 +228,7 @@ def count_non_clifford_phases(
         The graph to count leaves in.
     degree_threshold : int, optional
         The minimum phase degree to count as non-Clifford. Defaults to 3,
-        matching `CubicPhaseGate`'s own "non_gaussian" tagging -- see the
-        dev guide for the alternative (`degree_threshold=2`, matching
-        `TerminalAbsorptionRule`/`CopyRule`'s stricter internal boundary).
+        matching `CubicPhaseGate`'s own "non_gaussian" tagging.
 
     Returns
     -------
@@ -274,11 +250,9 @@ def count_non_clifford_phases(
 def diagram_depth(diagram: Diagram) -> int | None:
     """Stage count of `diagram`, via `normalize_diagram`'s own stage output.
 
-    Reuses `normalize_diagram()` (`cvzx.passes.normalize`) exactly as its
-    public contract already exposes it, rather than reaching into its
-    private `stage_records` state: if it returns a `CompositionDiagram`,
-    each element is by construction exactly one stage, so the depth is
-    `len(result.diagrams)`.
+    Reuses `normalize_diagram()` exactly as its public contract already
+    exposes it: if it returns a `CompositionDiagram`, each element is by
+    construction exactly one stage, so the depth is `len(result.diagrams)`.
 
     Parameters
     ----------
@@ -291,20 +265,9 @@ def diagram_depth(diagram: Diagram) -> int | None:
     -------
     int | None
         The stage count, `0` for a leafless diagram, or `None` if
-        `diagram` contains a `ContractedDiagram` -- `normalize_diagram`
-        conservatively leaves those unchanged (see its docstring), so no
-        stage count is defined for them.
-
-    Notes
-    -----
-    A diagram built entirely from bare identity wires but *already*
-    expressed as a `CompositionDiagram` (rather than, say, a single
-    identity leaf) is a degenerate case this can misreport as depth
-    `len(diagram.diagrams)` instead of `0`: `normalize_diagram` elides such
-    wiring internally and returns the (still-composed) input unchanged,
-    which this function can't distinguish from a genuine single-stage
-    result without reaching into that private elision logic. Not a
-    concern for real circuits, which always have substantive leaves.
+        `diagram` contains a `ContractedDiagram` (no stage count is
+        defined there). See :doc:`../dev_guide/benchmarks` for that case
+        and a degenerate all-identity-wires edge case worth knowing about.
     """
     cvzx_graph = _nx_to_graph(diagram)
     graph = cvzx_graph.graph

@@ -48,34 +48,14 @@ _APPLY_RULE_MAX_ROUNDS = 100
 
 
 class RewriteRule(ABC):
-    """Base class for rewrite rules operating on graphs.
+    """Base class for rewrite rules operating on a `CVZXGraph` in-place.
 
-    All rewrite rules operate on a `CVZXGraph` in-place (mutating its
-    underlying `.graph`). This avoids repeated conversions between diagram
-    and graph representations.
-
-    The typical workflow is:
-        1. Convert diagram to graph: `G = to_graph(diagram)`
-        2. Apply rules: `rule1.apply_rule(G); rule2.apply_rule(G)`
-        3. Convert back: `diagram = to_diagram(G)`
-
-    Subclasses must implement:
-        - `match(G)`: Find all matches in the graph
-        - `apply_single(G, match)`: Apply a single match in-place
-
-    The `apply_rule` method provides a default implementation that:
-        1. Finds all matches
-        2. Returns the modified graph
-
-    Parameters
-    ----------
-    graph : CVZXGraph
-        The graph to modify.
-
-    Returns
-    -------
-    CVZXGraph
-        The modified graph (same object, for chaining).
+    Subclasses implement `match()` (find every independent match in the
+    graph) and `apply_single()` (apply exactly one match). `apply_rule()`
+    (defined once here, never overridden) drives both through a whole
+    round of matches. See :doc:`../../dev_guide/rewrite_engine` for the full
+    contract, the match-dict convention, and why rules operate on the
+    graph rather than walking the `Diagram` tree directly.
     """
 
     @abstractmethod
@@ -107,45 +87,14 @@ class RewriteRule(ABC):
         """
 
     def apply_rule(self, graph: CVZXGraph) -> CVZXGraph:
-        """Apply a rule to the graph for up to `_APPLY_RULE_MAX_ROUNDS` rounds.
+        """Apply the rule to `graph` for up to `_APPLY_RULE_MAX_ROUNDS` rounds.
 
-        A single round is: find every match, group by container, and apply
-        each group's matches in reverse position order (so an earlier
-        removal can't shift a later match's index), then rebuild
-        `graph.registry` (see `CVZXGraph.rebuild_registry`) so the next
-        round's `match()` sees the graph as it now stands rather than a
-        stale index. After a round that applied at least one match,
-        `match()` is run again on the now-mutated graph, and another round
-        runs if it finds anything -- up to `_APPLY_RULE_MAX_ROUNDS` rounds,
-        after which this returns regardless of whether more matches remain.
-
-        More than one round is sometimes useful because applying a match
-        can turn a node that was blocking another, still-unapplied match
-        into a pass-through: for instance, two independent chains that
-        both need to chase through the same shared node (a `Swap`, say)
-        can only have ONE of them claim that node per `match()` call --
-        `match()`'s own bookkeeping treats a node consumed by one match as
-        unavailable to any other match found in that same call, even when
-        the pattern would allow both, one after the other, once the first
-        is voided. A single round would see only the first chain folded,
-        with the second left sitting there unreduced, even though nothing
-        about the graph actually prevents folding it too -- only the
-        single-call scan does.
-
-        `_APPLY_RULE_MAX_ROUNDS` is deliberately small rather than large
-        enough to always reach this rule's own full local fixed point in
-        one call: `optimize()`'s own outer `_simplify_to_fixed_point` loop
-        already re-invokes every rule's `apply_rule` again on the very
-        next pass whenever the current pass changed anything, and keeps
-        doing so until a whole pass changes nothing anywhere -- so any
-        matches this call leaves unresolved are picked up there, at the
-        same cost that finishing them here would have been. Keeping the
-        cap small instead bounds how much internal work one `apply_rule`
-        call can do chasing through a single pathological match -- e.g. a
-        `ChainReductionRule` closure that would otherwise try to
-        verify/resolve its way through an arbitrarily long run of chained
-        `Swap` nodes in one round (see `_trace_closure_leftovers`, which caps
-        that at one `Swap`-like bundle per match for the same reason).
+        Each round: find every match, group by `container_id`, apply each
+        group in reverse position order (so an earlier removal can't shift
+        a later match's index), then rebuild `graph.registry`. Repeats
+        while a round still finds matches, up to `_APPLY_RULE_MAX_ROUNDS`
+        rounds -- see :doc:`../../dev_guide/rewrite_engine` for why more than
+        one round is sometimes needed and why the cap is kept small.
 
         Parameters
         ----------
@@ -1704,32 +1653,14 @@ class FusionRule(RewriteRule):
 
     Two same-color spiders connected by a wire fuse into a single spider
     with the summed phase and the union of their unconnected ports. Two
-    shapes are recognized:
+    shapes are recognized: the two halves of a `ContractedDiagram`
+    (`match_contracted`/`_apply_contracted`), and two same-color spiders
+    joined through a composition, possibly across identities/`Swap`
+    nodes (`match_terminal`/`_apply_terminal`). `first_id` is always the
+    survivor in `apply_single`.
 
-    - **Contracted**: the two halves of a `ContractedDiagram`, coupled
-      through its `I1`/`I2`/`J1`/`J2` wiring. Handled by
-      `match_contracted` / `_apply_contracted`.
-    - **Composition**: two same-color spiders joined by a wire through a
-      composition, possibly with identities or `Swap` nodes in between.
-      Handled by `match_terminal` / `_apply_terminal`.
-
-    Match-level guards:
-
-    - A bare `(1, 1)` zero-phase identity spider is never fused into a
-      real spider by `match_terminal`. It is a wire, and
-      `IdentityRule` owns its removal.
-    - A direct half of a `ContractedDiagram` is never touched by
-      `match_terminal`. Restructuring a contract half requires
-      rewriting the contract's own I/J coupling and is a distinct
-      operation, not a same-color two-spider fusion. Contract halves
-      whose partner is a fusible same-color spider are handled by
-      `match_contracted`; contract halves whose partner is not (e.g. a
-      Q/P CSUM-style contract) are left alone for now.
-    - Composition matches whose endpoints are already claimed by a
-      contracted match are filtered out, so the more specific contracted
-      path wins when both apply.
-
-    `first_id` is always the survivor in `apply_single`.
+    See :doc:`../../user_guide/rewrite_rules` for the match-level guards
+    that keep this from overlapping `IdentityRule`/`CopyRule`.
     """
 
     # -------------------------------------------------------------------------
@@ -2145,47 +2076,19 @@ class FusionRule(RewriteRule):
 class PassthroughRule(RewriteRule):
     """Rewrites a disguised-composition `ContractedDiagram` into `Compose`/`Tensor`/`Swap`.
 
-    A `ContractedDiagram(first, second, I1, I2, J1, J2)` whose two halves
-    are bare, different-color spiders (or one buried as the last slot of a
-    `TensorDiagram` -- the shape `CopyRule` leaves behind when it copies a
-    spider across a contraction boundary), linked by a single one-way wire
-    -- forward (`I1`/`I2`) or feedback (`J1`/`J2`) -- with each side's kept
-    arity exactly `(1, 1)`, is mathematically just a composition, not a
-    genuine partial trace (a phase-0 spider with kept arity `(1, 1)` is a
-    ZX-calculus identity, since a phase-0 spider forces all of its legs
-    equal).
+    A `ContractedDiagram` whose two halves are bare, different-color
+    spiders (or one buried as the last slot of a `TensorDiagram` --
+    `CopyRule` debris), linked by a single one-way wire with each side's
+    kept arity exactly `(1, 1)`, is mathematically just a composition,
+    not a genuine partial trace. This only fires once both "outer"
+    connections it would repurpose are already proven dead (absent, or a
+    `VoidDiagram`) -- see :doc:`../../user_guide/rewrite_rules` for the full
+    eligibility argument and the phase-dispatch table.
 
-    Call the output-owning half `a` (`I1`'s or `J2`'s owner) and the
-    input-owning half `b` (`I2`'s or `J1`'s owner) -- `a` is `first` for a
-    forward link, `second` for a feedback one (and vice versa for `b`).
-    Rewriting this into `Compose`/`Tensor`/`Swap` is only *safe* once the
-    two "outer" connections it would repurpose -- whatever receives `a`'s
-    own kept output, and whatever feeds `b`'s own kept input -- are
-    *already* proven dead (absent, or a genuine `VoidDiagram`), not merely
-    a not-yet-simplified identity spider that might still matter. This
-    eligibility check is why the rewrite lives in its own rule rather than
-    inside `FusionRule`: it must be re-verified on every pass (so it only
-    fires once the surrounding diagram has actually settled into a
-    provably-safe shape), not assumed once from phase alone.
-
-    Dispatches on each spider's phase once eligible:
-
-    - Both non-zero: not yet implemented -- left as a genuine
-      `ContractedDiagram` (a verified, non-lossy port routing for this
-      case isn't in place yet).
-    - `b` zero (`a` survives): ``Compose([Tensor([a(1, 1), Void(1, 1)]), Swap()])``.
-    - `a` zero (`b` survives): ``Compose([Swap(), Tensor([b(1, 1), Void(1, 1)])])``.
-    - Both zero: bare, possibly-marked ``Swap()``.
-
-    Whichever of `a`/`b` survives is placed with arity `(1, 1)` -- not its
-    raw `(1, 2)`/`(2, 1)` shape -- as a freshly minted node (same
-    type/phase, reduced arity), paired with a same-shaped `(1, 1)` `Void`
-    occupying the other slot of whichever `Tensor` sits next to the
-    `Swap`. Because `Void` always sits in a fixed, known slot next to the
-    `Swap` by construction, `void_input_port` is set deterministically
-    (not by checking any pre-existing outer connection) -- the leg
-    touching `Void` is known dead-content filler regardless of what (if
-    anything) is attached beyond it.
+    Whichever spider survives is placed at arity `(1, 1)` next to a
+    same-shaped `Void` filling the dead slot, so `void_input_port` is
+    always known deterministically rather than checked against any
+    pre-existing wiring.
     """
 
     @staticmethod
@@ -3997,49 +3900,20 @@ class TerminalAbsorptionRule(RewriteRule):
 
     Absorbs a gate adjacent to a QSpider/PSpider terminal (arity (1,0)
     effect or (0,1) state) into the terminal's own phase, eliminating the
-    gate. Four sub-cases (the gate may sit on either side of the
-    terminal, whichever its own arity allows -- an effect's gate is
-    upstream, a state's gate is downstream):
+    gate. Four sub-cases -- rotation, squeezing, cross-color discard,
+    displacement -- each fold the gate's parameter into the terminal's
+    phase by a different closed-form rule; see
+    :doc:`../../user_guide/rewrite_rules` for each case's exact formula and
+    validity condition.
 
-    - Rotation (QSpider terminal only, input phase degree <= 1): a
-      terminal with phase `c + k*x` folds R(theta) into
-      `c - tan(theta)/2*x**2 + k/cos(theta)*x`. Doesn't match when theta
-      is an odd multiple of pi/2 (tan/1-over-cos undefined). This is the
-      QSpider/PSpider-absorbs-a-rotation identity worked out in [1] Eq.
-      (239a)-(239e). `Fourier2` (a fixed rotation by pi) is absorbed the
-      same way, using theta = pi in the formula above -- pi isn't an odd
-      multiple of pi/2, so it's never degenerate. `Fourier`/`FourierInv`
-      (fixed rotations by -+pi/2) are deliberately NOT recognized here:
-      that is exactly the degenerate angle the formula excludes, so they
-      can never absorb this way regardless of how they're spelled.
-    - Squeezing (QSpider or PSpider terminal, any phase degree): a
-      QSpider terminal with phase f(x) folds Sq(tau) into f(x * tau)
-      and a PSpider terminal with phase f(x) folds Sq(tau) into f(x / tau).
-    - Cross-color discard (opposite-color raw (1,1) spider): a QSpider
-      terminal absorbing an adjacent PSpider(1,1,f(x)), or vice versa,
-      leaves the terminal's phase unchanged -- the gate simply vanishes.
-      Same-color (1,1) spiders are ordinary spider fusion, FusionRule's
-      job, not this rule's.
-    - Displacement (QSpider or PSpider terminal, input phase degree <=
-      1, i.e. in R1[X] -- the same restriction `CopyRule.is_in_R1`
-      enforces for its own copy pattern): a `DisplacementGate` adjacent
-      to such a terminal simply collapses, phase unchanged, exactly like
-      cross-color discard. A higher-degree terminal phase describes a
-      genuinely squeezed (curved) eigenstate, for which an adjacent
-      displacement is not simply irrelevant, so this sub-case doesn't
-      match there (`_check_pair` returns no match rather than guessing).
-
-    Only the rotation sub-case is an exact identity for any physical
-    state. Squeezing absorption, cross-color discard, and displacement
-    absorption all treat the terminal's phase as an idealized (infinite
-    squeezing) eigenstate -- a real finite-squeezed state would carry
-    extra terms these sub-cases drop. `assume_infinite_squeezing`
-    (default False) gates whether those sub-cases are allowed to match
-    at all; when False, only rotation absorption runs.
+    Only rotation absorption is exact for any physical state; the other
+    three treat the terminal as an idealized (infinite squeezing)
+    eigenstate and only run when `assume_infinite_squeezing=True` (the
+    default, False, restricts matching to rotation absorption alone).
 
     Neither the terminal nor the gate may be directly one of a
-    ContractedDiagram's own two halves (its `first_id`/`second_id`) --
-    `match()` excludes any such pair outright.
+    `ContractedDiagram`'s own two halves -- that shape belongs to
+    `PassthroughRule` instead.
 
     References
     ----------
@@ -4061,26 +3935,11 @@ class TerminalAbsorptionRule(RewriteRule):
     def match(self, cvzx_graph: CVZXGraph) -> list[dict]:  # ruff: ignore[too-many-locals]
         """Find all gate/terminal pairs that can be absorbed.
 
-        Candidates are the graph's own terminal (state/effect) nodes --
-        the same universe `CopyRule` scans -- restricted to QSpider/PSpider,
-        since only those can ever be `_check_pair`'s terminal side. From
-        each one, `_chase_identity_chain` follows its single wire,
-        stepping over any run of identity spiders or `Swap` nodes directly in
-        the path, to find the real neighboring gate to check -- exactly
-        mirroring `CopyRule`'s own candidate-and-chase scan, rather than
-        only checking pairs directly joined by one composition edge.
-        Every composition edge already connects fully-resolved leaf nodes
-        regardless of how deeply either endpoint sits inside a
-        TensorDiagram/ContractedDiagram wrapper, so this also finds pairs
-        that cross a container boundary -- e.g. a gate sitting in one
-        Tensor lane feeding a measurement terminal that lives in a
-        completely different Tensor two containers away. `_check_pair`
-        itself is unchanged.
-
-        A pair is skipped outright, before `_check_pair` even runs, when
-        either endpoint's own immediate parent is a ContractedDiagram --
-        see the class docstring for why this rule leaves that case to
-        `CopyRule` entirely.
+        Uses the same candidate-and-chase scan as `CopyRule.match` (see
+        :doc:`../../dev_guide/rewrite_engine`) -- terminal nodes, chased past
+        identities/`Swap` nodes to the real neighboring gate -- and, like
+        `PassthroughRule`, skips a pair outright when either endpoint's
+        immediate parent is a `ContractedDiagram`.
 
         Parameters
         ----------
@@ -4464,65 +4323,32 @@ class TerminalAbsorptionRule(RewriteRule):
 class CopyRule(RewriteRule):
     r"""Copy rule - Graph-based version.
 
-    The copy rule copies a spider with arity (0,1) or (1,0) through a spider
-    with arity (1,n) or (n,1), producing n copies in a tensor diagram.
-
-    Cases:
-    1. P(φ, 1, n) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ ... ⊗ Q(g, 0, 1) (n copies)
-    2. Q(g, 1, 0) ∘ P(φ, n, 1) → Q(g, 1, 0) ⊗ ... ⊗ Q(g, 1, 0) (n copies)
-    3. Q(φ, 1, n) ∘ P(g, 0, 1) → P(g, 0, 1) ⊗ ... ⊗ P(g, 0, 1) (n copies)
-    4. P(g, 1, 0) ∘ Q(φ, n, 1) → P(g, 1, 0) ⊗ ... ⊗ P(g, 1, 0) (n copies)
-
-    Constraints:
-    - The copied spider's phase g MUST be in R₁[X] (degree ≤ 1)
-    - The disappearing spider's phase φ can be ANY polynomial
-    - The result is a TensorDiagram of n copies of the copied spider
-    - The composition is removed and replaced by a tensor diagram
+    Copies a spider with arity (0,1) or (1,0) through an adjacent,
+    opposite-color spider with arity (1,n) or (n,1), producing n copies
+    of the narrow spider in a `TensorDiagram` in place of the
+    composition -- valid only when the *copied* spider's phase is in
+    R1[X] (degree <= 1); the disappearing spider's own phase can be any
+    polynomial. See :doc:`../../user_guide/rewrite_rules` for the four
+    color/arity cases and their exact result shapes.
 
     The two spiders need not be direct siblings of one flat
-    CompositionDiagram. `match()` finds them via the graph's own
-    "composition" edges, which already connect fully-resolved leaf nodes
-    regardless of how deeply either sits inside a TensorDiagram or
-    ContractedDiagram.
-
-    `match()` also transparently sees through any run of identity
-    spiders (zero-phase, raw arity (1,1)) sitting directly in the
-    composition path between the copy spider and its target hub: an
-    identity there is a pure pass-through with no bearing on the copy
-    law, and must not block a match that is otherwise exactly this
-    pattern. Every identity crossed this way is recorded in the match
-    and, in `apply_single`, converted into a same-shape, in-place
-    `VoidDiagram` -- a bare type/phase relabeling at its own exact
-    existing position, touching no container's shape or bookkeeping, so
-    it trivially preserves connectivity.
+    `CompositionDiagram` -- `match()` finds them via the graph's own
+    "composition" edges, which already resolve to fully-resolved leaf
+    nodes regardless of container nesting, and transparently sees
+    through any run of identity spiders in the path (recorded in the
+    match and voided in `apply_single`).
     """
 
     def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
         """Find all composition-adjacent copy-able patterns in the graph.
 
-        Copy-able pairs are found by scanning the graph's own "composition"
-        edges rather than one CompositionDiagram's flat `sub_diagram_ids`
-        list. Every composition edge already connects fully-resolved proper
-        (leaf) nodes regardless of how deeply either endpoint is nested
-        inside TensorDiagram/ContractedDiagram containers (that resolution
-        is exactly what `external_input_mapping`/`external_output_mapping`
-        are used for when the graph is first built) -- so this also finds
-        pairs that cross a TensorDiagram or ContractedDiagram boundary.
-
-        Two shapes are recognized:
-
-        - Same immediate parent (both nodes are direct, necessarily
-          adjacent, entries of one flat CompositionDiagram): resolved via
-          that container's own `sub_diagram_ids`/`connectivity`, exactly as
-          before.
-        - Cross-container: the two nodes have different immediate parents.
-          Only combinations this rule knows how to restructure are matched:
-          the disappearing spider's parent must be a TensorDiagram (direct
-          list substitution) or a ContractedDiagram (`first_id`/`second_id`
-          substitution); the copy spider's parent must be a TensorDiagram
-          or a flat CompositionDiagram where the copy spider sits at one of
-          the two ends (a state must be first, an effect must be last, so
-          removing it never requires splicing two neighbors together).
+        Recognizes both same-parent pairs (direct entries of one flat
+        `CompositionDiagram`) and the cross-container shapes this rule
+        knows how to restructure -- see :doc:`../../dev_guide/rewrite_engine`
+        for exactly which container combinations are supported. Also
+        transparently chases through any run of identity spiders directly
+        in the path (`_chase_identity_chain`), recording them so
+        `apply_single` can void them.
 
         Parameters
         ----------

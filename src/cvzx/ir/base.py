@@ -15,37 +15,16 @@ from cvzx.exceptions import ArityMismatchError, InvalidSymbolError
 class ZxPoly(Poly):
     """Real polynomial in one variable for CV ZX calculus phase functions.
 
-    This class inherits from sympy.Poly and adds ZX-specific functionality
-    while maintaining backward compatibility with the original ZxPoly API.
-
-    The polynomial is stored as a sympy.Poly object internally, supporting both
-    numeric and symbolic coefficients. Zero coefficients are omitted from the
-    dictionary representation.
+    Wraps `sympy.Poly` (single generator `x`) with a `dict[degree, coeff]`-based convenience
+    API -- build from a coefficient dict, a plain sympy expression, or another `Poly`; zero
+    coefficients are omitted from `.coeffs`. Coefficients may be numeric or symbolic. See
+    :doc:`../dev_guide/architecture` for the representation choices and worked examples.
 
     Parameters
     ----------
     coeffs : dict[int, float | Expr]
         Dictionary mapping degree → coefficient. For numeric coefficients,
         returns Python floats; for symbolic coefficients, returns sympy expressions.
-
-    Examples
-    --------
-    >>> p = ZxPoly({0: 1.0, 2: -0.5})  # 1 - 0.5·x²
-    >>> q = ZxPoly({1: 2.0})            # 2·x
-    >>> r = p + q                       # 1 + 2·x - 0.5·x²
-    >>> r.degree()
-    2
-    >>> s = p * q                       # 2·x - x³
-    >>> s.coeffs                        # Dict for compatibility
-    {1: 2.0, 3: -1.0}
-
-    >>> from sympy import symbols
-    >>> a, b = symbols('a b')
-    >>> p = ZxPoly({0: a, 1: b})        # a + b·x
-    >>> q = ZxPoly({0: 1, 1: 2})        # 1 + 2·x
-    >>> r = p + q                       # (a+1) + (b+2)·x
-    >>> r.coeffs
-    {0: a + 1, 1: b + 2}
     """
 
     _var = symbols("x", real=True)
@@ -53,9 +32,10 @@ class ZxPoly(Poly):
     def __new__(cls, coeffs_or_poly: dict[int, float | int | Expr] | Poly | Expr | None = None, *args, **kwargs):  # ruff: ignore[missing-type-args, missing-type-kwargs, missing-return-type-special-method]
         """Create a new ZxPoly instance.
 
-        This method intercepts instance creation to handle the special case
-        where the user provides a coefficient dictionary instead of a sympy
-        expression or Poly object.
+        Intercepts instance creation to handle the special case where the user provides a
+        coefficient dictionary instead of a sympy expression or Poly object -- a `Poly`, `Expr`,
+        or `None` argument is passed straight through to `sympy.Poly`. See
+        :doc:`../dev_guide/architecture` for an example of each accepted input form.
 
         Parameters
         ----------
@@ -70,23 +50,6 @@ class ZxPoly(Poly):
         -------
         ZxPoly
             A new ZxPoly instance.
-
-        Examples
-        --------
-        >>> # From coefficient dictionary
-        >>> p = ZxPoly({0: 1.0, 2: -0.5})
-
-        >>> # From sympy expression
-        >>> from sympy import symbols
-        >>> x = symbols('x')
-        >>> p = ZxPoly(x**2 + 2*x + 1)
-
-        >>> # From sympy.Poly
-        >>> from sympy import Poly
-        >>> q = ZxPoly(Poly(x**2 + 1, x))
-
-        >>> # Zero polynomial
-        >>> z = ZxPoly()
         """
         if isinstance(coeffs_or_poly, dict):
             # Build expression from coefficient dictionary
@@ -142,18 +105,6 @@ class ZxPoly(Poly):
         dict[int, float | complex | Expr]
             Dictionary mapping degree to coefficient. Returns empty dict
             for the zero polynomial.
-
-        Examples
-        --------
-        >>> p = ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})
-        >>> p.coeffs
-        {0: 1.0, 1: 2.0, 2: 3.0}
-
-        >>> from sympy import symbols
-        >>> a = symbols('a')
-        >>> p = ZxPoly({0: a, 1: 2.0})
-        >>> p.coeffs
-        {0: a, 1: 2.0}
         """
         if self.is_zero:
             return {}
@@ -194,36 +145,14 @@ class ZxPoly(Poly):
         return {symbol for coef in self.coeffs.values() if isinstance(coef, Expr) for symbol in coef.free_symbols}
 
     def __repr__(self) -> str:
-        """Return a string representation of the polynomial.
+        """Return a human-readable ZX-calculus-notation string, terms ordered by increasing degree.
 
-        Returns a human-readable string in ZX calculus notation:
-        - Terms are ordered by increasing degree
-        - Uses '·' for multiplication
-        - Uses '^' for exponents
-        - Constant term is shown as just the coefficient
-        - Linear term is shown as 'c·x'
-        - Higher-degree terms are shown as 'c·x^n'
+        See :doc:`../dev_guide/architecture` for example output.
 
         Returns
         -------
         str
             String representation of the polynomial.
-
-        Examples
-        --------
-        >>> p = ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})
-        >>> repr(p)
-        '1.0 + 2.0·x + 3.0·x^2'
-
-        >>> from sympy import symbols
-        >>> a = symbols('a')
-        >>> p = ZxPoly({0: a, 1: 2.0, 2: -0.5})
-        >>> repr(p)
-        'a + 2.0·x - 0.5·x^2'
-
-        >>> z = ZxPoly({})
-        >>> repr(z)
-        '0'
         """
         if self.is_zero:
             return "0"
@@ -530,20 +459,14 @@ class ProperDiagram(Diagram):
 
 @dataclass
 class ContractedDiagram(Diagram):
-    r"""Diagram resulting from contracting (tracing) outputs to inputs in both directions.
+    r"""Diagram from contracting (tracing) two diagrams' outputs into each other's inputs.
 
-    This is the output of the contraction rule apply to a tensor diagram of two diagrams D1 and D2
-    from [1] Eq. (51)::
-
-        ∫∫ ds̄ dȳ ⟨s_i\| D1 \|s_j⟩ ⊗ q⟨s_j\| D2 \|s_i⟩
-
-    The connections are:
-
-    - (I1, I2): outputs I1 of first diagram connect to inputs I2 of second diagram (forward)
-    - (J1, J2): outputs J2 of second diagram connect to inputs J1 of first diagram (feedback)
-
-    After connection, the integral over the connected variables is implicit in the
-    diagrammatic language. Only unconnected wires remain as external inputs/outputs.
+    `I1`/`J1` index into `first`'s own output/input port numbering and `I2`/`J2` into
+    `second`'s -- never the container's external port numbering. `I1` (first's outputs)
+    connects, in order, to `I2` (second's inputs); `J2` (second's outputs) connects to `J1`
+    (first's inputs). `len(I1) == len(I2)` and `len(J1) == len(J2)` are enforced by `__init__`.
+    Only wires not named in any of the four sequences remain external. See
+    :doc:`../dev_guide/architecture` for the full Eq. (51) derivation this implements.
 
     Attributes
     ----------
@@ -561,11 +484,6 @@ class ContractedDiagram(Diagram):
         Indices of inputs from first diagram that receive connections from second diagram
     J2 : Sequence[int]
         Indices of outputs from second diagram that connect to first diagram
-
-    Notes
-    -----
-    The lengths must satisfy: \|I1\| = \|I2\| and \|J1\| = \|J2\|
-    The connection is made in order: I1[0] connects to I2[0], I1[1] to I2[1], etc.
 
     References
     ----------
@@ -845,15 +763,13 @@ class TensorDiagram(Diagram):
         self,
         diagram_pairs: Sequence[tuple[int, Sequence[int], Sequence[int]]],
     ) -> None:
-        r"""Perform partial trace by connecting outputs of some diagrams to inputs of others.
+        r"""Contract two consecutive diagrams in the tensor product into one `ContractedDiagram`.
 
-        Contract the diagram by connecting specified output wires of certain diagrams
-        to specified input wires of other diagrams. The contracted diagrams must be
-        consecutive in the tensor product.
-
-        This implements diagram contraction as defined in [1] Eq. (51)::
-
-            ∫∫ ds̄ dȳ ⟨s_i\| D1 \|s_j⟩ ⊗ q⟨s_j\| D2 \|s_i⟩
+        Connects the given output wires of one diagram to the given input wires of the other,
+        and vice versa; unconsumed wires remain external. The two diagrams must be consecutive
+        in the tensor product -- a layout restriction to keep the result easy to draw, not a
+        fundamental one. Implements diagram contraction as defined in [1] Eq. (51); see
+        :doc:`../dev_guide/architecture` for the full derivation.
 
         Parameters
         ----------
@@ -878,18 +794,6 @@ class TensorDiagram(Diagram):
             If input wire index is out of range for the second diagram.
             If output wires contain duplicate indices.
             If input wires contain duplicate indices.
-
-        Notes
-        -----
-        The contraction operation is only valid when the contracted diagrams
-        are adjacent in the tensor product. This restriction is to draw the
-        resulting contracted diagram easily. But in theory the partial trace
-        can be applied to any two diagrams of a tensor diagram.
-
-        After contraction, the two diagrams are replaced by a single diagram
-        representing their composition with the contracted wires traced out.
-        Only the unconsumed inputs and outputs wire from the first diagram and
-        from the second diagram remain as external wires.
 
         References
         ----------
@@ -1749,31 +1653,13 @@ class Swap(ProperDiagram):
 class VoidDiagram(ProperDiagram):
     r"""Void diagram: a transient, undrawn placeholder of arbitrary arity.
 
-    Represents no wire and no physical content at all -- it is pure
-    bookkeeping, not a state, effect, gate, or identity wire. It exists
-    solely so that a container's shape (its `num_inputs`/`num_outputs`)
-    never has to change when one of its slots is fully consumed elsewhere
-    in the diagram.
-
-    The motivating case is `CopyRule`'s cross-container application: when
-    a state/effect is copied through a spider that lives in a different
-    container, the state/effect's own original slot has nothing left to
-    put there (its content now lives as copies elsewhere) -- but simply
-    deleting that slot would shrink its container's arity and force an
-    arity-propagation cascade through every parent container above it.
-    Installing a `VoidDiagram` with the exact same arity instead keeps
-    that slot's shape identical to what it replaced, so nothing upstream
-    ever needs to be touched or recomputed.
-
-    A `VoidDiagram` is meant to be transient: it should never survive past
-    `optimize()`'s return value. The end-of-pipeline cleanup pass removes
-    every `VoidDiagram` for good (alongside any leftover identity wires),
-    actually shrinking the containers they sit in at that point, once and
-    for all, rather than doing so eagerly on every application.
-
-    Visually, a `VoidDiagram` reserves exactly the layout space an
-    identity wire of the same arity would take, but draws nothing --
-    unlike an identity spider, which draws as a straight wire.
+    Represents no wire and no physical content at all -- pure bookkeeping, not a state, effect,
+    gate, or identity wire. It exists so a container's shape (`num_inputs`/`num_outputs`) never
+    has to change when one of its slots is fully consumed elsewhere in the diagram, avoiding an
+    arity-propagation cascade through every parent container above it. A `VoidDiagram` must
+    never survive past `optimize()`'s return value -- the end-of-pipeline cleanup pass removes
+    every one (and any leftover identity wires) for good. See :doc:`../dev_guide/architecture`
+    for the motivating cross-container rewrite case and its visualization behavior.
 
     Parameters
     ----------
@@ -1932,27 +1818,13 @@ class Fourier2(ProperDiagram):
 
 
 def flatten_composition(diagram: Diagram) -> Diagram:  # ruff: ignore[complex-structure, too-many-branches]
-    """Recursively flatten any CompositionDiagram found in the diagram.
+    """Recursively flatten any CompositionDiagram found in the diagram into one flat sequence.
 
-    This method recursively traverses the diagram and flattens:
-
-    1. Single-element compositions → return the element directly
-    2. Nested compositions → extract and merge their diagrams, preserving connectivity
-    3. Compositions inside TensorDiagram → flatten the composition
-    4. Compositions inside ContractedDiagram → flatten the composition
-
-    When flattening nested compositions, the connectivity is adjusted to reflect
-    the flattened structure.
-
-    Examples::
-
-        CompositionDiagram([A]) → A
-        CompositionDiagram([A, CompositionDiagram([B, C]), D])
-            → CompositionDiagram([A, B, C, D])
-        TensorDiagram([CompositionDiagram([A, B]), C])
-            → TensorDiagram([CompositionDiagram([A, B]), C])  # Composition inside Tensor is NOT flattened
-        CompositionDiagram([TensorDiagram([A, B]), C])
-            → CompositionDiagram([TensorDiagram([A, B]), C])  # Tensor inside Composition is NOT flattened
+    A single-element composition collapses to its element; a `CompositionDiagram` nested inside
+    another `CompositionDiagram` is merged in, with connectivity indices shifted to match. A
+    composition nested inside a `TensorDiagram`/`ContractedDiagram` is recursed into but left in
+    place there -- only composition-inside-composition actually gets flattened. See
+    :doc:`../dev_guide/architecture` for worked examples of each case.
 
     Parameters
     ----------

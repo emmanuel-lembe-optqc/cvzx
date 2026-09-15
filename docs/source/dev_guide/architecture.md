@@ -62,6 +62,117 @@ manually (`add_node`/`remove_node`, or rebuilt with `build_from_graph`) — noth
 for you automatically, so any code that mutates the graph directly (rather than going
 through a `RewriteRule`) is responsible for updating the registry itself.
 
+### `GateRegister`'s symbolic-parameter/feedforward indexes
+
+Besides the category sets above, `GateRegister` also indexes symbolic-parameter and
+feedforward provenance, populated by `_index_parameters` (and retracted by
+`_retract_parameter_index`) every time `add_node`/`remove_node` runs:
+
+- `parametric_nodes` / `symbol_registry`: which nodes carry a free `sympy.Symbol` in any of
+  their parametric fields (a spider's `phase`, or a `CompactDiagram` gate's own parameter
+  fields — `alpha`/`beta`/`lam`, `a`/`b`, etc.), and the reverse index from symbol to the set
+  of nodes using it.
+- `feedforward_nodes` / `measurement_to_feedforward_map`: which nodes have `feedforward=True`,
+  and the reverse index from a measurement node's id to the set of nodes whose
+  `measurement_ids` includes it — i.e. which downstream gates depend on that measurement's
+  outcome.
+
+`CVZXGraph.parameter_consistency_violations()` (and its raising counterpart
+`validate_parameter_consistency()`) uses these two indexes to check the graph is internally
+consistent: (1) every symbol used by 2+ nodes must be bound (via each node's own
+`param_measurement_map[symbol]`) to the *same* measurement-id set everywhere it's declared —
+a node that merely carries the symbol without declaring a binding (e.g. the measurement leaf
+that originates it) is excluded from the comparison rather than treated as a conflict; (2)
+every measurement id referenced by `measurement_to_feedforward_map` must still be a
+registered measurement node. Symbol conflicts are reported (and raised, as
+`ParameterConflictError`) before unbound-measurement ones (`UnboundMeasurementError`), since
+an unresolved conflict makes any measurement-existence finding downstream of it suspect too.
+
+## Diagram building blocks (`ir/base.py`)
+
+### `ContractedDiagram`: partial trace over two diagrams
+
+`ContractedDiagram` is the output of applying the contraction rule to a tensor of two diagrams
+D1 and D2, from [Nagayoshi et al., CV ZX calculus, Definition 11, Eq. (51)]:
+
+```text
+∫∫ ds̄ dȳ ⟨s_i| D1 |s_j⟩ ⊗ q⟨s_j| D2 |s_i⟩
+```
+
+The connections are `(I1, I2)` — outputs `I1` of the first diagram connect to inputs `I2` of
+the second (forward) — and `(J1, J2)` — outputs `J2` of the second diagram connect to inputs
+`J1` of the first (feedback). After connection, the integral over the connected variables is
+implicit in the diagrammatic language; only wires not named in any of the four index sequences
+remain external. `TensorDiagram.partial_trace` is the entry point that builds one: it requires
+the two diagrams being contracted to be adjacent in the tensor product, which is purely a
+layout restriction (to keep the resulting diagram easy to draw) rather than a fundamental one —
+in principle partial trace could apply to any two diagrams in a `TensorDiagram`.
+
+### `VoidDiagram`: keeping container arity stable under cross-container rewrites
+
+The motivating case is `CopyRule`'s cross-container application: when a state/effect is copied
+through a spider that lives in a *different* container, the state/effect's own original slot
+has nothing left to put there (its content now lives as copies elsewhere) — but simply deleting
+that slot would shrink its container's arity and force an arity-propagation cascade through
+every parent container above it. Installing a `VoidDiagram` with the exact same arity instead
+keeps that slot's shape identical to what it replaced, so nothing upstream ever needs to be
+touched or recomputed. `VoidDiagram` is meant to be transient: the end-of-pipeline cleanup pass
+(part of `optimize()`) removes every `VoidDiagram` for good, alongside any leftover identity
+wires, actually shrinking the containers they sit in at that point once and for all, rather
+than doing so eagerly on every application. Visually, a `VoidDiagram` reserves exactly the
+layout space an identity wire of the same arity would take, but draws nothing — unlike an
+identity spider, which draws as a straight wire.
+
+### `ZxPoly`: phase polynomials as a wrapped `sympy.Poly`
+
+`ZxPoly` wraps `sympy.Poly` (a single generator, `x`) so that CV-ZX phase functions can be
+built from a plain `dict[degree, coeff]` as well as the usual sympy forms:
+
+```python
+>>> p = ZxPoly({0: 1.0, 2: -0.5})   # 1 - 0.5·x²
+>>> q = ZxPoly({1: 2.0})             # 2·x
+>>> (p + q).coeffs                   # 1 + 2·x - 0.5·x²
+{0: 1.0, 1: 2.0, 2: -0.5}
+>>> (p * q).coeffs                   # 2·x - x³
+{1: 2.0, 3: -1.0}
+
+>>> from sympy import symbols
+>>> a, b = symbols('a b')
+>>> (ZxPoly({0: a, 1: b}) + ZxPoly({0: 1, 1: 2})).coeffs   # (a+1) + (b+2)·x
+{0: a + 1, 1: b + 2}
+
+>>> from sympy import Poly
+>>> x = symbols('x')
+>>> ZxPoly(x**2 + 2*x + 1)           # from a sympy expression
+>>> ZxPoly(Poly(x**2 + 1, x))        # from a sympy.Poly
+>>> ZxPoly()                          # the zero polynomial
+```
+
+`.coeffs` always omits zero coefficients, converts numeric coefficients to Python `float` (or
+`complex`, if the coefficient has a nonzero imaginary part), and leaves symbolic coefficients
+as sympy expressions. `repr()` renders terms in increasing-degree order using ZX-calculus
+notation (`·` for multiplication, `^` for exponents, e.g. `ZxPoly({0: 1.0, 1: 2.0, 2: 3.0})` →
+`'1.0 + 2.0·x + 3.0·x^2'`, and the zero polynomial → `'0'`).
+
+### `flatten_composition`: normalizing nested composition structure
+
+`flatten_composition` recursively collapses nested `CompositionDiagram`s into one flat
+sequence, adjusting connectivity indices to match:
+
+```text
+CompositionDiagram([A]) → A
+CompositionDiagram([A, CompositionDiagram([B, C]), D])
+    → CompositionDiagram([A, B, C, D])
+TensorDiagram([CompositionDiagram([A, B]), C])
+    → TensorDiagram([CompositionDiagram([A, B]), C])  # Composition inside Tensor is NOT flattened
+CompositionDiagram([TensorDiagram([A, B]), C])
+    → CompositionDiagram([TensorDiagram([A, B]), C])  # Tensor inside Composition is NOT flattened
+```
+
+Only composition-inside-composition is actually flattened; a composition nested inside a
+`TensorDiagram` or `ContractedDiagram` is recursed into (in case *it* contains further nested
+compositions) but left in place there.
+
 ## The full pipeline: `CircuitRepr` to `DependencyDAG`
 
 The end-to-end path from a user-authored mqc3 `CircuitRepr`, through `cvzx`'s own

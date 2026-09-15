@@ -1,39 +1,16 @@
 """Plugin registry for lowering a cvzx `Diagram` into an mqc3 `DependencyDAG`.
 
-Different QPUs can require different lowering strategies once a circuit
-leaves cvzx's diagrammatic representation. mqc3 already has exactly
-this kind of plugin point *downstream* of `DependencyDAG`:
-`mqc3.graph.embed.embed.GraphEmbedder` is an abstract base class with
-concrete per-strategy subclasses (`beamsearch.py`, `greedy.py`) that
-each embed a `DependencyDAG` into a concrete `GraphRepr` differently,
-and `GraphRepr` is in turn lowered toward a machinery representation
-via `mqc3.machinery`. `DependencyDAG` itself is QPU-agnostic -- it only
-encodes per-mode operation dependencies and feedforward edges, not
-anything hardware-specific -- so it is the natural, stable interface
-for cvzx to hand off to mqc3's own machinery.
-
-This module provides the analogous plugin point for the one step still
-missing: cvzx `Diagram` -> mqc3 `DependencyDAG`. A `LoweringBackend` is
-any strategy for performing that step; backends register themselves
-under a name via the `register_backend` class decorator, and
-`graph_to_dependency_dag(diagram, backend=...)` dispatches to whichever
-one is requested (`"mqc3"`, the reference backend, by default). Adding
-support for a QPU that needs a different `Diagram -> DependencyDAG`
-lowering (for instance, one that wants to skip the `CircuitRepr`
-round-trip and build the DAG directly from the diagram's own structure)
+A `LoweringBackend` is any strategy for performing the `Diagram ->
+DependencyDAG` step; backends register themselves under a name via the
+`register_backend` class decorator, and `graph_to_dependency_dag(diagram,
+backend=...)` dispatches to whichever one is requested (`"mqc3"`, the
+bundled reference backend built on `cvzx.lowering.bridges.mqc3.to_circuit_repr`,
+by default). Adding support for a QPU that needs a different lowering
 means writing and registering one more `LoweringBackend` subclass --
-`get_backend`/`graph_to_dependency_dag` and every existing backend are
-untouched.
-
-The bundled reference backend (registered as `"mqc3"`) is deliberately
-the simplest correct implementation: it converts the diagram to an
-mqc3 `CircuitRepr` (via `cvzx.lowering.bridges.mqc3.to_circuit_repr` -- see that
-module for the exact per-gate translation and its documented
-limitations) and then builds the `DependencyDAG` from it using mqc3's
-own, already-tested `_DependencyBuilder.from_circuit()`. Every
-limitation of `to_circuit_repr` (no `ContractedDiagram`, no symbolic
-parameters, no `ControlledSumGate`/`CubicPhaseGate`, and so on) applies
-transitively to this backend.
+`get_backend`/`graph_to_dependency_dag` and every existing backend stay
+untouched. See :doc:`../user_guide/circuit_conversion` for why this
+plugin point exists and how it mirrors mqc3's own `GraphEmbedder` one
+downstream of `DependencyDAG`.
 """
 
 from __future__ import annotations

@@ -107,20 +107,15 @@ def _collect_symbols(attrs: dict) -> set[Symbol]:
 
 
 class GateRegister:
-    """Registry for tracking specific gate types and nodes in a CV ZX graph.
+    """Registry indexing a CV ZX graph's nodes by gate type/category, for O(1) `match()` lookups.
 
-    The GateRegister maintains sets of node IDs for different gate types,
-    enabling O(1) lookups instead of O(N) scans of the entire graph.
-    This is essential for performance in large circuits.
-
-    The registry tracks:
-        - Proper nodes: Q/P spiders, squeezing, displacement, rotation, Fourier gates
-        - Terminals: input states (0→1) and measurements (1→0)
-        - Containers: tensor, composition, and contracted diagrams
-
-    The registry must be kept in sync with the graph. Whenever the graph is
-    modified (nodes added, removed, or changed), the registry must be updated
-    accordingly using `add_node()`, `remove_node()`, or rebuilding from scratch.
+    Tracks proper nodes (spiders, squeezing/displacement/rotation/Fourier gates), terminals
+    (input states, measurements), the three container types, and symbolic-parameter/feedforward
+    provenance (`parametric_nodes`, `symbol_registry`, `feedforward_nodes`,
+    `measurement_to_feedforward_map`). Must be kept in sync with the graph manually --
+    `add_node()`/`remove_node()` on every mutation, or a full `build_from_graph()` rebuild;
+    nothing does this automatically. See :doc:`../../dev_guide/architecture` for what each index
+    is used for.
 
     Parameters
     ----------
@@ -454,12 +449,11 @@ class GateRegister:
 class CVZXGraph:
     """A CV ZX diagram represented as a directed graph, paired with its registry.
 
-    ``CVZXGraph`` bundles the ``networkx.DiGraph`` produced by :func:`to_graph`
-    together with the :class:`GateRegister` that indexes it, so that code
-    working on a diagram's graph representation does not have to thread the
-    graph and registry through separately. It is a thin, mutable wrapper:
-    it does not change how the graph or registry are built, read, or kept
-    in sync, it only gives them a single home.
+    Bundles the ``networkx.DiGraph`` produced by :func:`to_graph` together with the
+    :class:`GateRegister` that indexes it, so code working on a diagram's graph representation
+    does not have to thread the two through separately. A thin, mutable wrapper: it does not
+    change how the graph or registry are built, read, or kept in sync -- see
+    :doc:`../../dev_guide/architecture` for the two-representation design this is part of.
 
     Parameters
     ----------

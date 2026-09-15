@@ -213,11 +213,9 @@ def optimize(
     Each round: optionally expand two-mode gates (`assume_infinite_squeezing`),
     convert to the graph representation, run every rule to a fixed point,
     then convert back to a diagram for the next round -- rounds repeat
-    because folding/absorbing gates can expose further reductions (e.g. two
-    `ControlledSumGate` instances merging into one that itself needs re-expanding).
-    See the user guide ("Optimizing a diagram") for what
-    `assume_infinite_squeezing` unlocks and worked examples of each, and
-    the dev guide ("Architecture overview") for the full round-by-round
+    because folding/absorbing gates can expose further reductions. See
+    :doc:`../user_guide/optimization` for what `assume_infinite_squeezing`
+    unlocks, worked examples, and the full convergence/backend/performance
     breakdown.
 
     Parameters

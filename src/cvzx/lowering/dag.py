@@ -1,53 +1,17 @@
 """Extract an mqc3 `DependencyDAG` directly from a `CVZXGraph`.
 
-`cvzx.lowering.Mqc3ReferenceBackend` builds the `DependencyDAG` by first
-canonicalizing the diagram into `normalize_diagram`'s alternating
-type-1/type-2 stages and walking those. This module builds the exact
-same kind of `DependencyDAG` a different way: a single deterministic
-forward sweep over the `CVZXGraph`'s own node/edge structure, anchored at
-`GateRegister.input_states` and following the graph's own `"composition"`/
-`"contracted_internal"` wire edges (the same edges `nx_rewrite_rules`/
-`rx_rewrite_rules` already use for rule-matching, so no new edge
-convention is introduced) until each mode reaches a
-`GateRegister.measurement_nodes` node -- without requiring the diagram to
-already be in `normalize_diagram`'s canonical form first.
-
-`mqc3.graph.embed.dep_dag.DependencyDAG` is not itself backend-specific
-(its `.dag` is always a plain `networkx.DiGraph` internally, and its
-constructor only accepts an mqc3 `CircuitRepr`/`GraphRepr`) -- there is no
-rustworkx-backed variant of it to build instead. What *is* backend-aware
-here is the traversal: `extract_dependency_dag()` walks whichever
-`CVZXGraph` it's given (`networkx`- or `rustworkx`-backed, dispatched via
-`cvzx.backend`), then feeds the resulting mode-ordered leaf sequence
-through the same per-leaf translators `cvzx.lowering.bridges.mqc3` already
-uses (`_apply_1mode_leaf`/`_apply_2mode_leaf`, including their existing
-`FeedForward` support) to build a `CircuitRepr`, and hands that to
-`DependencyDAG` -- no cvzx-specific dependency-graph logic is
-reimplemented for the actual op translation, only the traversal order.
-
-Algorithm
----------
-1. `complete_boundaries()` (unless `complete=False`) closes every open
-   input/output port, so every wire is bounded by a real
-   `GateRegister.input_states`/`measurement_nodes` node -- the
-   precondition the sweep below relies on.
-2. Every `input_states` node starts a fresh mode (a monotonically
-   increasing integer, exactly as `cvzx.lowering.bridges.mqc3`'s own
-   `_ModeCounter` assigns them).
-3. A node is visited once **both** of its dependencies are satisfied:
-   every one of its input ports has a mode threaded into it from an
-   already-visited node (a "wire-ready" condition, propagated forward
-   along `"composition"`/`"contracted_internal"` edges port-for-port),
-   and every measurement id any of its parameters' `param_measurement_map`
-   cites has itself already been visited (a "classical-ready" condition
-   -- this is what guarantees a feedforward edge never points at an
-   unvisited measurement). A 1-mode leaf's single output port inherits
-   its input's mode; a 2-mode leaf's two output ports inherit its two
-   inputs' modes unchanged (matching `to_circuit_repr`'s own convention
-   that a wide gate never advances the mode counter); a measurement
-   effect (or any other 1-in-0-out leaf) ends its mode's thread.
-4. Container nodes (`kind == "container"`) are skipped entirely --
-   `V_leaves` is exactly the proper/compact node set.
+An alternative to `cvzx.lowering.Mqc3ReferenceBackend` (which canonicalizes
+into `normalize_diagram`'s alternating stages first): `extract_dependency_dag()`
+builds the same kind of `DependencyDAG` via a single deterministic forward
+sweep over the `CVZXGraph`'s own node/edge structure, anchored at
+`GateRegister.input_states` and following its `"composition"`/
+`"contracted_internal"` wire edges until each mode reaches a
+`GateRegister.measurement_nodes` node -- without requiring canonical form
+first. The resulting mode-ordered leaf sequence is fed through
+`cvzx.lowering.bridges.mqc3`'s own per-leaf translators to build a
+`CircuitRepr`, which is handed to `DependencyDAG`. See
+:doc:`../user_guide/circuit_conversion` for the full step-by-step
+algorithm and design rationale -- only the key steps are kept here.
 """
 
 from collections import deque
@@ -292,14 +256,11 @@ def extract_dependency_dag(
 ) -> "DependencyDAG":
     """Extract an mqc3 `DependencyDAG` directly from `diagram`'s `CVZXGraph`.
 
-    See the module docstring for the full algorithm. This is an
-    alternative to `cvzx.lowering.Mqc3ReferenceBackend` (registered as
-    `"cvzx-direct"` in `cvzx.lowering.lowering`'s backend registry) that discovers
-    execution order from the graph's own wire/classical edges instead of
-    `normalize_diagram`'s canonical stage form, so it tolerates diagram
-    shapes that form isn't required to (e.g. an explicit `Swap`, or a
-    `ContractedDiagram` `complete_boundaries()`/the translators below can
-    still resolve).
+    Registered as `"cvzx-direct"` in `cvzx.lowering.lowering`'s backend
+    registry. Discovers execution order from the graph's own wire/classical
+    edges instead of `normalize_diagram`'s canonical stage form, so it
+    tolerates diagram shapes that form isn't required to. See
+    :doc:`../user_guide/circuit_conversion` for the full sweep algorithm.
 
     Parameters
     ----------

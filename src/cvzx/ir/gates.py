@@ -320,28 +320,6 @@ class DisplacementGate(CompactDiagram):
     References
     ----------
     [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.1, Eq. (57)
-
-    Examples
-    --------
-    >>> # Numeric displacement
-    >>> D = DisplacementGate(0.5 + 0.3j)
-    >>> D.expand()
-
-    >>> # Symbolic displacement with real and imaginary parts
-    >>> from sympy import symbols, I
-    >>> a, b = symbols('a b', real=True)
-    >>> D = DisplacementGate(a + I*b, parametric=True)
-    >>> decomp = D.expand()
-    >>> # Decomposition: Q(√2*b*x) ∘ P(√2*a*x)
-
-    >>> # Substitute parameters
-    >>> D_sub = D.substitute_parameters({a: 0.5, b: 0.3})
-
-    >>> from base_gates import QSpider, ZxPoly
-    >>> m = symbols('m', real=True)
-    >>> meas = QSpider(1, 0, ZxPoly({1: m}), True)
-    >>> D = Displacement(m + I*2, parametric=True, param_measurement_map={m: {meas.id}})
-
     """
 
     alpha: float | int | complex | Expr
@@ -361,26 +339,10 @@ class DisplacementGate(CompactDiagram):
 
         D(a) = Q(√2 Im(a) x) ∘ P(√2 Re(a) x)
 
-        For symbolic alpha:
-            D(a) = Q(√2 Im(a) x) ∘ P(√2 Re(a) x)
-            where Re(a) and Im(a) are symbolic expressions.
-
         Returns
         -------
         CompositionDiagram
             Composition of p-spider then q-spider.
-
-        Examples
-        --------
-        >>> # Numeric displacement
-        >>> D = DisplacementGate(0.5 + 0.3j)
-        >>> decomp = D.expand()
-
-        >>> # Symbolic displacement with parameters
-        >>> from sympy import symbols, I
-        >>> a, b = symbols('a b', real=True)
-        >>> D = DisplacementGate(a + I*b, parametric=True)
-        >>> decomp = D.expand()
         """
         # Get real and imaginary parts
         real_part, imag_part = self._get_re_im()
@@ -551,19 +513,6 @@ class PhaseRotationGate(CompactDiagram):
     References
     ----------
     [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.2, Eq. (58)
-
-    Examples
-    --------
-    >>> # Numeric phase rotation
-    >>> R = PhaseRotationGate(np.pi/4)
-    >>> R.expand()
-
-    >>> # Symbolic phase rotation
-    >>> from sympy import symbols
-    >>> theta = symbols('theta', real=True)
-    >>> R = PhaseRotationGate(theta, parametric=True)
-    >>> decomp = R.expand()
-
     """
 
     theta: float | int | complex | Expr
@@ -588,11 +537,6 @@ class PhaseRotationGate(CompactDiagram):
         -------
         CompositionDiagram
             Composition of three q-spiders.
-
-        Examples
-        --------
-        >>> R = PhaseRotationGate(np.pi/4)
-        >>> decomp = R.expand()
         """
         tan_half = self._get_tan_half()
         sin_theta = self._get_sin()
@@ -725,19 +669,6 @@ class SqueezingGate(CompactDiagram):
     References
     ----------
     [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.3, Eq. (59)
-
-    Examples
-    --------
-    >>> # Numeric squeezing
-    >>> S = SqueezingGate(0.5)
-    >>> S.expand()
-
-    >>> # Symbolic squeezing
-    >>> from sympy import symbols
-    >>> r = symbols('r', real=True)
-    >>> S = SqueezingGate(exp(-r), parametric=True)
-    >>> decomp = S.expand()
-
     """
 
     tau: float | int | complex | Expr
@@ -763,11 +694,6 @@ class SqueezingGate(CompactDiagram):
         -------
         CompositionDiagram
             Composition of Q, P, Q, P spiders in sequence.
-
-        Examples
-        --------
-        >>> S = SqueezingGate(0.5)
-        >>> decomp = S.expand()
         """
         a, b, c, d = self._get_coefficients()
         phase1 = ZxPoly({2: a})
@@ -908,19 +834,6 @@ class ControlledSumGate(CompactDiagram):
     ----------
     [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.4, Eq. (61)-(62)
     [4] Yoshikawa et al., QRL configuration, Sec. IV.C.3
-
-    Examples
-    --------
-    >>> # Unbiased CSUM
-    >>> C = ControlledSumGate(control=2, target=1)
-    >>> C.expand()
-
-    >>> # Biased CSUM with symbolic gain
-    >>> from sympy import symbols
-    >>> g = symbols('g', real=True)
-    >>> C = ControlledSumGate(gain=g, control=2, target=1, parametric=True)
-    >>> decomp = C.expand()
-
     """
 
     gain: float | int | complex | Expr = 1.0
@@ -941,25 +854,14 @@ class ControlledSumGate(CompactDiagram):
     def expand(self) -> Diagram:
         """Decompose CSUM gate into spiders with contraction.
 
-        For unbiased (g=1) gate [1] Eq. (61):
-            CSUM2,1 = ContractedDiagram of q-spider and p-spider
-            CSUM1,2 = ContractedDiagram of p-spider and q-spider
-
-        For biased gate [1] Eq. (62):
-            CSUM1,2(g) = (Sq(g) ⊗ Id) ∘ CSUM1,2(1) ∘ (Sq(g⁻¹) ⊗ Id)
-            CSUM2,1(g) = (Sq(g) ⊗ Id) ∘ CSUM2,1(1) ∘ (Sq(g⁻¹) ⊗ Id)
-
-        The squeezing is applied to the control mode.
+        Unbiased (g=1) [1] Eq. (61): contraction of a copying spider (control)
+        with an adding spider (target). Biased [1] Eq. (62): the unbiased gate
+        conjugated by a squeezing gate on the control mode.
 
         Returns
         -------
         Diagram
             ContractedDiagram for unbiased, CompositionDiagram for biased.
-
-        Examples
-        --------
-        >>> C = ControlledSumGate(control=2, target=1)
-        >>> decomp = C.expand()
         """
         # q-spider copies position from control mode
         # p-spider adds the copied position to the momentum of target mode
@@ -1127,19 +1029,6 @@ class ControlledZGate(CompactDiagram):
     References
     ----------
     [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.5, Eq. (63)-(64)
-
-    Examples
-    --------
-    >>> # Unbiased CZ
-    >>> CZ = ControlledZGate()
-    >>> CZ.expand()
-
-    >>> # Symbolic CZ
-    >>> from sympy import symbols
-    >>> g = symbols('g', real=True)
-    >>> CZ = ControlledZGate(gain=g, parametric=True)
-    >>> decomp = CZ.expand()
-
     """
 
     gain: float | int | complex | Expr = 1.0
@@ -1158,22 +1047,14 @@ class ControlledZGate(CompactDiagram):
     def expand(self) -> Diagram:
         """Decompose CZ gate using Fourier gates and CSUM.
 
-        Unbiased CZ [1] Eq. (63):
-            CZ = ContractedDiagram of q-spider and p-spider with
-            a fourier diagram in between
-
-        Biased CZ [1] Eq. (64):
-            CZ(g) = (Sq(g⁻¹) ⊗ Id) ∘ CZ(1) ∘ (Sq(g) ⊗ Id)
+        Unbiased CZ [1] Eq. (63): contraction of a q-spider and a p-spider
+        with a Fourier diagram in between. Biased CZ [1] Eq. (64): the
+        unbiased gate conjugated by a squeezing gate on mode 1.
 
         Returns
         -------
         Diagram
             Composition of Fourier, CSUM, Fourier.
-
-        Examples
-        --------
-        >>> CZ = ControlledZGate()
-        >>> decomp = CZ.expand()
         """
         # Fourier diagram
         fourier_inv = FourierInv()
@@ -1308,19 +1189,6 @@ class BeamsplitterGate(CompactDiagram):
     References
     ----------
     [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.6, Eq. (66)-(67)
-
-    Examples
-    --------
-    >>> # 50:50 beamsplitter
-    >>> BS = BeamsplitterGate(np.pi/4)
-    >>> BS.expand()
-
-    >>> # Symbolic beamsplitter
-    >>> from sympy import symbols
-    >>> theta = symbols('theta', real=True)
-    >>> BS = BeamsplitterGate(theta, parametric=True)
-    >>> decomp = BS.expand()
-
     """
 
     theta: float | int | complex | Expr
@@ -1343,11 +1211,6 @@ class BeamsplitterGate(CompactDiagram):
         -------
         Diagram
             Composition following [1] Eq. (66) or simplified Eq. (67).
-
-        Examples
-        --------
-        >>> BS = BeamsplitterGate(np.pi/4)
-        >>> decomp = BS.expand()
         """
         if self._is_balanced():
             # Balanced beamsplitter [1] Eq. (67)
@@ -1487,19 +1350,6 @@ class CubicPhaseGate(CompactDiagram):
     References
     ----------
     [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.7, Eq. (68)
-
-    Examples
-    --------
-    >>> # Numeric cubic phase gate
-    >>> CPG = CubicPhaseGate(0.5)
-    >>> CPG.expand()
-
-    >>> # Symbolic cubic phase gate
-    >>> from sympy import symbols
-    >>> gamma = symbols('gamma', real=True)
-    >>> CPG = CubicPhaseGate(gamma, parametric=True)
-    >>> decomp = CPG.expand()
-
     """
 
     gamma: float | int | Expr
@@ -1522,11 +1372,6 @@ class CubicPhaseGate(CompactDiagram):
         -------
         QSpider
             q-spider with phase function f(x) = y x³.
-
-        Examples
-        --------
-        >>> CPG = CubicPhaseGate(0.5)
-        >>> spider = CPG.expand()
         """
         phase = ZxPoly({3: self.gamma})
         return _build_spider(self, QSpider, 1, 1, phase)
@@ -1583,14 +1428,11 @@ class CubicPhaseGate(CompactDiagram):
 class ShearXInvariantGate(CompactDiagram):
     r"""X-invariant shear gate P(kappa) (mqc3 `intrinsic.ShearXInvariant`).
 
-    Represents the shear operator that leaves x-hat invariant and shifts
-    p-hat:
-
-        P^dagger(kappa) (x, p) P(kappa) = [[1, 0], [2*kappa, 1]] (x, p)
-
-    A quadratic-phase q-spider *is* this shear directly -- the same
-    building block already used inside `PhaseRotationGate`/`SqueezingGate`
-    -- so no composition is needed.
+    Leaves x-hat invariant and shifts p-hat by `2*kappa*x-hat` (see the
+    gate catalog table for the full Heisenberg action). A quadratic-phase
+    q-spider *is* this shear directly -- the same building block already
+    used inside `PhaseRotationGate`/`SqueezingGate` -- so `expand()` needs
+    no composition, just one spider.
 
     Parameters
     ----------
@@ -1614,12 +1456,6 @@ class ShearXInvariantGate(CompactDiagram):
     mqc3 `intrinsic.ShearXInvariant`; a quadratic-phase q-spider implements
     this shear directly, the same pattern used by `PhaseRotationGate` and
     `SqueezingGate` for [1] Eq. (58)-(59).
-
-    Examples
-    --------
-    >>> P = ShearXInvariantGate(0.3)
-    >>> P.expand()
-
     """
 
     kappa: float | int | Expr
@@ -1700,13 +1536,9 @@ class ShearXInvariantGate(CompactDiagram):
 class ShearPInvariantGate(CompactDiagram):
     r"""P-invariant shear gate Q(eta) (mqc3 `intrinsic.ShearPInvariant`).
 
-    Represents the shear operator that leaves p-hat invariant and shifts
-    x-hat:
-
-        Q^dagger(eta) (x, p) Q(eta) = [[1, 2*eta], [0, 1]] (x, p)
-
-    A quadratic-phase p-spider *is* this shear directly, symmetric to
-    `ShearXInvariantGate`.
+    Leaves p-hat invariant and shifts x-hat by `2*eta*p-hat` (see the gate
+    catalog table for the full Heisenberg action). A quadratic-phase
+    p-spider *is* this shear directly, symmetric to `ShearXInvariantGate`.
 
     Parameters
     ----------
@@ -1730,12 +1562,6 @@ class ShearPInvariantGate(CompactDiagram):
     mqc3 `intrinsic.ShearPInvariant`; a quadratic-phase p-spider implements
     this shear directly, the same pattern used by `PhaseRotationGate` and
     `SqueezingGate` for [1] Eq. (58)-(59).
-
-    Examples
-    --------
-    >>> Q = ShearPInvariantGate(0.3)
-    >>> Q.expand()
-
     """
 
     eta: float | int | Expr
@@ -1817,28 +1643,15 @@ class ArbitraryGate(CompactDiagram):
     r"""Arbitrary single-mode Gaussian gate R(alpha) S(lam) R(beta) (mqc3 `intrinsic.Arbitrary`).
 
     mqc3 defines this as the operator product `R(alpha) . S(lam) . R(beta)`
-    (rightmost applied first, i.e. the mode meets `R(beta)` first, then
-    `S(lam)`, then `R(alpha)` last), where:
+    (rightmost applied first: the mode meets `R(beta)`, then `S(lam)`, then
+    `R(alpha)`). `expand()` composes it, in signal-flow order, as::
 
-        R^dagger(phi) (x, p) R(phi) = [[cos(phi), -sin(phi)], [sin(phi), cos(phi)]] (x, p)
-        S^dagger(r) (x, p) S(r) = [[e^r, 0], [0, e^-r]] (x, p)
+        PhaseRotationGate(-beta) . SqueezingGate(e^lam) . PhaseRotationGate(-alpha)
 
-    Two conversions are needed to express this with cvzx's existing gates:
-
-    - cvzx's `PhaseRotationGate(theta)` implements mqc3's `R(-theta)`, not
-      `R(theta)` (verified directly from its own three-spider
-      decomposition) -- so `R(phi)` here becomes `PhaseRotationGate(-phi)`.
-    - cvzx's `SqueezingGate(tau)` implements `diag(tau, 1/tau)`, exactly
-      `S(lam)` under `tau = e^lam` (no sign correction needed there).
-
-    Composed in signal-flow order (first-applied-first, matching
-    `CompositionDiagram`'s own convention):
-
-        Arbitrary(alpha, beta, lam)
-            = PhaseRotationGate(-beta) . SqueezingGate(e^lam) . PhaseRotationGate(-alpha)
-
-    Verified numerically against the raw mqc3 matrix product for random
-    (alpha, beta, lam).
+    -- the sign flip on the rotations corrects for `PhaseRotationGate`'s own
+    convention (it implements mqc3's `R(-theta)`, not `R(theta)`); see
+    :doc:`../user_guide/gates` for the full derivation and the
+    `conjugate()` formula's justification.
 
     Parameters
     ----------
@@ -1985,17 +1798,14 @@ class ArbitraryGate(CompactDiagram):
 class Squeezing45Gate(CompactDiagram):
     r"""45-degree squeezing gate (mqc3 `intrinsic.Squeezing45`).
 
-    Defined by mqc3 as `R(-pi/4) S_V(cot theta) R(pi/4)`, where `S_V(c)`
-    has matrix `diag(1/c, c)`. This is exactly `ArbitraryGate` with
-    `alpha = -pi/4`, `beta = pi/4`, and `lam` chosen so that
-    `S(lam) = S_V(cot theta)`: since `e^lam = 1/cot(theta) = tan(theta)`,
-    cvzx's `SqueezingGate(tau)` (which implements `diag(tau, 1/tau)`) can
-    be used directly with `tau = tan(theta)`, no logarithm required.
+    Defined by mqc3 as `R(-pi/4) S_V(cot theta) R(pi/4)` -- a special case
+    of `ArbitraryGate` (`alpha=-pi/4`, `beta=pi/4`). `expand()` composes it
+    directly, in signal-flow order, as::
 
-    Composed in signal-flow order:
+        PhaseRotationGate(-pi/4) . SqueezingGate(tan theta) . PhaseRotationGate(pi/4)
 
-        Squeezing45(theta)
-            = PhaseRotationGate(-pi/4) . SqueezingGate(tan theta) . PhaseRotationGate(pi/4)
+    See :doc:`../user_guide/gates` for how `tan(theta)` follows from mqc3's
+    `S_V(cot theta)` convention.
 
     Parameters
     ----------
@@ -2113,18 +1923,12 @@ class Squeezing45Gate(CompactDiagram):
 class TwoModeShearGate(CompactDiagram):
     r"""Two-mode shear gate P2(a, b) (mqc3 `intrinsic.TwoModeShear`).
 
-        P2^dagger(a, b) (x1, x2, p1, p2) P2(a, b)
-            = [[1, 0, 0, 0], [0, 1, 0, 0], [2a, b, 1, 0], [b, 2a, 0, 1]] (x1, x2, p1, p2)
-
-    The diagonal `2a` terms are exactly `ShearXInvariantGate(a)` applied to
-    each mode; the cross `b` term is exactly cvzx's `ControlledZGate`
-    generator `exp(-ig q1 q2)` evaluated at `g = -b` (cvzx's
-    `ControlledZGate(g)` produces `p1 -= g*x2, p2 -= g*x1`, the negative of
-    mqc3's `ControlledZ(g)` convention -- verified directly from its own
-    decomposition's generator). Both pieces are shears of the same abelian
-    family (they only ever add a linear function of the x's to the p's,
-    leaving the x's invariant), so they commute and no new primitive is
-    required.
+    Shifts each mode's p-hat by `2a` times its own x-hat plus `b` times the
+    other mode's x-hat, leaving both x-hats invariant (see the gate catalog
+    table for the full Heisenberg action). `expand()` composes a diagonal
+    shear on each mode (`ShearXInvariantGate(a)`, tensored) with a single
+    `ControlledZGate(gain=-b)` for the cross term -- see
+    :doc:`../user_guide/gates` for why the CZ gain is `-b` and not `b`.
 
     Parameters
     ----------
@@ -2195,13 +1999,10 @@ class TwoModeShearGate(CompactDiagram):
     def conjugate(self) -> CompactDiagram:
         """Conjugate of the two-mode shear gate negates both parameters.
 
-        Both `a` and `b` parametrize the same real quadratic-form generator
-        (`H = a*x1^2 + a*x2^2 + b*x1*x2`), so
-        `exp(-iH)^dagger = exp(+iH) = exp(-i(-H))` is the same gate with
-        both coefficients negated -- computed directly rather than
-        delegating to `ControlledZGate.conjugate()`, since the two-mode
-        shear's adjoint is defined independently of whatever convention
-        that method follows.
+        Computed directly (both `a` and `b` parametrize the same real
+        quadratic-form generator, so negating it negates both) rather than
+        delegating to `ControlledZGate.conjugate()`; see
+        :doc:`../user_guide/gates` for the derivation.
 
         Returns
         -------
@@ -2250,24 +2051,15 @@ class MeasurementGate(CompactDiagram):
     Measures the quadrature `x-hat sin(theta) + p-hat cos(theta)`. This is
     not a unitary gate but an *effect* -- a diagram leaf with an output
     arity of zero, the dual of how e.g. `PSpider(0, 1, ...)` is already
-    used elsewhere in this codebase (and in
-    `tests/test_visualize_gates.py`'s `feedforward_test`) to represent
-    ancilla/measurement leaves.
+    used elsewhere in this codebase to represent ancilla/measurement leaves.
 
-    Measuring `x-hat` directly is a plain q-spider effect, `QSpider(1, 0, 0)`.
-    To measure the rotated quadrature, rotate the mode into alignment
-    first: solving `R(phi)`'s Heisenberg matrix (top row) for
-    `cos(phi)*x - sin(phi)*p = sin(theta)*x + cos(theta)*p` gives
-    `phi = theta - pi/2`. Composed in signal-flow order (rotate first, then
-    measure), and converting to cvzx's rotation-gate convention
-    (`PhaseRotationGate(psi)` = mqc3's `R(-psi)`):
+    `expand()` rotates the mode into alignment and then applies a plain
+    x-basis effect::
 
-        Measurement(theta) = PhaseRotationGate(pi/2 - theta) . QSpider(1, 0, 0)
+        MeasurementGate(theta) = PhaseRotationGate(pi/2 - theta) . QSpider(1, 0, 0)
 
-    Checked against the theta=0 case (measuring p-hat directly):
-    `phi = -pi/2` correctly rotates x-hat onto p-hat.
-
-    Note: `conjugate()` returns a bare `Diagram` (a 0-in-1-out state), not
+    See :doc:`../user_guide/gates` for the derivation of the `pi/2 - theta`
+    angle. `conjugate()` returns a bare `Diagram` (a 0-in-1-out state), not
     another `MeasurementGate` -- an effect's adjoint is a state, a
     different shape, so it cannot be wrapped back into this same compact
     gate class the way every other gate in this module does.
@@ -2331,14 +2123,10 @@ class MeasurementGate(CompactDiagram):
     def conjugate(self) -> Diagram:
         """Conjugate of the measurement effect.
 
-        Built directly rather than delegating to `self.expand().conjugate()`:
-        `QSpider.conjugate()` does not currently flip the input/output
-        arity for non-square (state/effect) leaves, so composing the
-        reversed, per-piece-conjugated pieces (as `CompositionDiagram`'s
-        own `conjugate()` does generically) fails arity validation. The
-        true adjoint of a 1-in-0-out effect is a 0-in-1-out state, so it
-        is constructed here explicitly: a zero-phase state followed by the
-        inverse rotation.
+        Built directly (a zero-phase state followed by the inverse
+        rotation) rather than delegating to `self.expand().conjugate()`,
+        which fails arity validation for this non-square leaf -- see
+        :doc:`../user_guide/gates` for why.
 
         Returns
         -------
@@ -2389,20 +2177,11 @@ class MeasurementGate(CompactDiagram):
     def _rotation_diagram(self, phi: float | Expr) -> Diagram:
         """Build the rotation diagram for angle `phi`.
 
-        Routes around `PhaseRotationGate`'s restriction on odd
-        multiples of pi/2: it refuses angles that are an odd multiple of
-        pi/2 -- exactly the angles this gate needs for a plain x or p
-        measurement (`theta` an integer multiple of pi). Folding `phi`
-        into `(-pi, pi]` and substituting the equivalent `Fourier`/
-        `FourierInv` proper diagram at the two problem angles sidesteps
-        this without touching `PhaseRotationGate` itself. Derived (and
-        numerically checked) from `Fourier`'s own docstring definition:
-        `Fourier` implements the standard rotation matrix R(pi/2)
-        (x' = -p, p' = x), which is cvzx's `PhaseRotationGate(-pi/2)`
-        under the sign convention noted on `ArbitraryGate`; `FourierInv`
-        is its adjoint, R(-pi/2), i.e. `PhaseRotationGate(pi/2)`.
-        Only applies in numeric mode -- parametric angles skip
-        `PhaseRotationGate`'s own validation the same way already.
+        Routes around `PhaseRotationGate`'s refusal of odd multiples of
+        pi/2 -- exactly the angles a plain x or p measurement needs -- by
+        folding `phi` into `(-pi, pi]` and substituting `Fourier`/
+        `FourierInv` at the two problem angles instead. Only applies in
+        numeric mode; see :doc:`../user_guide/gates` for the derivation.
 
         Returns
         -------

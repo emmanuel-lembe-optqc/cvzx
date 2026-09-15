@@ -22,13 +22,12 @@ from cvzx.ir.gates import BeamsplitterGate, ControlledSumGate
 def simplify_reduced_value(value: Expr | complex) -> Expr | complex:
     """Run a chain-reduction-combined algebraic value through `sympy.simplify`.
 
-    `ChainReductionRule` (`nx.rules`/`rx.rules`) combines a chain's phases
-    and gate parameters with plain `+`/`*`, which never algebraically
-    reduces the result -- e.g. `sin(x)**2 + cos(x)**2` stays exactly that,
-    rather than collapsing to `1`, and two chained gates whose parameters
-    are exact negatives of each other (`x` then `-x`) may not compare
-    equal to the identity's `0` by structural equality alone. Running the
-    combined value through `simplify()` first catches both.
+    `ChainReductionRule` combines a chain's phases/parameters with plain
+    `+`/`*`, which never algebraically reduces the result (e.g.
+    `sin(x)**2 + cos(x)**2` stays that way rather than collapsing to `1`);
+    running it through `simplify()` first catches that. See
+    :doc:`../dev_guide/rewrite_engine` for why a simplified `Expr` is
+    deliberately never coerced back to a plain number.
 
     Parameters
     ----------
@@ -38,18 +37,8 @@ def simplify_reduced_value(value: Expr | complex) -> Expr | complex:
     Returns
     -------
     Expr | complex
-        The simplified value. A plain Python number is returned unchanged
-        (nothing to simplify -- and nothing to lose precision on: this
-        function only ever calls `simplify()` on a value that was already
-        a sympy `Expr`, since a value built purely from plain Python
-        numbers never becomes one via `+`/`*` alone). Deliberately does
-        *not* coerce a simplified `Expr` back to a plain Python number
-        even when it collapses to one with no free symbols left (e.g. a
-        chain of exact multiples of `pi` staying an exact `Expr` rather
-        than an approximate `float` -- `Expr.is_number` is true for any
-        such exact irrational constant, not just literal numbers, so
-        doing that coercion would silently lose exactness for phases like
-        `pi/6 + pi/5 + pi/7`).
+        The simplified value, or `value` unchanged if it wasn't a sympy
+        `Expr` to begin with.
     """
     if not isinstance(value, Expr):
         return value
@@ -96,30 +85,9 @@ def is_chase_passthrough(attrs: dict) -> bool:
     A passthrough is an identity/wiring diagram (see
     `is_wiring_node_from_attrs`), a `Swap`, or a same-arity (square)
     `VoidDiagram` -- all three are pure wire-routing with no bearing on
-    whatever pattern is being chased through them.
-
-    A square `VoidDiagram` belongs here alongside a bare identity spider
-    and a `Swap` because it is one of them, mid-chase: every rule that
-    installs one in place of a chain member it has already decided is a
-    pure pass-through does so via a bare type relabel, at the *same* node,
-    with the *same* arity. Nothing about what the node physically does changes;
-    only its label does.
-    Treating it as opaque instead -- which is what happened before this
-    was added -- makes a voided `Swap` a permanent one-way wall: since
-    `_simplify_to_fixed_point` re-runs every rule to a fixed point,
-    a chain that shares a `Swap` with another, already-reduced chain
-    would otherwise never become reachable on any later pass, not just
-    the current one, even though the wire it needs to cross is exactly
-    as pass-through as it always was.
-
-    A `VoidDiagram`'s arity must still be checked here rather than
-    assumed: this rule's own `identity_chain` mechanism (see
-    `_is_chase_passthrough`'s callers) only ever installs one at 1-in/
-    1-out (a voided identity spider) or 2-in/2-out (a voided `Swap`), so
-    in practice this only ever matches those two shapes -- but a
-    `VoidDiagram` installed by some other mechanism entirely (a vanished
-    state/effect, arity (0, 1) or (1, 0)) is a genuine dead end, not a
-    wire to chase through, and must stay opaque.
+    whatever pattern is being chased through them. See
+    :doc:`../dev_guide/rewrite_engine` for why a square `VoidDiagram`
+    must count as transparent here too, not just a bare identity/`Swap`.
 
     Parameters
     ----------
@@ -170,27 +138,14 @@ def expand_two_mode_gates(diagram: Diagram) -> Diagram:
     """Recursively expand BeamsplitterGate/ControlledSumGate, but not CZ.
 
     Like `cvzx.ir.gates.expand_all`, but deliberately excludes
-    `ControlledZGate`: CZ's own decomposition sandwiches a Fourier gate
-    between its copy spider and the target mode, so `CopyRule` can't reach
-    across it -- expanding CZ wouldn't unlock any new reduction, unlike
-    BS/CSUM, whose expansions expose a bare copy spider `CopyRule` can act
-    on directly.
-
-    This function is only ever called under `assume_infinite_squeezing=True`
-    (see `optimize()`), which is also what licenses a second simplification
-    applied here: a biased `ControlledSumGate(gain=g != 1)` is normalized to
-    `gain=1` before expanding, rather than expanded via its own squeeze-CSUM-
-    unsqueeze decomposition. This is the Squeezing rule: under the infinite-
-    squeezing assumption the modes involved are idealized eigenstates, for
-    which CSUM(g) and CSUM(1) act identically, so the bias can simply be
-    dropped instead of being carried through as an explicit pair of
-    `SqueezingGate` instances. Doing it this way also sidesteps a real limitation of
-    `.expand()`'s biased decomposition: the squeeze gates it introduces land
-    in a different container than whatever state feeds the CSUM, so
-    `TerminalAbsorptionRule`/`CopyRule` (which only match within a single
-    container) can't reach through them, and a biased CSUM fed by a
-    reducible ancilla would otherwise fail to reduce at all. `CZ` is left
-    completely unexpanded (and hence unnormalized), per the docstring above.
+    `ControlledZGate` (its decomposition sandwiches a Fourier gate that
+    would block `CopyRule` anyway). Only called under
+    `assume_infinite_squeezing=True` (see `optimize()`), which also
+    licenses normalizing a biased `ControlledSumGate(gain != 1)` to
+    `gain=1` before expanding rather than expanding its own biased
+    decomposition -- see :doc:`../dev_guide/rewrite_engine` for why both
+    choices are needed for `CopyRule`/`TerminalAbsorptionRule` to reach
+    through the result.
 
     Parameters
     ----------
@@ -229,19 +184,13 @@ def flatten_expanded_composition(
 ) -> CompositionDiagram:
     """Splice a child that expanded into its own CompositionDiagram into the parent's flat list.
 
-    `to_graph()`'s composition-edge resolution (`find_node_by_external_output`/
-    `find_node_by_external_input` in `cvzx.backends.nx.graph`) recurses into a
-    composition's TENSOR/CONTRACTED children -- both store an
-    `external_*_mapping` -- but never into a CompositionDiagram nested
-    directly inside another CompositionDiagram, since composition containers
-    don't store one (a flat composition's own boundary edges are resolved
-    from `sub_diagram_ids`/`connectivity` directly, see `_add_composition_node`).
-    Left un-flattened, any wire crossing such a nested boundary is silently
-    dropped -- exactly what `BeamsplitterGate.expand()`'s balanced case
-    produces (a `CompositionDiagram` of two expanded `ControlledSumGate` instances and
-    a `TensorDiagram` of squeezing gates), so expanding a two-mode gate that
-    sits alongside other elements in a composition must flatten the result
-    back into one flat list rather than nesting it.
+    `to_graph()`'s composition-edge resolution never recurses into a
+    `CompositionDiagram` nested directly inside another one, so a wire
+    crossing such a nested boundary would otherwise be silently dropped --
+    exactly what `BeamsplitterGate.expand()`'s balanced case produces. See
+    :doc:`../dev_guide/rewrite_engine` for why this only affects a directly
+    nested `CompositionDiagram` (not the TENSOR/CONTRACTED case, which
+    `to_graph()` already handles).
 
     Parameters
     ----------
