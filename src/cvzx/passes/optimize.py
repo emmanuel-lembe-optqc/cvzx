@@ -104,29 +104,54 @@ def _build_rules(rules_mod: ModuleType, *, assume_infinite_squeezing: bool) -> "
     return rules
 
 
-def _simplify_to_fixed_point(graph: "NxCVZXGraph | RxCVZXGraph", rules: "list[NxRewriteRule | RxRewriteRule]") -> bool:
-    """Apply `rules` to `graph` in-place, repeatedly, until none of them match.
+def _simplify_to_fixed_point(
+    graph: "NxCVZXGraph | RxCVZXGraph",
+    rules: "list[NxRewriteRule | RxRewriteRule]",
+    graph_mod: ModuleType,
+) -> "tuple[NxCVZXGraph | RxCVZXGraph, bool]":
+    """Apply `rules` to `graph`, repeatedly, until none of them match.
 
     Parameters
     ----------
     graph : CVZXGraph
-        The graph to simplify in-place.
+        The graph to simplify.
     rules : list[NxRewriteRule | RxRewriteRule]
         The rules to try each pass, in order.
+    graph_mod : ModuleType
+        The backend's graph module (matching `graph`'s own backend), used to
+        round-trip through `to_diagram`/`to_graph` after each rule
+        application -- see Notes.
 
     Returns
     -------
-    bool
-        True if a genuine fixed point was reached AND at least one rule
-        matched (so `graph` was modified) along the way. False both for
+    tuple[NxCVZXGraph | RxCVZXGraph, bool]
+        The simplified graph (a new object each time a rule changes
+        anything -- see Notes -- so callers must use this return value
+        rather than assuming `graph` was mutated in place), and True if a
+        genuine fixed point was reached AND at least one rule matched (so
+        the graph was modified) along the way. The bool is False both for
         "nothing matched at all" and for "hit `_MAX_SIMPLIFY_PASSES`
         without reaching a fixed point" -- `optimize()`'s caller treats
         both the same way (stop, don't commit this round), since a
-        not-fully-simplified `graph` isn't safe to build the next round's
+        not-fully-simplified graph isn't safe to build the next round's
         `normalize_diagram`/`expand_two_mode_gates` on top of.
 
     Notes
     -----
+    After each individual rule application, the graph is round-tripped
+    through `graph_mod.to_diagram()`/`to_graph()` before the next rule is
+    tried. This mirrors how the rules are meant to be applied one at a time
+    by hand (see the "Optimizing a diagram" user guide walkthrough) and is
+    not merely cosmetic: some rules (e.g. `FusionRule`'s `special_case`
+    handling of a `CopyRule`-produced fan-out) leave bookkeeping on
+    unrelated, not-yet-simplified nodes that a subsequent rule's `match()`
+    can silently misread if the graph is only ever mutated continuously in
+    place -- reconstructing from the diagram tree in between normalizes
+    that bookkeeping the same way a fresh `to_graph()` call always does.
+    Without this, `optimize()` can converge to a different (still correct
+    in isolation, but not maximally reduced) fixed point than applying the
+    same rules by hand would.
+
     `graph`'s registry is rebuilt from scratch only right after a rule
     actually applies a change to `graph` -- never merely because a pass
     moves on to the next rule. A rule whose `match()` returns nothing leaves
@@ -157,7 +182,7 @@ def _simplify_to_fixed_point(graph: "NxCVZXGraph | RxCVZXGraph", rules: "list[Nx
                 "point -- discarding this round's (incomplete) simplification",
                 _MAX_SIMPLIFY_PASSES,
             )
-            return False
+            return graph, False
         pass_changed = False
         for rule in rules:
             # `rule` and `graph` are always resolved from the same backend
@@ -168,9 +193,11 @@ def _simplify_to_fixed_point(graph: "NxCVZXGraph | RxCVZXGraph", rules: "list[Nx
                 rule.apply_rule(graph)  # type: ignore[arg-type]
                 pass_changed = True
                 graph.rebuild_registry()
+                graph = graph_mod.to_graph(graph_mod.to_diagram(graph))
+                graph.rebuild_registry()
         if not pass_changed:
             logger.debug("_simplify_to_fixed_point: reached fixed point after %d pass(es)", n_passes)
-            return changed
+            return graph, changed
         changed = True
 
 
@@ -248,7 +275,8 @@ def optimize(
         candidate = expand_two_mode_gates(normalized) if assume_infinite_squeezing else normalized
 
         candidate_graph = graph_mod.to_graph(candidate)
-        if not _simplify_to_fixed_point(candidate_graph, rules):
+        candidate_graph, simplified = _simplify_to_fixed_point(candidate_graph, rules, graph_mod)
+        if not simplified:
             # Nothing matched this round -- expanding (if we did) didn't
             # unlock anything, so keep the state from before this round.
             logger.debug("optimize: converged after %d round(s)", round_index)

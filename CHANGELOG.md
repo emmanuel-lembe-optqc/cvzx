@@ -374,3 +374,32 @@ development on `main` to date, grouped by area rather than by commit.
   some time -- both raised `AttributeError`/`TypeError` if actually run;
   fixed to use the current `match(cvzx_graph)` signature and
   `graph.registry` directly.
+- `Diagram` ids could collide across a `to_diagram()`/`to_graph()`
+  round-trip: `reconstruct_proper_node` (`backends/nx/graph.py`,
+  `backends/rx/graph.py`) preserves a node's original graph id for anything
+  in `registry.measurement_nodes` -- which, despite the name, is any
+  `(1, 0)`-arity node, not just literal measurements -- by force-setting
+  `.id` directly, without ever advancing the shared `Diagram` id counter
+  past that value. The counter could later independently reach the same
+  integer and hand it to an unrelated object, so two different `Diagram`s
+  ended up with the same `.id`; since `to_graph()` keys graph nodes by
+  `diagram.id`, the two silently merged into one malformed graph node.
+  Fixed by replacing the bare counter with a `Diagram._reserve_id()`
+  classmethod that every force-set call site (including a new upfront
+  reservation in both backends' `to_diagram()`, covering every node the
+  graph could hand out regardless of visit order) now calls.
+- `optimize()` could converge to a different, less-reduced fixed point than
+  applying the same rewrite rules by hand: `_simplify_to_fixed_point`
+  mutated the graph continuously across a whole pass, while the
+  hand-driven workflow (and the example notebooks) round-trips through
+  `to_diagram()`/`to_graph()` between every individual rule application --
+  some rules (e.g. `FusionRule`'s handling of a `CopyRule`-produced
+  fan-out) leave bookkeeping that a later rule's `match()` can misread
+  without that round-trip. Concretely, the measurement-induced-squeezer
+  example (`examples/example_1_measurement_induced_squeezer.ipynb`)
+  reduced to `SqueezingGate(sin(theta)**2/cos(theta))` via `optimize()` but
+  correctly to `SqueezingGate(sin(theta))` (matching the paper) when the
+  same rules were applied one at a time. `_simplify_to_fixed_point` now
+  round-trips after each rule application, matching the manual workflow;
+  this alone would have surfaced the `Diagram`-id-collision bug above as
+  outright crashes, which is how that bug was actually found and fixed.

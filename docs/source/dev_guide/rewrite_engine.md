@@ -92,3 +92,25 @@ every ancestor container's port count. `cvzx.backends.nx.rules.remove_void_and_i
 is the only thing that ever removes these, and `optimize()` runs it exactly once, at the very
 end of the pipeline (see {doc}`architecture`) — a `Diagram` produced mid-pipeline (e.g. the
 `.diagram` field on `OptimizeResult`, or any partial round) may still contain them.
+
+## Keeping `Diagram.id` unique across reconstruction
+
+`Diagram.__init__` (`ir/base.py`) assigns every freshly-constructed object the next value of a
+single, class-level `Diagram._next_id` counter, guaranteeing every `Diagram` in a process gets
+a distinct id — *except* that `reconstruct_proper_node` (`backends/nx/graph.py`,
+`backends/rx/graph.py`) deliberately overrides this for a node in `registry.measurement_nodes`,
+stamping `.id` to that node's original graph id instead (needed so a measurement leaf's id
+survives a `to_diagram()`/`to_graph()` round-trip, since other code refers back to it by that
+exact value — e.g. `param_measurement_map`). Despite the name, `registry.measurement_nodes` is
+purely shape-based (any `(1, 0)`-arity node — see `_is_measurement`), so this override fires
+far more often than the name suggests.
+
+Because that override never advances `_next_id`, without care it can silently let `_next_id`
+independently reach a value already claimed this way, handing that same integer to a second,
+unrelated object — `to_graph()` then keys graph nodes by `diagram.id`, so the two colliding
+objects merge into a single malformed graph node (a `nx.Graph.add_node`/`rx` node-weight
+update on an id that already exists updates that node in place rather than creating a second
+one). Every call site that force-sets `.id` from a specific value **must** call
+`Diagram._reserve_id(that_value)` right after, and `to_diagram()` additionally reserves past
+the whole graph's max node id once up front, before any reconstruction begins — covering
+override order regardless of which node the recursive walk visits first.

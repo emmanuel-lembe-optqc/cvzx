@@ -98,6 +98,17 @@ actually matching is discarded rather than committed, and `max_rounds` is a safe
 against a diagram that never reaches a fixed point (it should not be hit in practice —
 raise an issue if you find a circuit that does; `optimize()` logs a warning if it is).
 
+Within a round, `_simplify_to_fixed_point` doesn't just mutate the graph continuously as it
+tries each rule in turn — after every individual rule application, it round-trips the graph
+through `to_diagram()`/`to_graph()` before trying the next rule. This mirrors applying the
+rules one at a time by hand (build a diagram, convert to a graph, apply one rule, convert
+back) and isn't just cosmetic: some rules leave bookkeeping on other, not-yet-simplified
+nodes that a later rule's `match()` can misread if the graph is only ever mutated in place
+between matches — reconstructing from the diagram tree normalizes that bookkeeping the same
+way a fresh `to_graph()` call always does. Skipping this round-trip (mutating continuously
+across a whole pass instead) can converge to a different, less-reduced fixed point than
+applying the same rules by hand would.
+
 ## Choosing a backend
 
 `optimize()` — and every other entry point that builds a `CVZXGraph` (`complete_boundaries`,
@@ -147,19 +158,23 @@ or running in an environment where `rustworkx` genuinely isn't installed.
 
 ## Performance
 
-`optimize()`'s round loop does `O(n)` work per round in diagram size, not
-`O(rounds × rules × n)`: `_simplify_to_fixed_point` only rebuilds its internal `GateRegister`
-(the O(1)-lookup index `match()` uses so it doesn't have to scan the whole graph for, say,
-every rotation gate) right after a rule actually applies a change — never merely because a
-pass moves on to the next rule. A rule whose `match()` finds nothing leaves the graph, and
-therefore every category the registry indexes, untouched, so rebuilding in that case would be
-pure wasted work; as a round approaches the fixed point and fewer rules still match, this
-saves more and more rebuilds. `to_graph`/`to_diagram` also no longer carry a defensive
-`deepcopy` of the diagram they convert — nothing in that conversion walk mutates its input
-(pinned down by `tests/backends/nx/graph/test_nx_graph.py::TestToGraphDoesNotMutateInput`), so the copy
-was pure overhead, on the order of a third of `to_graph`'s own cost on a realistic circuit.
-Neither change affects what `optimize()` computes, only how much work it takes to get there —
-see {doc}`../dev_guide/rewrite_engine` for the registry-sync rationale in more detail.
+`_simplify_to_fixed_point` only rebuilds its internal `GateRegister` (the O(1)-lookup index
+`match()` uses so it doesn't have to scan the whole graph for, say, every rotation gate)
+right after a rule actually applies a change — never merely because a pass moves on to the
+next rule. A rule whose `match()` finds nothing leaves the graph, and therefore every
+category the registry indexes, untouched, so rebuilding in that case would be pure wasted
+work. `to_graph`/`to_diagram` also no longer carry a defensive `deepcopy` of the diagram they
+convert — nothing in that conversion walk mutates its input (pinned down by
+`tests/backends/nx/graph/test_nx_graph.py::TestToGraphDoesNotMutateInput`), so the copy was
+pure overhead, on the order of a third of `to_graph`'s own cost on a realistic circuit.
+
+Be aware, though, that the per-rule `to_diagram()`/`to_graph()` round-trip described above
+(needed for correctness — see "Convergence") means a full graph reconstruction now happens
+once per *successful rule application*, not once per round: `_simplify_to_fixed_point`'s cost
+is closer to `O(matches × n)` than the `O(n)`-per-round the registry-rebuild optimization
+alone would suggest. This is a correctness/performance trade-off, not a regression to work
+around — see {doc}`../dev_guide/rewrite_engine` for the registry-sync rationale in more
+detail.
 
 ## Debugging with logs
 

@@ -804,6 +804,15 @@ def to_diagram(cvzx_graph: CVZXGraph) -> Diagram:
         msg = "No root node found in the graph."
         raise ValueError(msg)
 
+    # `reconstruct_proper_node` preserves some nodes' original graph ids
+    # (see its own docstring/comment) rather than drawing a fresh one from
+    # `Diagram._next_id` -- reserving past every id this graph could hand
+    # out, before reconstructing anything, guarantees none of those fresh
+    # ids can ever collide with a preserved one, regardless of which gets
+    # visited first during the recursive walk below.
+    if graph.nodes:
+        Diagram._reserve_id(max(graph.nodes))  # ruff: ignore[private-member-access]
+
     # Reconstruct the diagram from the root
     return reconstruct_from_node(graph, root, cvzx_graph.registry)
 
@@ -1769,6 +1778,7 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
         )
         if node_id in reg.measurement_nodes:
             result.id = node_id
+            Diagram._reserve_id(node_id)  # ruff: ignore[private-member-access]
         return result
     if node_type == "PSpider":
         result = PSpider(  # type: ignore[assignment]
@@ -1782,6 +1792,7 @@ def reconstruct_proper_node(G: nx.DiGraph, node_id: int, reg: GateRegister) -> D
         )
         if node_id in reg.measurement_nodes:
             result.id = node_id
+            Diagram._reserve_id(node_id)  # ruff: ignore[private-member-access]
         return result
     if node_type == "Swap":
         return Swap(void_input_port=attrs.get("void_input_port"))

@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
-from itertools import count
 from typing import Any, ClassVar
 
 from sympy import Expr, Poly, S, Symbol, symbols, sympify
@@ -291,10 +290,24 @@ class Diagram(ABC):
         - Contraction (partial trace over connected modes)
     """
 
-    id_counter = count(1)
+    _next_id: ClassVar[int] = 1
 
     def __init__(self) -> None:
-        self.id = next(Diagram.id_counter)
+        self.id = Diagram._next_id
+        Diagram._next_id += 1
+
+    @classmethod
+    def _reserve_id(cls, node_id: int) -> None:
+        """Ensure future auto-assigned ids stay past `node_id`.
+
+        Called wherever a `Diagram`'s `.id` is force-set to a value not
+        drawn from `_next_id` (e.g. graph reconstruction preserving a
+        specific node's original id) -- without this, `_next_id` can
+        later independently reach that same value and hand it to an
+        unrelated object, producing two different `Diagram` instances
+        with the same `.id`.
+        """
+        cls._next_id = max(cls._next_id, node_id + 1)
 
     @abstractmethod
     def tensor(self, other: "Diagram") -> "Diagram":
