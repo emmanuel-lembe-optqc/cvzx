@@ -1,11 +1,7 @@
 """CV ZX calculus rewrite rules and applications.
 
-This module implements the 10 basic rewrite rules from [1] Sec. IV.A,
+This module implements the 10 basic rewrite rules from :cite:`nagayoshi2024zx` Sec. IV.A,
 and the derived rules from Sec. IV.B; using a graph structure.
-
-References
-----------
-[1] Nagayoshi et al., CV ZX calculus, 2024
 """
 
 import logging
@@ -3917,7 +3913,7 @@ class TerminalAbsorptionRule(RewriteRule):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (239a)-(239e).
+    :cite:`nagayoshi2024zx`, Eq. (239a)-(239e).
     """
 
     def __init__(self, assume_infinite_squeezing: bool = False) -> None:  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
@@ -4184,7 +4180,7 @@ class TerminalAbsorptionRule(RewriteRule):
 
         References
         ----------
-        [1] Nagayoshi et al., CV ZX calculus, 2024, Eq. (82)-(83).
+        :cite:`nagayoshi2024zx`, Eq. (82)-(83).
         """
         factor = tau if is_q_spider else 1 / tau
         return ZxPoly({degree: coeff * factor**degree for degree, coeff in phase.coeffs.items()})

@@ -93,7 +93,7 @@ an unresolved conflict makes any measurement-existence finding downstream of it 
 ### `ContractedDiagram`: partial trace over two diagrams
 
 `ContractedDiagram` is the output of applying the contraction rule to a tensor of two diagrams
-D1 and D2, from [Nagayoshi et al., CV ZX calculus, Definition 11, Eq. (51)]:
+D1 and D2, from {cite}`nagayoshi2024zx`, Definition 11, Eq. (51):
 
 ```text
 ∫∫ ds̄ dȳ ⟨s_i| D1 |s_j⟩ ⊗ q⟨s_j| D2 |s_i⟩

@@ -113,7 +113,7 @@ source of further worked examples for that specific rule's match fields.
   downstream):
   - *Rotation* (QSpider terminal, input phase degree $\le 1$): a terminal with phase
     $c + kx$ folds $R(\theta)$ into $c - \tfrac{\tan\theta}{2}x^2 + \tfrac{k}{\cos\theta}x$
-    (Nagayoshi et al., CV ZX calculus, 2024, Eq. (239a)-(239e)); doesn't match at odd
+    ({cite}`nagayoshi2024zx`, Eq. (239a)-(239e)); doesn't match at odd
     multiples of $\pi/2$ (`Fourier`/`FourierInv` are never absorbed this way; `Fourier2`, a
     fixed rotation by $\pi$, is fine since $\pi$ isn't an odd multiple of $\pi/2$). This is
     the only sub-case exact for any physical state.

@@ -1,4 +1,4 @@
-"""CV-ZX representation of quantum gates from [1] Nagayoshi et al. (2024), Sec. II.C.
+"""CV-ZX representation of quantum gates from :cite:`nagayoshi2024zx`, Sec. II.C.
 
 This module implements the standard CV quantum gates as compact diagrams
 built from proper diagrams (spiders, Fourier, Swap). Each gate is a subclass
@@ -7,7 +7,7 @@ equivalent CompositionDiagram or TensorDiagram of basic CV ZX elements.
 
 References
 ----------
-[1] Nagayoshi et al., CV ZX calculus, Sec. II.C, Table I
+:cite:`nagayoshi2024zx`, Sec. II.C, Table I
 """
 
 from dataclasses import dataclass, field
@@ -319,7 +319,7 @@ class DisplacementGate(CompactDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.1, Eq. (57)
+    :cite:`nagayoshi2024zx`, Sec. II.C.1, Eq. (57)
     """
 
     alpha: float | int | complex | Expr
@@ -512,7 +512,7 @@ class PhaseRotationGate(CompactDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.2, Eq. (58)
+    :cite:`nagayoshi2024zx`, Sec. II.C.2, Eq. (58)
     """
 
     theta: float | int | complex | Expr
@@ -668,7 +668,7 @@ class SqueezingGate(CompactDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.3, Eq. (59)
+    :cite:`nagayoshi2024zx`, Sec. II.C.3, Eq. (59)
     """
 
     tau: float | int | complex | Expr
@@ -802,7 +802,7 @@ class ControlledSumGate(CompactDiagram):
     Represents the operation exp(-i g q̂_c p̂_t) where c is the control mode
     and t is the target mode. For g=1, this is the unbiased CSUM gate
     (CV analogue of CNOT). Decomposes into q-spider and p-spider
-    with a contraction as shown in [1] Eq. (61)-(62).
+    with a contraction as shown in :cite:`nagayoshi2024zx` Eq. (61)-(62).
 
     Attributes
     ----------
@@ -832,8 +832,7 @@ class ControlledSumGate(CompactDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.4, Eq. (61)-(62)
-    [4] Yoshikawa et al., QRL configuration, Sec. IV.C.3
+    :cite:`nagayoshi2024zx`, Sec. II.C.4, Eq. (61)-(62)
     """
 
     gain: float | int | complex | Expr = 1.0
@@ -1010,11 +1009,6 @@ class ControlledZGate(CompactDiagram):
         Gain parameter g. Default is 1 (unbiased CZ).
     parametric : bool
         If True, treat gain as symbolic parameter. Default False.
-
-    Attributes
-    ----------
-    gain : float | int | Expr
-        Gain parameter (symbolic or numeric).
     label : str
         String label for the gate.
     _num_inputs : int
@@ -1028,7 +1022,7 @@ class ControlledZGate(CompactDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.5, Eq. (63)-(64)
+    :cite:`nagayoshi2024zx`, Sec. II.C.5, Eq. (63)-(64)
     """
 
     gain: float | int | complex | Expr = 1.0
@@ -1162,7 +1156,7 @@ class BeamsplitterGate(CompactDiagram):
     r"""Beamsplitter gate BS(θ).
 
     Represents the operation exp(-iθ (q̂₁ p̂₂ - p̂₁ q̂₂)). Decomposes into
-    squeezing gates and CSUM gates as shown in [1] Eq. (66).
+    squeezing gates and CSUM gates as shown in :cite:`nagayoshi2024zx` Eq. (66).
 
     Attributes
     ----------
@@ -1170,11 +1164,6 @@ class BeamsplitterGate(CompactDiagram):
         Beamsplitter angle. θ = π/4 gives a 50:50 beamsplitter.
     parametric : bool
         If True, treat theta as symbolic parameter. Default False.
-
-    Attributes
-    ----------
-    theta : float | int | Expr
-        Beamsplitter angle (symbolic or numeric).
     label : str
         String label for the gate.
     _num_inputs : int
@@ -1188,7 +1177,7 @@ class BeamsplitterGate(CompactDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.6, Eq. (66)-(67)
+    :cite:`nagayoshi2024zx`, Sec. II.C.6, Eq. (66)-(67)
     """
 
     theta: float | int | complex | Expr
@@ -1349,7 +1338,7 @@ class CubicPhaseGate(CompactDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. II.C.7, Eq. (68)
+    :cite:`nagayoshi2024zx`, Sec. II.C.7, Eq. (68)
     """
 
     gamma: float | int | Expr

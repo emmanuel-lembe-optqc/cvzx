@@ -1,6 +1,6 @@
 # Theory: the CV ZX calculus
 
-`cvzx` implements the continuous-variable ZX calculus proposed in [1]. This page summarizes
+`cvzx` implements the continuous-variable ZX calculus proposed in {cite}`nagayoshi2024zx`. This page summarizes
 the parts of that calculus the library actually implements, and gives an explicit
 translation table between the paper's notation and `cvzx`'s Python API. It assumes you have
 skimmed the paper (or at least its Table I, Table II, and Section IV.A) — this is a map
@@ -109,6 +109,4 @@ version of the compiler, we focused on rules which were valuable in optimizing d
 - **GKP diagrams, non-unitary/complex-phase spiders, mixed states** (Sections VI.B) are out
   of scope for this codebase.
 
-## Bibliography
-
-[1] Hironari Nagayoshi, Warit Asavanant, Ryuhoh Ide, Kosuke Fukui, Atsushi Sakaguchi, Jun-ichi Yoshikawa, Nicolas C. Menicucci, and  Akira Furusawa, "ZX Graphical Calculus for Continuous-Variable Quantum Processes" Physical Review Research, vol. 7, no. 3, Aug. 2025, p. 033141. APS Physics, [doi:10.1103/PhysRevResearch.7.033141](https://doi.org/10.1103/PhysRevResearch.7.033141).
+See {doc}`references` for the full citation.

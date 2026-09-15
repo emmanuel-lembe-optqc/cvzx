@@ -344,7 +344,7 @@ class ProperDiagram(Diagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    :cite:`nagayoshi2024zx`, Sec. III.B, Table II
     """
 
     _num_inputs: int
@@ -487,7 +487,7 @@ class ContractedDiagram(Diagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Definition 11, Eq. (51)
+    :cite:`nagayoshi2024zx`, Definition 11, Eq. (51)
     """
 
     diagrams: list[Diagram]
@@ -754,7 +754,7 @@ class TensorDiagram(Diagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Definition 9
+    :cite:`nagayoshi2024zx`, Definition 9
     """
 
     diagrams: Sequence[Diagram]
@@ -797,7 +797,7 @@ class TensorDiagram(Diagram):
 
         References
         ----------
-        [1] Nagayoshi et al., CV ZX calculus, Definition 11
+        :cite:`nagayoshi2024zx`, Definition 11
         """
         if not diagram_pairs:
             msg = "diagram_pairs cannot be empty"
@@ -1043,7 +1043,7 @@ class CompositionDiagram(Diagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Definition 10
+    :cite:`nagayoshi2024zx`, Definition 10
     """
 
     diagrams: Sequence[Diagram]
@@ -1440,7 +1440,7 @@ class QSpider(ProperDiagram, Parametrized):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    :cite:`nagayoshi2024zx`, Sec. III.B, Table II
     """
 
     phase: ZxPoly
@@ -1527,7 +1527,7 @@ class PSpider(ProperDiagram, Parametrized):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    :cite:`nagayoshi2024zx`, Sec. III.B, Table II
     """
 
     phase: ZxPoly
@@ -1614,7 +1614,7 @@ class Swap(ProperDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    :cite:`nagayoshi2024zx`, Sec. III.B, Table II
     """
 
     _num_inputs: int = field(default=2, init=False)
@@ -1706,7 +1706,7 @@ class Fourier(ProperDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    :cite:`nagayoshi2024zx`, Sec. III.B, Table II
     """
 
     _num_inputs: int = field(default=1, init=False)
@@ -1747,7 +1747,7 @@ class FourierInv(ProperDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    :cite:`nagayoshi2024zx`, Sec. III.B, Table II
     """
 
     _num_inputs: int = field(default=1, init=False)
@@ -1790,7 +1790,7 @@ class Fourier2(ProperDiagram):
 
     References
     ----------
-    [1] Nagayoshi et al., CV ZX calculus, Sec. III.B, Table II
+    :cite:`nagayoshi2024zx`, Sec. III.B, Table II
     """
 
     _num_inputs: int = field(default=1, init=False)
