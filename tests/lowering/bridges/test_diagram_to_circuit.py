@@ -167,14 +167,17 @@ def test_nonzero_phase_state_leaf_raises():
     """Reject a nonzero-phase state leaf rather than silently mistranslating it.
 
     Only the bare idealized zero-phase state leaf is recognized as an
-    `InitialState`; anything else has no documented translation.
+    `InitialState`; anything else has no documented translation. A phase's
+    constant (degree 0) term is dropped at construction -- an unobservable
+    global phase -- so this uses a linear term instead to stay genuinely
+    nonzero.
 
     Raises
     ------
     AssertionError
         If `to_circuit_repr` does not raise `NotImplementedError`.
     """
-    nonzero_state = QSpider(0, 1, ZxPoly({0: 0.3}))
+    nonzero_state = QSpider(0, 1, ZxPoly({1: 0.3}))
     try:
         to_circuit_repr(nonzero_state)
     except NotImplementedError:

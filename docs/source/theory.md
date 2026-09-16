@@ -30,6 +30,11 @@ F^\dagger$), and `Fourier2` ($\hat F^2$).
 | Diagram contraction (Eq. 51) | `ContractedDiagram(first, second, I1, I2, J1, J2)` |
 | Blank spider (zero phase function) | `QSpider(n, m, ZxPoly({}))` — this is the identity wire when $n = m = 1$ |
 
+A degree-0 term in $f(x)$ is a constant $c$ contributing a global factor $e^{ic}$ to every
+matrix element — an unobservable global phase. `QSpider`/`PSpider` therefore always drop
+it at construction: `QSpider(n, m, ZxPoly({0: c, ...}))` normalizes to the same object as
+`QSpider(n, m, ZxPoly({...}))` with the `0: c` entry removed.
+
 The paper draws diagrams right-to-left to match bra-ket notation (Def. 7). `cvzx`'s
 `CompositionDiagram([d1, d2, ...])` instead lists elements in **left-to-right causal
 order** — `d1` first, `d2` second, and so on — matching how you'd read a circuit

@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import rustworkx as rx
-from sympy import Expr, cos, pi, tan
+from sympy import Expr, Poly, cos, pi, tan
 
 from cvzx.backends.rx.graph import (
     CVZXGraph,
@@ -3613,9 +3613,13 @@ class TerminalAbsorptionRule(RewriteRule):
     eigenstate and only run when `assume_infinite_squeezing=True` (the
     default, False, restricts matching to rotation absorption alone).
 
-    Neither the terminal nor the gate may be directly one of a
-    `ContractedDiagram`'s own two halves -- that shape belongs to
-    `PassthroughRule` instead.
+    The terminal itself may never be directly one of a `ContractedDiagram`'s
+    own two halves -- that shape belongs to `PassthroughRule` instead. The
+    *gate* side may be: a fifth sub-case (also gated on
+    `assume_infinite_squeezing`) absorbs a bare spider (`state1`) that is
+    directly a `ContractedDiagram`'s `first_id`/`second_id`, folding the
+    terminal into `state1`'s exact slot in the contraction -- see
+    :doc:`../../user_guide/rewrite_rules` for its own validity conditions.
 
     References
     ----------
@@ -3634,14 +3638,17 @@ class TerminalAbsorptionRule(RewriteRule):
         """
         self.assume_infinite_squeezing = assume_infinite_squeezing
 
-    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:  # ruff: ignore[too-many-locals]
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:  # ruff: ignore[too-many-locals, complex-structure]
         """Find all gate/terminal pairs that can be absorbed.
 
         Uses the same candidate-and-chase scan as `CopyRule.match` (see
         :doc:`../../dev_guide/rewrite_engine`) -- terminal nodes, chased past
-        identities/`Swap` nodes to the real neighboring gate -- and, like
-        `PassthroughRule`, skips a pair outright when either endpoint's
-        immediate parent is a `ContractedDiagram`.
+        identities/`Swap` nodes to the real neighboring gate -- and skips a
+        pair outright when the *terminal's* own immediate parent is a
+        `ContractedDiagram` (that shape belongs to `PassthroughRule`
+        instead). The gate side may legitimately be directly one of a
+        `ContractedDiagram`'s own two halves -- see
+        `_try_absorb_contracted_child`.
 
         Parameters
         ----------
@@ -3651,7 +3658,8 @@ class TerminalAbsorptionRule(RewriteRule):
         Returns
         -------
         list[dict]
-            List of matches, each containing:
+            List of matches. The ordinary (non-contracted-child) case, each
+            containing:
 
             - 'container_id': grouping key for `RewriteRule.apply_rule`
               (the pair's shared immediate parent when they have one and
@@ -3663,6 +3671,9 @@ class TerminalAbsorptionRule(RewriteRule):
             - 'result_type': 'QSpider' or 'PSpider'
             - 'result_num_inputs' / 'result_num_outputs': the terminal's own arity
             - 'result_phase': the folded phase
+
+            The contracted-child case instead has `'kind': 'contracted_child'`
+            plus the keys `_try_absorb_contracted_child` documents.
         """
         graph = cvzx_graph.graph
         registry = cvzx_graph.registry
@@ -3677,27 +3688,60 @@ class TerminalAbsorptionRule(RewriteRule):
                 continue
 
             forward = graph[id_map[terminal_id]].get("num_outputs") == 1
-            gate_id, _, identity_chain = self._chase_identity_chain(graph, id_map, terminal_id, forward=forward)
-            if gate_id is None or gate_id in used_nodes or any(cid in used_nodes for cid in identity_chain):
+            gate_id, gate_port, identity_chain = self._chase_identity_chain(
+                graph, id_map, terminal_id, forward=forward
+            )
+            if (
+                gate_id is None
+                or gate_port is None
+                or gate_id in used_nodes
+                or any(cid in used_nodes for cid in identity_chain)
+            ):
                 continue
             if sum(1 for cid in identity_chain if graph[id_map[cid]].get("type") == "Swap") > 1:
                 continue
 
-            first_id, second_id = (terminal_id, gate_id) if forward else (gate_id, terminal_id)
-
-            first_container_id = graph[id_map[first_id]].get("container_id")
-            second_container_id = graph[id_map[second_id]].get("container_id")
-            if (  # ruff: ignore[too-many-boolean-expressions]
-                first_container_id is not None
-                and first_container_id in id_map
-                and graph[id_map[first_container_id]].get("container_type") == "contracted"
-            ) or (
-                second_container_id is not None
-                and second_container_id in id_map
-                and graph[id_map[second_container_id]].get("container_type") == "contracted"
+            # The terminal itself may never be directly one of a
+            # ContractedDiagram's own two halves -- that shape belongs to
+            # PassthroughRule instead.
+            terminal_container_id = graph[id_map[terminal_id]].get("container_id")
+            if (
+                terminal_container_id is not None
+                and terminal_container_id in id_map
+                and graph[id_map[terminal_container_id]].get("container_type") == "contracted"
             ):
                 continue
 
+            # The gate side, on the other hand, may legitimately be
+            # directly one of a ContractedDiagram's own two halves -- see
+            # `_try_absorb_contracted_child`.
+            gate_container_id = graph[id_map[gate_id]].get("container_id")
+            if (
+                gate_container_id is not None
+                and gate_container_id in id_map
+                and graph[id_map[gate_container_id]].get("container_type") == "contracted"
+            ):
+                match = self._try_absorb_contracted_child(
+                    graph,
+                    id_map,
+                    terminal_id=terminal_id,
+                    state1_id=gate_id,
+                    state1_port=gate_port,
+                    contracted_id=gate_container_id,
+                    forward=forward,
+                )
+                if match is None:
+                    continue
+                match["identity_chain"] = identity_chain
+                match["container_id"] = ("cross", terminal_id, gate_id)
+                sort_first, sort_second = (terminal_id, gate_id) if forward else (gate_id, terminal_id)
+                ordered_matches.append((sort_first, sort_second, match))
+                used_nodes.add(terminal_id)
+                used_nodes.add(gate_id)
+                used_nodes.update(identity_chain)
+                continue
+
+            first_id, second_id = (terminal_id, gate_id) if forward else (gate_id, terminal_id)
             match = self._check_pair(graph, id_map, first_id, second_id)
             if match is None:
                 continue
@@ -3824,6 +3868,183 @@ class TerminalAbsorptionRule(RewriteRule):
             "result_type": terminal_type,
             "result_num_inputs": terminal_attrs["num_inputs"],
             "result_num_outputs": terminal_attrs["num_outputs"],
+            "result_phase": new_phase,
+        }
+
+    def _try_absorb_contracted_child(  # ruff: ignore[complex-structure, too-many-locals, too-many-arguments, too-many-branches, too-many-return-statements, too-many-statements]
+        self,
+        graph: rx.PyDiGraph,
+        id_map: dict[int, int],
+        *,
+        terminal_id: int,
+        state1_id: int,
+        state1_port: int,
+        contracted_id: int,
+        forward: bool,
+    ) -> dict | None:
+        """Check whether `terminal_id` can absorb `state1_id`, a direct child of `contracted_id`.
+
+        `state1_id` (`contracted_id`'s `first_id` or `second_id`) must have
+        *exactly one* of its own raw ports consumed internally by the
+        contraction (`I1`/`J1` if `state1_id` is `first_id`, `I2`/`J2` if
+        `second_id`) -- the terminal has only one port total, so it can
+        only take over a `state1_id` whose entire remaining role reduces to
+        "one port connects to the terminal, one port is used internally,
+        everything else is already dead". Every other raw port of
+        `state1_id` (besides the connecting one and the internal one) must
+        already lead, via a single ordinary composition edge, directly to a
+        `VoidDiagram` -- otherwise folding `state1_id` away would silently
+        drop a live wire.
+
+        Only gated on `assume_infinite_squeezing`, same as squeezing/
+        cross-color-discard/displacement absorption: `state1_id` is treated
+        as an idealized eigenstate, not a generic physical one.
+
+        Parameters
+        ----------
+        graph : rx.PyDiGraph
+            The graph to search.
+        id_map : dict[int, int]
+            Node ID -> `PyDiGraph` index map.
+        terminal_id : int
+            The candidate terminal (a `(1,0)` effect or `(0,1)` state).
+        state1_id : int
+            The node directly occupying `contracted_id`'s `first_id`/
+            `second_id` slot that `terminal_id` was chased to.
+        state1_port : int
+            `state1_id`'s own port the chase's wire lands on -- an input
+            port if `forward`, an output port otherwise (see
+            `_chase_identity_chain`).
+        contracted_id : int
+            `state1_id`'s immediate parent `ContractedDiagram`.
+        forward : bool
+            Whether `terminal_id` is a state (feeding forward into
+            `state1_id`) or an effect (fed by it).
+
+        Returns
+        -------
+        dict | None
+            None if the pattern doesn't match. Otherwise a dict with:
+
+            - 'kind': `"contracted_child"`
+            - 'contracted_id', 'side' (`"first"`/`"second"`),
+              'internal_key' (one of `"I1"`/`"J1"`/`"I2"`/`"J2"`),
+              'old_internal_port': which single entry of `contracted_id`'s
+              own bookkeeping references `state1_id`'s internal port
+            - 'state1_id', 'terminal_id'
+            - 'result_phase': the folded phase
+
+        Raises
+        ------
+        TypeError
+            If `terminal_id`'s own phase is present but not a `ZxPoly`.
+        """
+        if not self.assume_infinite_squeezing:
+            return None
+
+        contracted_attrs = graph[id_map[contracted_id]]
+        side = "first" if contracted_attrs.get("first_id") == state1_id else "second"
+
+        # Which of state1's own raw ports the contraction consumes
+        # internally -- state1 PROVIDING an output (state-like) or
+        # RECEIVING an input (effect-like). Exactly one, total, across
+        # both lists, or the terminal (a single-port node) cannot possibly
+        # take state1's place.
+        output_key = "I1" if side == "first" else "J2"
+        input_key = "J1" if side == "first" else "I2"
+        output_internal = list(contracted_attrs.get(output_key, []))
+        input_internal = list(contracted_attrs.get(input_key, []))
+        if len(output_internal) + len(input_internal) != 1:
+            return None
+
+        if state1_id not in id_map:
+            return None
+        state1_attrs = graph[id_map[state1_id]]
+        if state1_attrs.get("type") not in {"QSpider", "PSpider"}:
+            return None
+
+        if terminal_id not in id_map:
+            return None
+        terminal_attrs = graph[id_map[terminal_id]]
+        terminal_type = terminal_attrs["type"]
+        terminal_phase = terminal_attrs.get("phase")
+        if terminal_phase is not None and not isinstance(terminal_phase, ZxPoly):
+            msg = f"terminal_attrs['phase'] must be a ZxPoly, got {type(terminal_phase)}."
+            raise TypeError(msg)
+
+        if output_internal:
+            # state1's own output feeds the contraction internally -- only
+            # a (0,1) state has a single output to offer that role.
+            if terminal_attrs.get("num_inputs") != 0 or terminal_attrs.get("num_outputs") != 1:
+                return None
+            internal_key, internal_port, internal_is_input = output_key, output_internal[0], False
+        else:
+            # state1's own input is fed by the contraction internally --
+            # only a (1,0) effect has a single input to offer that role.
+            if terminal_attrs.get("num_inputs") != 1 or terminal_attrs.get("num_outputs") != 0:
+                return None
+            internal_key, internal_port, internal_is_input = input_key, input_internal[0], True
+
+        # `state1_port` is an input port of state1 if `forward` (the
+        # terminal feeds forward into it), an output port otherwise (see
+        # `_chase_identity_chain`).
+        connecting_is_input = forward
+        if connecting_is_input == internal_is_input and state1_port == internal_port:
+            # The connecting port and the internal port must be different
+            # ports -- something is structurally inconsistent otherwise.
+            return None
+
+        # Every other raw port of state1 must already be dead: a bare
+        # composition edge landing directly on a VoidDiagram.
+        for port in range(state1_attrs.get("num_inputs", 0)):
+            if internal_is_input and port == internal_port:
+                continue
+            if connecting_is_input and port == state1_port:
+                continue
+            neighbor_id, _ = self._composition_step(graph, id_map, state1_id, port, forward=False)
+            if (
+                neighbor_id is None
+                or neighbor_id not in id_map
+                or graph[id_map[neighbor_id]].get("type") != "VoidDiagram"
+            ):
+                return None
+        for port in range(state1_attrs.get("num_outputs", 0)):
+            if not internal_is_input and port == internal_port:
+                continue
+            if not connecting_is_input and port == state1_port:
+                continue
+            neighbor_id, _ = self._composition_step(graph, id_map, state1_id, port, forward=True)
+            if (
+                neighbor_id is None
+                or neighbor_id not in id_map
+                or graph[id_map[neighbor_id]].get("type") != "VoidDiagram"
+            ):
+                return None
+
+        state1_phase = state1_attrs.get("phase")
+        if state1_phase is None or not isinstance(state1_phase, ZxPoly):
+            return None
+        if state1_attrs.get("type") == terminal_type:
+            if terminal_phase is None:
+                return None
+            new_phase = terminal_phase + state1_phase
+        else:
+            if terminal_phase is None or state1_phase.degree() > 1:
+                return None
+            a = state1_phase.coeffs.get(1, 0)
+            x = ZxPoly._var  # ruff: ignore[private-member-access]
+            shifted_expr = (terminal_phase.as_expr().subs(x, x + a)).expand()
+            shifted_poly = Poly(shifted_expr, x)
+            new_phase = ZxPoly({int(monom[0]): coeff for monom, coeff in shifted_poly.as_dict().items()})
+
+        return {
+            "kind": "contracted_child",
+            "contracted_id": contracted_id,
+            "side": side,
+            "internal_key": internal_key,
+            "old_internal_port": internal_port,
+            "state1_id": state1_id,
+            "terminal_id": terminal_id,
             "result_phase": new_phase,
         }
 
@@ -3965,6 +4186,11 @@ class TerminalAbsorptionRule(RewriteRule):
         The composition hierarchy, connectivity, and every container's
         shape stay exactly as they were.
 
+        Dispatches to `_apply_contracted_child` instead when
+        `match["kind"] == "contracted_child"` -- that case does splice,
+        void, and propagate arity, since the terminal moves into a
+        `ContractedDiagram`'s own slot.
+
         Parameters
         ----------
         cvzx_graph : CVZXGraph
@@ -3976,6 +4202,11 @@ class TerminalAbsorptionRule(RewriteRule):
         """
         graph = cvzx_graph.graph
         id_map = _get_id_map(graph)
+
+        if match.get("kind") == "contracted_child":
+            self._apply_contracted_child(graph, id_map, match)
+            return
+
         terminal_id, gate_id = match["node_ids"]
         if terminal_id not in id_map or gate_id not in id_map:
             return
@@ -3990,6 +4221,73 @@ class TerminalAbsorptionRule(RewriteRule):
 
         self._reset_to_identity(graph, id_map, absorb_id)
 
+        for passthrough_id in match.get("identity_chain", []):
+            if passthrough_id not in id_map or graph[id_map[passthrough_id]]["type"] == "Swap":
+                continue
+            self._reset_to_identity(graph, id_map, passthrough_id)
+
+    def _apply_contracted_child(self, graph: rx.PyDiGraph, id_map: dict[int, int], match: dict) -> None:
+        """Fold `state1_id` into `terminal_id`, moving the terminal into its contraction slot.
+
+        Unlike ordinary absorption, the terminal doesn't keep its own old
+        slot -- it moves into `state1_id`'s exact place in the
+        `ContractedDiagram` (`state1_id` disappears for good), and the
+        terminal's own vacated old slot gets a same-shaped `VoidDiagram`
+        instead, same as any other "this node moved elsewhere" cleanup
+        (see `CopyRule.apply_single`'s cross-container branch).
+
+        Parameters
+        ----------
+        graph : rx.PyDiGraph
+            The graph to modify.
+        id_map : dict[int, int]
+            Node ID -> `PyDiGraph` index map.
+        match : dict
+            Match from `_try_absorb_contracted_child`.
+        """
+        contracted_id = match["contracted_id"]
+        state1_id = match["state1_id"]
+        terminal_id = match["terminal_id"]
+        if contracted_id not in id_map or state1_id not in id_map or terminal_id not in id_map:
+            return
+
+        terminal_attrs = graph[id_map[terminal_id]]
+        old_terminal_parent = terminal_attrs.get("container_id")
+        old_terminal_num_inputs = terminal_attrs.get("num_inputs", 0)
+        old_terminal_num_outputs = terminal_attrs.get("num_outputs", 0)
+
+        # 1. Remap the one relevant I1/J1/I2/J2 entry to the terminal's own
+        # (always 0, a single-port node) sole port index.
+        contracted_attrs = graph[id_map[contracted_id]]
+        contracted_attrs[match["internal_key"]] = [0]
+
+        # 2. Fold state1's phase into the terminal; its own color is
+        # already correct (`_try_absorb_contracted_child` never changes
+        # it).
+        terminal_attrs["phase"] = match["result_phase"]
+
+        # 3. Splice the terminal into state1's exact slot in the contraction.
+        self._replace_in_parent(graph, id_map, contracted_id, state1_id, terminal_id)
+
+        # 4. The terminal no longer occupies its own old slot -- install a
+        # same-shaped VoidDiagram there instead.
+        if old_terminal_parent is not None and old_terminal_parent in id_map:
+            self._install_void_placeholder(
+                graph, id_map, old_terminal_parent, terminal_id, old_terminal_num_inputs, old_terminal_num_outputs
+            )
+
+        # 5. state1 is fully absorbed.
+        _remove_node(graph, id_map, state1_id)
+
+        # 6. The contraction's own external arity shrinks to whatever the
+        # terminal itself contributes (usually nothing -- its one port is
+        # now internal) -- recompute it and ripple the change up through
+        # whatever parent sits above it.
+        arity_change = self._recompute_contracted_arity(graph, id_map, contracted_id)
+        self._propagate_arity_to_parent(graph, id_map, contracted_id, *arity_change)
+
+        # 7. Every identity/Swap passthrough the chase crossed is reset in
+        # place, same as ordinary absorption.
         for passthrough_id in match.get("identity_chain", []):
             if passthrough_id not in id_map or graph[id_map[passthrough_id]]["type"] == "Swap":
                 continue

@@ -123,7 +123,7 @@ The package currently targets Python 3.10 and newer.
 A guided introduction is available in
 [`examples/quickstart.ipynb`](examples/quickstart.ipynb) — building a diagram, converting it
 to the graph representation, and simplifying it by hand and via `optimize()`. See
-[`examples/example_1_measurement_induced_squeezer.ipynb`](examples/example_1_measurement_induced_squeezer.ipynb)
+[`examples/measurement_induced_squeezer.ipynb`](examples/measurement_induced_squeezer.ipynb)
 for a deeper, physically-motivated worked example. The Sphinx docs' user guide also has
 task-oriented pages for building/rewriting/optimizing diagrams, converting to and from mqc3
 circuits, and visualization — see [Documentation](#documentation).

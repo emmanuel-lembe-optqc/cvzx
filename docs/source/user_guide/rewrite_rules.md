@@ -108,7 +108,7 @@ source of further worked examples for that specific rule's match fields.
   parameter.
 - **`TerminalAbsorptionRule`** — matches a gate adjacent to a $(1,0)$-effect or
   $(0,1)$-state `QSpider`/`PSpider` terminal, and folds the gate into the terminal's phase.
-  Four sub-cases, each a different closed-form fold (the gate may sit on either side of the
+  Five sub-cases, each a different closed-form fold (the gate may sit on either side of the
   terminal, whichever its own arity allows — an effect's gate is upstream, a state's gate is
   downstream):
   - *Rotation* (QSpider terminal, input phase degree $\le 1$): a terminal with phase
@@ -126,12 +126,25 @@ source of further worked examples for that specific rule's match fields.
     `CopyRule`): a `DisplacementGate` next to such a terminal collapses, phase unchanged, like
     cross-color discard; a higher-degree terminal phase describes a genuinely squeezed state,
     for which this doesn't apply.
+  - *Contracted-child absorption*: a terminal composed directly into a node (`state1`) that is
+    itself one of a `ContractedDiagram`'s own two children. `state1` is eligible only if
+    exactly one of its raw ports is used internally by the contraction and every other raw
+    port (besides the one connecting to the terminal) already traces to a `VoidDiagram` —
+    otherwise a live wire would be silently dropped, so the match doesn't fire. Same color as
+    the terminal: phases simply add. Opposite color: `state1`'s phase must be in
+    $\mathbb{R}_1[X]$, $ax$ say; if the terminal's phase is $f(x)$ it becomes $f(x+a)$. Either
+    way `state1` disappears, the terminal takes over its exact slot in the contraction (with
+    the contraction's arity re-derived from the terminal's own $(1,0)$/$(0,1)$ shape), and the
+    terminal's own vacated slot becomes a `VoidDiagram`.
 
-  Squeezing, cross-color discard, and displacement absorption are all only exact for an
-  idealized (infinitely squeezed) terminal eigenstate, and only run when constructed as
-  `TerminalAbsorptionRule(assume_infinite_squeezing=True)`; the default `False` restricts
-  matching to rotation absorption. Neither the terminal nor the gate may be directly one of a
-  `ContractedDiagram`'s own two halves — that shape belongs to `PassthroughRule` instead.
+  Squeezing, cross-color discard, displacement, and contracted-child absorption are all only
+  exact for an idealized (infinitely squeezed) terminal eigenstate, and only run when
+  constructed as `TerminalAbsorptionRule(assume_infinite_squeezing=True)`; the default `False`
+  restricts matching to rotation absorption. The terminal itself may never be directly one of
+  a `ContractedDiagram`'s own two halves (it must stay a genuine standalone leaf); `state1`
+  being one of those two halves is precisely the new sub-case above rather than
+  `PassthroughRule`'s territory, since a real terminal — not a bare identity — is being folded
+  in.
 - **`CopyRule`** — matches a $(0,1)$/$(1,0)$ spider adjacent to a wide ($n$-input or
   $n$-output) opposite-color spider whose phase is in $\mathbb{R}_1[X]$
   (`CopyRule.is_in_R1`), and copies the narrow spider through, producing $n$ copies in a

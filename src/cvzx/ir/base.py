@@ -1424,6 +1424,25 @@ class Parametrized:
         raise NotImplementedError
 
 
+def _drop_constant_phase(phase: ZxPoly) -> ZxPoly:
+    """Zero out a phase polynomial's constant (degree 0) term.
+
+    A spider's matrix element is `exp(i * f(s))` for every leg tied to the shared
+    variable `s`; a constant term in `f` factors out as `exp(i * c)`, a global phase
+    that is physically unobservable. QSpider/PSpider therefore always drop it, so
+    `Q/PSpider(n, m, constant)` normalizes to the same object as
+    `Q/PSpider(n, m, zero_phase)`.
+
+    Returns
+    -------
+    ZxPoly
+        `phase` with its degree-0 coefficient removed, if any.
+    """
+    if 0 not in phase.coeffs:
+        return phase
+    return ZxPoly({degree: coeff for degree, coeff in phase.coeffs.items() if degree != 0})
+
+
 @dataclass
 class QSpider(ProperDiagram, Parametrized):
     r"""q-spider: position-basis spider with polynomial phase.
@@ -1493,6 +1512,7 @@ class QSpider(ProperDiagram, Parametrized):
             parametric, or if `_sync_feedforward_state` finds an
             inconsistency (see its own docstring).
         """
+        self.phase = _drop_constant_phase(self.phase)
         if self.parametric != self.phase.is_parametric():
             msg = "The parametric attribute is not accurate."
             raise ValueError(msg)
@@ -1580,6 +1600,7 @@ class PSpider(ProperDiagram, Parametrized):
             parametric, or if `_sync_feedforward_state` finds an
             inconsistency (see its own docstring).
         """
+        self.phase = _drop_constant_phase(self.phase)
         if self.parametric != self.phase.is_parametric():
             msg = "The parametric attribute is not accurate."
             raise ValueError(msg)

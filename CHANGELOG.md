@@ -415,7 +415,7 @@ development on `main` to date, grouped by area rather than by commit.
   some rules (e.g. `FusionRule`'s handling of a `CopyRule`-produced
   fan-out) leave bookkeeping that a later rule's `match()` can misread
   without that round-trip. Concretely, the measurement-induced-squeezer
-  example (`examples/example_1_measurement_induced_squeezer.ipynb`)
+  example (`examples/measurement_induced_squeezer.ipynb`)
   reduced to `SqueezingGate(sin(theta)**2/cos(theta))` via `optimize()` but
   correctly to `SqueezingGate(sin(theta))` (matching the paper) when the
   same rules were applied one at a time. `_simplify_to_fixed_point` now

@@ -33,6 +33,7 @@ from cvzx.ir.base import (
     QSpider,
     Swap,
     TensorDiagram,
+    VoidDiagram,
     ZxPoly,
 )
 from cvzx.ir.gates import BeamsplitterGate, DisplacementGate, PhaseRotationGate, SqueezingGate
@@ -673,15 +674,16 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         graph = to_graph(comp)
         assert len(self.rule.match(graph)) == 0
 
-    def test_constant_term_carries_through_rotation(self):
-        """A constant term in the terminal's phase survives the rotation fold unchanged."""
+    def test_constant_term_dropped_before_rotation_fold(self):
+        """QSpider drops the terminal's constant term at construction, before any fold."""
         effect_with_const = QSpider(1, 0, ZxPoly({0: 2.0, 1: -3.0}))
+        assert 0 not in effect_with_const.phase.coeffs
         comp = CompositionDiagram([self.r1, effect_with_const])
         graph = to_graph(comp)
         _apply_absorption_and_cleanup(graph, self.rule)
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
-        assert isclose(result.phase.coeffs[0], 2.0)
+        assert 0 not in result.phase.coeffs
 
     def test_squeezing_any_degree(self):
         """Squeezing absorption isn't restricted to linear phase."""
@@ -706,15 +708,16 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         expected = ZxPoly({1: -3.0 * tau})
         assert simplify(result.phase.as_expr() - expected.as_expr()) == 0
 
-    def test_squeezing_constant_term_unchanged(self):
-        """A constant term is untouched by x -> x/tau (it doesn't depend on x)."""
+    def test_squeezing_constant_term_stays_dropped(self):
+        """A terminal's constant term is dropped at construction, before x -> x/tau."""
         effect_with_const = QSpider(1, 0, ZxPoly({0: 5.0, 1: -3.0}))
+        assert 0 not in effect_with_const.phase.coeffs
         comp = CompositionDiagram([self.sq1, effect_with_const])
         graph = to_graph(comp)
         _apply_absorption_and_cleanup(graph, self.rule_idealized)
         result = to_diagram(graph)
         assert isinstance(result, QSpider)
-        assert isclose(result.phase.coeffs[0], 5.0)
+        assert 0 not in result.phase.coeffs
 
     def test_cross_color_discard_arbitrary_degree(self):
         """Cross-color discard has no degree restriction on the vanishing gate."""
@@ -727,8 +730,9 @@ class TestTerminalAbsorptionRule(unittest.TestCase):
         assert result.phase == self.q_effect.phase
 
     def test_displacement_constant_phase(self):
-        """Displacement absorption works for a constant-only (degree 0) terminal phase."""
+        """A constant-only phase is already zero-phase at construction; stays so."""
         constant_effect = QSpider(1, 0, ZxPoly({0: 4.0}))
+        assert constant_effect.phase.is_zero
         comp = CompositionDiagram([DisplacementGate(0.5), constant_effect])
         graph = to_graph(comp)
         _apply_absorption_and_cleanup(graph, self.rule_idealized)
@@ -954,6 +958,177 @@ class TestTerminalAbsorptionResetToIdentityClearsParamMeasurementMap(unittest.Te
         assert attrs["measurement_ids"] is None
         assert attrs["phase"] == ZxPoly({})
         assert attrs["type"] == "QSpider"
+
+
+class TestTerminalAbsorptionContractedChild(unittest.TestCase):
+    """A terminal absorbing `state1`, a bare spider directly inside a `ContractedDiagram`.
+
+    `state1` must have exactly one raw port used internally by the
+    contraction (its "internal port"); every other raw port besides the one
+    connecting to the terminal must already trace to a `VoidDiagram`. The
+    terminal moves into `state1`'s exact slot (`first_id`/`second_id`),
+    `state1` is removed, and the terminal's own old slot becomes a
+    same-shaped `VoidDiagram`. Only matches under `assume_infinite_squeezing`.
+    """
+
+    def setUp(self):
+        """Create the rule under test."""
+        self.rule = TerminalAbsorptionRule(assume_infinite_squeezing=True)
+        self.rule_exact_only = TerminalAbsorptionRule(assume_infinite_squeezing=False)
+        self.zero_phase = ZxPoly({})
+
+    def _cubic_phase_injection_diagram(self, m: Symbol, gamma: Symbol) -> CompositionDiagram:
+        """The worked example: a cubic-phase state feeds a copy spider fused with a measurement.
+
+        `second = PSpider(-m*x, 1, 2)` (a copy spider `FusionRule` already
+        fused with a homodyne measurement) has a live external input (fed
+        by the cubic-phase state, to be absorbed), an internal output
+        feeding `first` (`J2=[0]`), and an already-void extra output.
+        """
+        stage0 = TensorDiagram([
+            QSpider(1, 1, self.zero_phase),
+            QSpider(0, 1, ZxPoly({3: gamma}), parametric=True),
+        ])
+        stage1 = ContractedDiagram(
+            QSpider(2, 1, self.zero_phase),
+            PSpider(1, 2, ZxPoly({1: -m}), parametric=True),
+            [],
+            [],
+            [1],
+            [0],
+        )
+        correction = QSpider(1, 1, ZxPoly({1: -3 * gamma * m**2, 2: -3 * gamma * m}), parametric=True)
+        stage2 = TensorDiagram([correction, VoidDiagram(1, 0)])
+        return CompositionDiagram([stage0, stage1, stage2])
+
+    def test_match_state_absorbs_output_role_state1_cross_color(self):
+        """The worked example: cubic-phase QSpider state absorbs the PSpider copy/measurement spider."""
+        m, gamma = Symbol("m", real=True), Symbol("gamma", real=True)
+        diagram = self._cubic_phase_injection_diagram(m, gamma)
+        graph = to_graph(diagram)
+
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        match = matches[0]
+        assert match["kind"] == "contracted_child"
+        assert match["side"] == "second"
+        assert match["internal_key"] == "J2"
+        assert match["old_internal_port"] == 0
+        # f(x + a) with f(x) = gamma*x**3, a = -m: gamma*(x - m)**3.
+        expected = ZxPoly({3: gamma, 2: -3 * gamma * m, 1: 3 * gamma * m**2, 0: -(gamma * m**3)})
+        assert match["result_phase"] == expected
+
+    def test_apply_rule_state_absorbs_output_role_state1(self):
+        """Applying the match moves the terminal into the contraction and voids both old slots."""
+        m, gamma = Symbol("m", real=True), Symbol("gamma", real=True)
+        diagram = self._cubic_phase_injection_diagram(m, gamma)
+        graph = to_graph(diagram)
+
+        self.rule.apply_rule(graph)
+        graph.rebuild_registry()
+        result = to_diagram(graph)
+
+        assert result.num_inputs == 1
+        assert result.num_outputs == 1
+        contract = result.diagrams[1]
+        assert isinstance(contract, ContractedDiagram)
+        assert contract.second.num_inputs == 0
+        assert contract.second.num_outputs == 1
+        # QSpider drops the constant term (-gamma*m**3, an unobservable global phase) at
+        # construction, when `to_diagram` rebuilds it -- unlike `match["result_phase"]`
+        # above, which is the raw pre-construction ZxPoly and still carries it.
+        assert contract.second.phase == ZxPoly({3: gamma, 2: -3 * gamma * m, 1: 3 * gamma * m**2})
+        assert contract.J2 == [0]
+        # The cubic-phase state's old slot (stage0) is now void.
+        assert isinstance(result.diagrams[0].diagrams[1], VoidDiagram)
+        assert result.diagrams[0].diagrams[1].num_inputs == 0
+        assert result.diagrams[0].diagrams[1].num_outputs == 0
+
+    def test_match_effect_absorbs_input_role_state1_cross_color(self):
+        """A measurement (effect) absorbs a state1 whose internal port is input-like (I2)."""
+        m = Symbol("m", real=True)
+        first = QSpider(1, 1, self.zero_phase)
+        second = PSpider(1, 1, self.zero_phase)
+        contract = ContractedDiagram(first, second, [0], [0], [], [])
+        meas = QSpider(1, 0, ZxPoly({1: -m}), parametric=True)
+        diagram = CompositionDiagram([contract, meas])
+        graph = to_graph(diagram)
+
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        match = matches[0]
+        assert match["kind"] == "contracted_child"
+        assert match["side"] == "second"
+        assert match["internal_key"] == "I2"
+        assert match["result_phase"] == ZxPoly({1: -m})  # a = 0 (second's own phase is zero)
+
+        self.rule.apply_rule(graph)
+        graph.rebuild_registry()
+        result = to_diagram(graph)
+        assert result.num_inputs == 1
+        assert result.num_outputs == 0
+
+    def test_match_same_color_adds_phases(self):
+        """state1 the same color as the terminal: phases simply add, no R1 restriction."""
+        m = Symbol("m", real=True)
+        first = PSpider(1, 1, self.zero_phase)
+        second = QSpider(1, 1, ZxPoly({1: 2.0}))  # degree 1, but irrelevant for same-color
+        contract = ContractedDiagram(first, second, [0], [0], [], [])
+        meas = QSpider(1, 0, ZxPoly({1: -m}), parametric=True)
+        diagram = CompositionDiagram([contract, meas])
+        graph = to_graph(diagram)
+
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["result_phase"] == ZxPoly({1: 2.0 - m})
+
+    def test_match_cross_color_degree_gt_1_no_match(self):
+        """state1's phase must be in R1 (degree <= 1) for cross-color absorption."""
+        m = Symbol("m", real=True)
+        first = PSpider(1, 1, self.zero_phase)
+        second = PSpider(1, 1, ZxPoly({2: 5.0}))  # degree 2, opposite color from terminal
+        contract = ContractedDiagram(first, second, [0], [0], [], [])
+        meas = QSpider(1, 0, ZxPoly({1: -m}), parametric=True)
+        diagram = CompositionDiagram([contract, meas])
+        graph = to_graph(diagram)
+
+        assert len(self.rule.match(graph)) == 0
+
+    def test_match_multiple_internal_ports_no_match(self):
+        """state1 with more than one internally-consumed port cannot fit a single-port terminal."""
+        m = Symbol("m", real=True)
+        first = QSpider(1, 2, self.zero_phase)
+        second = PSpider(2, 1, self.zero_phase)
+        contract = ContractedDiagram(first, second, [0, 1], [0, 1], [], [])
+        meas = QSpider(1, 0, ZxPoly({1: -m}), parametric=True)
+        diagram = CompositionDiagram([contract, meas])
+        graph = to_graph(diagram)
+
+        assert len(self.rule.match(graph)) == 0
+
+    def test_match_live_extra_port_no_match(self):
+        """state1 with an extra port that is NOT void must not match (would drop a live wire)."""
+        m, gamma = Symbol("m", real=True), Symbol("gamma", real=True)
+        stage0 = TensorDiagram([
+            QSpider(1, 1, self.zero_phase),
+            QSpider(0, 1, ZxPoly({3: gamma}), parametric=True),
+        ])
+        stage1 = ContractedDiagram(QSpider(2, 1, self.zero_phase), PSpider(1, 2, self.zero_phase), [], [], [1], [0])
+        correction = QSpider(1, 1, ZxPoly({1: -3 * gamma * m**2, 2: -3 * gamma * m}), parametric=True)
+        live_gate = QSpider(1, 1, ZxPoly({1: 7.0}))  # LIVE, not void -- second's extra port feeds this
+        stage2 = TensorDiagram([correction, live_gate])
+        diagram = CompositionDiagram([stage0, stage1, stage2])
+        graph = to_graph(diagram)
+
+        assert len(self.rule.match(graph)) == 0
+
+    def test_match_requires_assume_infinite_squeezing(self):
+        """The contracted-child sub-case is gated on assume_infinite_squeezing, like squeezing/discard."""
+        m, gamma = Symbol("m", real=True), Symbol("gamma", real=True)
+        diagram = self._cubic_phase_injection_diagram(m, gamma)
+        graph = to_graph(diagram)
+
+        assert len(self.rule_exact_only.match(graph)) == 0
 
 
 if __name__ == "__main__":

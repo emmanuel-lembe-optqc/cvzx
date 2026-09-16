@@ -490,6 +490,44 @@ class TestZxPolyGetParameters:
         assert poly.get_parameters() == {a, b}
 
 
+class TestSpiderConstantPhaseDropped:
+    """QSpider/PSpider always drop their phase's constant (degree 0) term.
+
+    A degree-0 phase term is an unobservable global phase, so
+    `Q/PSpider(n, m, constant)` normalizes to `Q/PSpider(n, m, zero_phase)`.
+    """
+
+    def test_qspider_pure_constant_becomes_zero_phase(self):
+        """A phase that is nothing but a constant collapses to the zero polynomial."""
+        q = QSpider(1, 0, ZxPoly({0: 4.0}))
+        assert q.phase == ZxPoly({})
+        assert q.phase.is_zero
+
+    def test_pspider_pure_constant_becomes_zero_phase(self):
+        """Same collapse for PSpider."""
+        p = PSpider(0, 1, ZxPoly({0: -2.5}))
+        assert p.phase == ZxPoly({})
+        assert p.phase.is_zero
+
+    def test_constant_dropped_alongside_higher_degree_terms(self):
+        """A constant coexisting with higher-degree terms only loses the constant."""
+        q = QSpider(1, 1, ZxPoly({0: 2.0, 1: -3.0, 2: 1.0}))
+        assert q.phase == ZxPoly({1: -3.0, 2: 1.0})
+        assert 0 not in q.phase.coeffs
+
+    def test_symbolic_constant_dropped(self):
+        """A symbolic constant term is dropped exactly like a numeric one."""
+        a, b = symbols("a b", real=True)
+        q = QSpider(0, 1, ZxPoly({0: b, 1: a}), parametric=True)
+        assert q.phase == ZxPoly({1: a})
+
+    def test_no_constant_term_unaffected(self):
+        """A phase with no degree-0 term at all is left as-is."""
+        phase = ZxPoly({2: 1.0, 1: -3.0})
+        q = QSpider(1, 0, phase)
+        assert q.phase == phase
+
+
 class TestParametrizedMixin:
     """Test suite for the `Parametrized` mixin, exercised via QSpider/PSpider.
 

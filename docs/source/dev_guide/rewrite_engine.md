@@ -49,11 +49,18 @@ shapes come out of that scan:
   together).
 
 `TerminalAbsorptionRule` uses the identical candidate-and-chase scan (any terminal, chase its
-one wire past identities/`Swap` nodes to the real neighboring gate) but never restructures a
-container itself — the gate and every passthrough crossed are simply reset in place to identity
-spiders, so no cross-container substitution logic is needed there. Neither rule ever matches a
-pair where either endpoint is directly one of a `ContractedDiagram`'s own two halves — that
-shape belongs to `PassthroughRule` instead (see below).
+one wire past identities/`Swap` nodes to the real neighboring gate). For its first four
+sub-cases the gate and every passthrough crossed are simply reset in place to identity
+spiders, so no cross-container substitution logic is needed. Its fifth sub-case is the one
+exception: the chased-to neighbor may be directly one of a `ContractedDiagram`'s own two
+children (`first_id`/`second_id`), in which case the terminal is spliced into that exact slot
+via the same `_replace_in_parent`/`_install_void_placeholder` machinery `CopyRule` uses, the
+one relevant `I1`/`I2`/`J1`/`J2` entry is remapped, and `_recompute_contracted_arity`/
+`_propagate_arity_to_parent` re-derive the contraction's arity from the terminal's own
+$(1,0)$/$(0,1)$ shape. The terminal's *own* immediate parent, though, is still never allowed to
+be a `ContractedDiagram`'s own two halves — it must stay a genuine standalone leaf — and
+`PassthroughRule` still owns the case where *both* halves are bare, different-color spiders
+being spliced together (see below).
 
 ## The `RewriteRule` contract
 

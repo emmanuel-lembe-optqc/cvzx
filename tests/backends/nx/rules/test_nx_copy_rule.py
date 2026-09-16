@@ -616,13 +616,15 @@ class TestCopyRule(unittest.TestCase):
     def test_copy_spider_phase_in_R1_with_symbolic(self):
         """Copied spider with symbolic phase in R₁[X] (degree 1)."""
         a, b = symbols("a b", real=True)
+        # QSpider drops a phase's constant (degree 0) term -- a global phase -- at
+        # construction, so `q.phase` is `a*x`, not `a*x + b`.
         phase = ZxPoly({1: a, 0: b})  # a*x + b (degree 1)
         q = QSpider(0, 1, phase, True)
         comp = CompositionDiagram([q, self.p_1_2])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
         assert len(matches) == 1
-        assert matches[0]["copy_spider_phase"] == phase
+        assert matches[0]["copy_spider_phase"] == q.phase
 
     def test_copy_spider_phase_not_in_R1_with_symbolic(self):
         """Copied spider with symbolic phase NOT in R₁[X] (degree 2)."""
