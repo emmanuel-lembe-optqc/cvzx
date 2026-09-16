@@ -1,13 +1,8 @@
 # CVZX Compiler
 
 A graph-based compiler for continuous-variable quantum circuits and CV-ZX diagrams, with a
-full rewrite/optimization pipeline and round-trip conversion to/from mqc3 circuits.
-
-> **Status:** Research codebase. The graph representation, the full set of main CV-ZX rewrite
-> rules, the optimization pipeline, and conversion to/from mqc3's `CircuitRepr`/`MachineryRepr`
-> are all implemented. Completeness beyond the currently-implemented rules/gates (finite
-> squeezing, non-Gaussian resources beyond the cubic phase gate, GKP/mixed states) is out of
-> scope for now — see the [documentation](#documentation)'s theory page for the exact list.
+full rewrite/optimization pipeline, round-trip conversion to/from mqc3 circuits, and a dual
+`networkx`/`rustworkx` graph backend.
 
 ## Overview
 
@@ -17,17 +12,24 @@ diagrammatic representation, built around the CV ZX calculus of Nagayoshi et al.
 
 The current implementation covers:
 
-- A structured `Diagram` model (spiders, gates, tensor/composition/contraction containers)
-  and a lossless conversion to/from a `networkx` graph representation for rewriting.
+- A structured `Diagram` model (spiders, gates, tensor/composition/contraction containers,
+  `cvzx.ir.base`/`cvzx.ir.gates`) and a lossless conversion to/from a graph representation
+  for rewriting, on either a `networkx` or `rustworkx` backend
+  (`cvzx.backends.nx`/`cvzx.backends.rx`, dispatched via `cvzx.config.Backend`) — both produce
+  identical results, `rustworkx` is the faster default when installed.
 - The full set of CV-ZX rewrite rules (identity, fusion, chain reduction, Fourier
   normalization, terminal absorption, and the copy rule), applied to a fixed point by
-  `cvzx.optimize.optimize`.
-- Round-trip conversion between an mqc3 `CircuitRepr` and a canonical `cvzx.Diagram`
-  (`cvzx.circuit_to_diagram`, `cvzx.diagram_to_circuit`).
-- A pluggable lowering step from a `Diagram` to a concrete mqc3 `MachineryRepr`
-  (`cvzx.lowering`), so a different QPU backend can be added without touching the rest of
-  the pipeline.
-- Visualization of CV-ZX diagrams (`cvzx.visualize_base_gates`).
+  `cvzx.passes.optimize.optimize`.
+- Round-trip conversion between an mqc3 `CircuitRepr` and a canonical `cvzx.ir.base.Diagram`
+  (`cvzx.lowering.bridges.mqc3`), and boundary completion for open diagrams
+  (`cvzx.passes.completion`).
+- A pluggable lowering step from a `Diagram` to a concrete mqc3 `DependencyDAG`
+  (`cvzx.lowering.lowering`), with a bundled `"mqc3"` reference backend and a `"cvzx-direct"`
+  backend that skips the `CircuitRepr` round trip, so a different QPU backend can be added
+  without touching the rest of the pipeline. From there, mqc3's own `GraphEmbedder`/
+  `GraphRepr`/`MachineryRepr` chain is outside this project's scope.
+- Visualization of CV-ZX diagrams (`cvzx.visualization`), and optimization-quality metrics
+  measuring how much `optimize()` shrinks a diagram (`cvzx.utils.metrics`).
 - Opt-in structured file logging for the rewriting pipeline (`cvzx.logging_config`).
 
 ## Documentation
@@ -54,24 +56,34 @@ cvzx/
 ├── CHANGELOG.md
 ├── LICENSE
 ├── docs/                          # Sphinx documentation (theory, guides, API reference)
+├── examples/                      # Runnable Jupyter notebooks (see "Quick start")
 ├── src/
 │   └── cvzx/
 │       ├── __init__.py
-│       ├── base_gates.py          # Diagram hierarchy, ZxPoly, container types
-│       ├── gates.py               # CompactDiagram + every gate class
-│       ├── nx_graph.py            # Diagram <-> networkx.DiGraph conversion, GateRegister
-│       ├── normalize_diagram.py   # Type-1/type-2 stage canonicalization
-│       ├── nx_rewrite_rules.py    # The CV-ZX rewrite rules
-│       ├── optimize.py            # optimize(): runs the rules to a fixed point
-│       ├── circuit_to_diagram.py  # mqc3 CircuitRepr -> cvzx Diagram
-│       ├── diagram_to_circuit.py  # cvzx Diagram -> mqc3 CircuitRepr
-│       ├── lowering.py            # Diagram -> mqc3 MachineryRepr (pluggable backends)
+│       ├── backend.py             # Backend dispatcher (get_backend_modules)
+│       ├── config.py              # Backend enum, DEFAULT_BACKEND
+│       ├── exceptions.py          # CvzxError hierarchy
 │       ├── logging_config.py      # opt-in file logging for the rewriting pipeline
-│       └── visualize_base_gates.py
-└── tests/
-    ├── nx_graph/
-    ├── rewrite_rules/
-    └── test_*.py
+│       ├── ir/
+│       │   ├── base.py            # Diagram hierarchy, ZxPoly, container types
+│       │   └── gates.py           # CompactDiagram + every gate class
+│       ├── backends/
+│       │   ├── nx/                # networkx: graph.py (Diagram <-> DiGraph, GateRegister),
+│       │   │                      # rules.py (the CV-ZX rewrite rules)
+│       │   └── rx/                # rustworkx mirror of the above
+│       ├── passes/
+│       │   ├── normalize.py       # Type-1/type-2 stage canonicalization
+│       │   ├── optimize.py        # optimize(): runs the rules to a fixed point
+│       │   └── completion.py      # Closing a Diagram's open input/output ports
+│       ├── lowering/
+│       │   ├── bridges/mqc3.py    # mqc3 CircuitRepr <-> cvzx Diagram
+│       │   ├── dag.py             # Direct CVZXGraph -> DependencyDAG extraction
+│       │   └── lowering.py        # Diagram -> mqc3 DependencyDAG (pluggable backends)
+│       ├── utils/
+│       │   ├── helpers.py         # Rewrite-engine-adjacent utilities
+│       │   └── metrics.py         # Optimization-quality metrics (compute_metrics, ...)
+│       └── visualization/         # Drawing CV-ZX diagrams
+└── tests/                         # Mirrors the src/cvzx/ layout above
 ```
 
 Generated directories such as `build/`, `dist/`, `*.egg-info/`, and `__pycache__/` should not
@@ -108,9 +120,13 @@ The package currently targets Python 3.10 and newer.
 
 ## Quick start
 
-A guided introduction is available in [`quick_start.ipynb`](quick_start.ipynb), and the
-Sphinx docs' user guide has task-oriented pages for building/rewriting/optimizing diagrams,
-converting to and from mqc3 circuits, and visualization — see [Documentation](#documentation).
+A guided introduction is available in
+[`examples/quickstart.ipynb`](examples/quickstart.ipynb) — building a diagram, converting it
+to the graph representation, and simplifying it by hand and via `optimize()`. See
+[`examples/example_1_measurement_induced_squeezer.ipynb`](examples/example_1_measurement_induced_squeezer.ipynb)
+for a deeper, physically-motivated worked example. The Sphinx docs' user guide also has
+task-oriented pages for building/rewriting/optimizing diagrams, converting to and from mqc3
+circuits, and visualization — see [Documentation](#documentation).
 
 Start Jupyter from the repository root:
 
@@ -118,7 +134,7 @@ Start Jupyter from the repository root:
 jupyter notebook
 ```
 
-Then open `quick_start.ipynb` and run the cells from top to bottom.
+Then open a notebook under `examples/` and run the cells from top to bottom.
 
 ## Running tests
 
@@ -137,30 +153,29 @@ pytest --cov=cvzx
 ## Minimal example
 
 ```python
-from sympy import pi
-
-from cvzx.base_gates import CompositionDiagram
-from cvzx.gates import PhaseRotationGate
-from cvzx.optimize import optimize
+from cvzx.ir.base import CompositionDiagram
+from cvzx.ir.gates import PhaseRotationGate
+from cvzx.passes.optimize import optimize
 
 comp = CompositionDiagram([
-    PhaseRotationGate(pi / 6),
-    PhaseRotationGate(pi / 5),
-    PhaseRotationGate(pi / 7),
+    PhaseRotationGate(0.3),
+    PhaseRotationGate(0.4),
+    PhaseRotationGate(0.5),
 ])
 
-graph, diagram = optimize(comp)  # the three rotations fuse into one
+result = optimize(comp)  # the three rotations fuse into one; result.diagram, result.graph
 ```
 
 See the user guide's "Converting to and from mqc3 circuits" page for a walkthrough that covers
-converting to/from an mqc3 `CircuitRepr` and lowering to a `MachineryRepr`.
+converting to/from an mqc3 `CircuitRepr` and lowering to a `DependencyDAG`.
 
 ## Debugging
 
-The rewriting pipeline (`normalize_diagram`, `nx_rewrite_rules`, `optimize`) logs through the
-standard `logging` module. Call `cvzx.logging_config.setup_file_logging()` once, early in your
-script, to get one log file per module under `./logs/` instead of nothing — see the user
-guide's "Debugging with logs" section.
+The rewriting pipeline (`cvzx.passes.normalize`, `cvzx.backends.nx.rules`/
+`cvzx.backends.rx.rules`, `cvzx.passes.optimize`) logs through the standard `logging` module.
+Call `cvzx.logging_config.setup_file_logging()` once, early in your script, to get one log
+file per module under `./logs/` instead of nothing — see the user guide's "Debugging with
+logs" section.
 
 ## Research roadmap
 
@@ -182,8 +197,7 @@ and graph-based optimization.
 
 ## Acknowledgements
 
-This project is a that builds on the continuous-variable ZX formalism
-introduced in:
+This project builds on the continuous-variable ZX formalism introduced in:
 
 > Hironari Nagayoshi, Warit Asavanant, Ryuhoh Ide, Kosuke Fukui,
 > Atsushi Sakaguchi, Jun-ichi Yoshikawa, Nicolas C. Menicucci, and
@@ -192,8 +206,8 @@ introduced in:
 > [arXiv:2405.07246](https://arxiv.org/abs/2405.07246)
 
 The gate set and naming conventions follow MQC3's `graph`/`circuit` operations, and
-`cvzx.circuit_to_diagram`/`cvzx.diagram_to_circuit`/`cvzx.lowering` convert to/from and lower
-onto that machinery directly.
+`cvzx.lowering.bridges.mqc3`/`cvzx.lowering.lowering` convert to/from and lower onto that
+machinery directly.
 
 ## License
 
