@@ -200,10 +200,10 @@ source of further worked examples for that specific rule's match fields.
 
   | Match | Result |
   | --- | --- |
-  | $P(\varphi,1,n) \circ Q(g,0,1)$ | $Q(g,0,1) \otimes \cdots \otimes Q(g,0,1)$ ($n$ copies) |
-  | $Q(g,1,0) \circ P(\varphi,n,1)$ | $Q(g,1,0) \otimes \cdots \otimes Q(g,1,0)$ ($n$ copies) |
-  | $Q(\varphi,1,n) \circ P(g,0,1)$ | $P(g,0,1) \otimes \cdots \otimes P(g,0,1)$ ($n$ copies) |
-  | $P(g,1,0) \circ Q(\varphi,n,1)$ | $P(g,1,0) \otimes \cdots \otimes P(g,1,0)$ ($n$ copies) |
+  | $P(1,n, \varphi) \circ Q(0,1, g)$ | $Q(0,1,g) \otimes \cdots \otimes Q(0,1,g)$ ($n$ copies) |
+  | $Q(1,0,g) \circ P(n,1,\varphi)$ | $Q(1,0,g) \otimes \cdots \otimes Q(1,0,g)$ ($n$ copies) |
+  | $Q(1,n,\varphi) \circ P(0,1,g)$ | $P(0,1,g) \otimes \cdots \otimes P(0,1,g)$ ($n$ copies) |
+  | $P(1,0,g) \circ Q(n,1,\varphi)$ | $P(1,0,g) \otimes \cdots \otimes P(1,0,g)$ ($n$ copies) |
 
   Only the *copied* spider's phase $g$ needs to be in $\mathbb{R}_1[X]$ (degree $\le 1$); the
   disappearing spider's phase $\varphi$ can be any polynomial. Unlike the other rules, its

@@ -42,43 +42,43 @@ class TestCopyRule(unittest.TestCase):
         self.zero_phase = ZxPoly({})
 
         # Q-Spiders (copied spiders with phase in R₁[X])
-        self.q_0_1 = QSpider(0, 1, self.phase_x2)  # Q(g, 0, 1) - input spider
-        self.q_1_0 = QSpider(1, 0, self.phase_x)  # Q(g, 1, 0) - output spider
-        self.q_0_1_zero = QSpider(0, 1, self.zero_phase)  # Q(0, 0, 1)
+        self.q_0_1 = QSpider(0, 1, self.phase_x2)  # Q(0, 1, g) - input spider
+        self.q_1_0 = QSpider(1, 0, self.phase_x)  # Q(1, 0, g) - output spider
+        self.q_0_1_zero = QSpider(0, 1, self.zero_phase)  # Q(0, 1, 0)
 
         # Q-Spiders with phase NOT in R₁[X]
-        self.q_0_1_bad = QSpider(0, 1, self.phase_x3)  # Q(g, 0, 1) with g ∉ R₁[X]
-        self.q_1_0_bad = QSpider(1, 0, self.phase_mixed)  # Q(g, 1, 0) with g ∉ R₁[X]
+        self.q_0_1_bad = QSpider(0, 1, self.phase_x3)  # Q(0, 1, g) with g ∉ R₁[X]
+        self.q_1_0_bad = QSpider(1, 0, self.phase_mixed)  # Q(1, 0, g) with g ∉ R₁[X]
 
         # P-Spiders (copied spiders with phase in R₁[X])
-        self.p_0_1 = PSpider(0, 1, self.phase_x2)  # P(g, 0, 1) - input spider
-        self.p_1_0 = PSpider(1, 0, self.phase_x)  # P(g, 1, 0) - output spider
-        self.p_0_1_zero = PSpider(0, 1, self.zero_phase)  # P(0, 0, 1)
+        self.p_0_1 = PSpider(0, 1, self.phase_x2)  # P(0, 1, g) - input spider
+        self.p_1_0 = PSpider(1, 0, self.phase_x)  # P(1, 0, g) - output spider
+        self.p_0_1_zero = PSpider(0, 1, self.zero_phase)  # P(0, 1, 0)
 
         # P-Spiders with phase NOT in R₁[X]
-        self.p_0_1_bad = PSpider(0, 1, self.phase_x3)  # P(g, 0, 1) with g ∉ R₁[X]
-        self.p_1_0_bad = PSpider(1, 0, self.phase_mixed)  # P(g, 1, 0) with g ∉ R₁[X]
+        self.p_0_1_bad = PSpider(0, 1, self.phase_x3)  # P(0, 1, g) with g ∉ R₁[X]
+        self.p_1_0_bad = PSpider(1, 0, self.phase_mixed)  # P(1, 0, g) with g ∉ R₁[X]
 
         # Disappearing spiders (any phase, arity 1→n or n→1)
         self.phi_any = ZxPoly({2: 2, 3: 1})  # Any polynomial
 
-        # P(φ, 1, n) - disappears in case 1
-        self.p_1_2 = PSpider(1, 2, self.phi_any)  # P(φ, 1, 2)
-        self.p_1_3 = PSpider(1, 3, self.phi_any)  # P(φ, 1, 3)
-        self.p_1_4 = PSpider(1, 4, self.phi_any)  # P(φ, 1, 4)
+        # P(1, n, φ) - disappears in case 1
+        self.p_1_2 = PSpider(1, 2, self.phi_any)  # P(1, 2, φ)
+        self.p_1_3 = PSpider(1, 3, self.phi_any)  # P(1, 3, φ)
+        self.p_1_4 = PSpider(1, 4, self.phi_any)  # P(1, 4, φ)
 
-        # P(φ, n, 1) - disappears in case 2
+        # P(n, 1, φ) - disappears in case 2
         self.p_2_1 = PSpider(2, 1, self.phi_any)  # P(φ, 2, 1)
         self.p_3_1 = PSpider(3, 1, self.phi_any)  # P(φ, 3, 1)
         self.p_4_1 = PSpider(4, 1, self.phi_any)  # P(φ, 4, 1)
 
-        # Q(φ, 1, n) - disappears in case 3
-        self.q_1_2 = QSpider(1, 2, self.phi_any)  # Q(φ, 1, 2)
-        self.q_1_3 = QSpider(1, 3, self.phi_any)  # Q(φ, 1, 3)
+        # Q(1, n, φ) - disappears in case 3
+        self.q_1_2 = QSpider(1, 2, self.phi_any)  # Q(1, 2, φ)
+        self.q_1_3 = QSpider(1, 3, self.phi_any)  # Q(1, 3, φ)
 
-        # Q(φ, n, 1) - disappears in case 4
-        self.q_2_1 = QSpider(2, 1, self.phi_any)  # Q(φ, 2, 1)
-        self.q_3_1 = QSpider(3, 1, self.phi_any)  # Q(φ, 3, 1)
+        # Q(n, 1, φ) - disappears in case 4
+        self.q_2_1 = QSpider(2, 1, self.phi_any)  # Q(2, 1, φ)
+        self.q_3_1 = QSpider(3, 1, self.phi_any)  # Q(3, 1, φ)
 
         # Other gates (not copy-able)
         self.fourier = Fourier()
@@ -187,7 +187,7 @@ class TestCopyRule(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_match_case_1_p_1_n_q_0_1(self):
-        """Case 1: P(φ, 1, n) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ ... (n times)."""
+        """Case 1: P(1, n, φ) ∘ Q(0, 1, g) → Q(0, 1, g) ⊗ ... (n times)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -201,7 +201,7 @@ class TestCopyRule(unittest.TestCase):
         assert matches[0]["indices"] == [0, 1]
 
     def test_match_case_1_p_1_3_q_0_1(self):
-        """Case 1: P(φ, 1, 3) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ ... (3 times)."""
+        """Case 1: P(1, 3, φ) ∘ Q(0, 1, g) → Q(0, 1, g) ⊗ ... (3 times)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_3])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -209,7 +209,7 @@ class TestCopyRule(unittest.TestCase):
         assert matches[0]["n_copies"] == 3
 
     def test_match_case_2_q_1_0_p_n_1(self):
-        """Case 2: Q(g, 1, 0) ∘ P(φ, n, 1) → Q(g, 1, 0) ⊗ ... (n times)."""
+        """Case 2: Q(1, 0, g) ∘ P(n, 1, φ) → Q(1, 0, g) ⊗ ... (n times)."""
         comp = CompositionDiagram([self.p_2_1, self.q_1_0])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -222,7 +222,7 @@ class TestCopyRule(unittest.TestCase):
         assert matches[0]["copy_spider_phase"] == self.phase_x
 
     def test_match_case_3_q_1_n_p_0_1(self):
-        """Case 3: Q(φ, 1, n) ∘ P(g, 0, 1) → P(g, 0, 1) ⊗ ... (n times)."""
+        """Case 3: Q(1, n, φ) ∘ P(0, 1, g) → P(0, 1, g) ⊗ ... (n times)."""
         comp = CompositionDiagram([self.p_0_1, self.q_1_2])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -235,7 +235,7 @@ class TestCopyRule(unittest.TestCase):
         assert matches[0]["copy_spider_phase"] == self.phase_x2
 
     def test_match_case_4_p_1_0_q_n_1(self):
-        """Case 4: P(g, 1, 0) ∘ Q(φ, n, 1) → P(g, 1, 0) ⊗ ... (n times)."""
+        """Case 4: P(1, 0, g) ∘ Q(n, 1, φ) → P(1, 0, g) ⊗ ... (n times)."""
         comp = CompositionDiagram([self.q_2_1, self.p_1_0])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -346,7 +346,7 @@ class TestCopyRule(unittest.TestCase):
     # -------------------------------------------------------------------------
 
     def test_apply_single_case_1_p_1_2_q_0_1(self):
-        """Case 1: P(φ, 1, 2) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ Q(g, 0, 1)."""
+        """Case 1: P(1, 2, φ) ∘ Q(0, 1, g) → Q(0, 1, g) ⊗ Q(0, 1, g)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_2])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -359,7 +359,7 @@ class TestCopyRule(unittest.TestCase):
         assert all(d.num_inputs == 0 and d.num_outputs == 1 for d in result.diagrams)
 
     def test_apply_single_case_1_p_1_3_q_0_1(self):
-        """Case 1: P(φ, 1, 3) ∘ Q(g, 0, 1) → Q(g, 0, 1) ⊗ Q(g, 0, 1) ⊗ Q(g, 0, 1)."""
+        """Case 1: P(1, 3, φ) ∘ Q(0, 1, g) → Q(0, 1, g) ⊗ Q(0, 1, g) ⊗ Q(0, 1, g)."""
         comp = CompositionDiagram([self.q_0_1, self.p_1_3])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -371,7 +371,7 @@ class TestCopyRule(unittest.TestCase):
         assert all(isinstance(d, QSpider) and d.phase == self.phase_x2 for d in result.diagrams)
 
     def test_apply_single_case_2_q_1_0_p_2_1(self):
-        """Case 2: Q(g, 1, 0) ∘ P(φ, 2, 1) → Q(g, 1, 0) ⊗ Q(g, 1, 0)."""
+        """Case 2: Q(1, 0, g) ∘ P(φ, 2, 1) → Q(1, 0, g) ⊗ Q(1, 0, g)."""
         comp = CompositionDiagram([self.p_2_1, self.q_1_0])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -384,7 +384,7 @@ class TestCopyRule(unittest.TestCase):
         assert all(d.num_inputs == 1 and d.num_outputs == 0 for d in result.diagrams)
 
     def test_apply_single_case_3_q_1_2_p_0_1(self):
-        """Case 3: Q(φ, 1, 2) ∘ P(g, 0, 1) → P(g, 0, 1) ⊗ P(g, 0, 1)."""
+        """Case 3: Q(1, 2, φ) ∘ P(0, 1, g) → P(0, 1, g) ⊗ P(0, 1, g)."""
         comp = CompositionDiagram([self.p_0_1, self.q_1_2])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
@@ -397,7 +397,7 @@ class TestCopyRule(unittest.TestCase):
         assert all(d.num_inputs == 0 and d.num_outputs == 1 for d in result.diagrams)
 
     def test_apply_single_case_4_p_1_0_q_2_1(self):
-        """Case 4: P(g, 1, 0) ∘ Q(φ, 2, 1) → P(g, 1, 0) ⊗ P(g, 1, 0)."""
+        """Case 4: P(1, 0, g) ∘ Q(2, 1, φ) → P(1, 0, g) ⊗ P(1, 0, g)."""
         comp = CompositionDiagram([self.q_2_1, self.p_1_0])
         graph = to_graph(comp)
         matches = self.rule.match(graph)
