@@ -57,10 +57,27 @@ children (`first_id`/`second_id`), in which case the terminal is spliced into th
 via the same `_replace_in_parent`/`_install_void_placeholder` machinery `CopyRule` uses, the
 one relevant `I1`/`I2`/`J1`/`J2` entry is remapped, and `_recompute_contracted_arity`/
 `_propagate_arity_to_parent` re-derive the contraction's arity from the terminal's own
-$(1,0)$/$(0,1)$ shape. The terminal's *own* immediate parent, though, is still never allowed to
-be a `ContractedDiagram`'s own two halves — it must stay a genuine standalone leaf — and
-`PassthroughRule` still owns the case where *both* halves are bare, different-color spiders
-being spliced together (see below).
+$(1,0)$/$(0,1)$ shape. Every identity/`Swap` passthrough the chase crossed is then voided (not
+reset to a same-arity identity, since the terminal has moved away and the wire they used to
+carry now goes nowhere) and the resulting shrink propagated up through its own parent, the
+same way the contraction's own shrink is. The terminal's *own* immediate parent, though, is
+still never allowed to be a `ContractedDiagram`'s own two halves — it must stay a genuine
+standalone leaf — and `PassthroughRule` still owns the case where *both* halves are bare,
+different-color spiders being spliced together (see below).
+
+`TerminalAbsorptionRule`'s sixth sub-case, `bare_cap_fusion`, is not found via this chase at
+all: it scans `registry.contracted_diagrams` directly for a contraction whose `first`/`second`
+is *already* a genuine terminal with its sole port entirely internal — no external terminal
+ever needs to chase in, since the shape is self-contained. It's the closest thing
+`TerminalAbsorptionRule` has to `FusionRule`'s own `match_contracted` (a match confined to one
+`ContractedDiagram` node's own children), rather than a cross-container splice.
+
+`ChainReductionRule`'s own second match kind, commute-and-fuse (see
+{doc}`../user_guide/rewrite_rules`), reuses the same `_chase_identity_chain` primitive from a
+candidate middle node outward in both directions, but needs no cross-container substitution
+logic either: every node it touches keeps its own slot, container, and arity — only `phase`/
+`type` change, and the "moved" element is left in place, reset to a same-arity identity
+(diagrammatically free, since an identity commutes with everything).
 
 ## The `RewriteRule` contract
 

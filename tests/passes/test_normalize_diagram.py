@@ -26,6 +26,7 @@ from sympy import pi
 
 from cvzx.ir.base import (
     CompositionDiagram,
+    ContractedDiagram,
     Diagram,
     Fourier,
     PSpider,
@@ -34,9 +35,10 @@ from cvzx.ir.base import (
     VoidDiagram,
     ZxPoly,
 )
-from cvzx.ir.gates import ControlledSumGate, PhaseRotationGate, SqueezingGate
+from cvzx.ir.gates import BeamsplitterGate, ControlledSumGate, PhaseRotationGate, SqueezingGate
 from cvzx.passes.normalize import normalize_diagram
 from cvzx.backends.nx.graph import to_graph
+from cvzx.backends.nx.rules import ChainReductionRule
 from cvzx.visualization.debug import visualize_before_after
 
 _ZERO = ZxPoly({})
@@ -251,26 +253,37 @@ def _real_wiring(diagram):  # ruff: ignore[missing-type-function-argument, missi
 class TestBailOutCases(unittest.TestCase):
     """The two documented no-op cases: `ContractedDiagram` present, or no leaves."""
 
-    def test_bare_contracted_diagram_is_returned_unchanged(self):
-        """A `ContractedDiagram` at the top level is out of scope and untouched.
+    def test_bare_contracted_diagram_is_reconstructed_unchanged(self):
+        """A top-level `ContractedDiagram`, alone, normalizes to an equal (freshly-built) diagram.
 
-        `normalize_diagram` is meant to run *before* `expand_two_mode_gates`
-        (see module docstring); a `ContractedDiagram` is exactly what that
-        expansion produces, so encountering one means normalization already
-        ran (or was never applicable), and the function must not attempt to
-        re-derive wiring it wasn't designed to trace through.
+        `ContractedDiagram` is treated as a single opaque leaf (see
+        module docstring) -- with nothing else around it to normalize
+        against, the single-leaf, single-stage result is the contraction
+        itself, reconstructed via `reconstruct_contracted_node` rather
+        than handed back `is`-identical.
         """
         expanded = ControlledSumGate(control=2, target=1).expand()
         assert type(expanded).__name__ == "ContractedDiagram"
         result = normalize_diagram(expanded)
-        assert result is expanded
+        assert result is not expanded
+        assert result == expanded
 
-    def test_nested_contracted_diagram_is_returned_unchanged(self):
-        """The same bail-out fires however deeply the `ContractedDiagram` is nested."""
+    def test_nested_contracted_diagram_normalizes_around_it(self):
+        """A `ContractedDiagram` tensored alongside an identity wire normalizes as one opaque leaf.
+
+        The contraction's own kept ports become one row; the untouched
+        identity wire is elided per the usual bare-identity handling.
+        """
         expanded = ControlledSumGate(control=2, target=1).expand()
         wrapped = TensorDiagram([expanded, _identity()])
         result = normalize_diagram(wrapped)
-        assert result is wrapped
+        assert result.num_inputs == wrapped.num_inputs
+        assert result.num_outputs == wrapped.num_outputs
+        assert isinstance(result, TensorDiagram)
+        contracted, identity_wire = result.diagrams
+        assert contracted == expanded
+        assert identity_wire.num_inputs == 1
+        assert identity_wire.num_outputs == 1
 
     def test_diagram_with_no_leaves_is_returned_unchanged(self):
         """An empty `TensorDiagram([])` has nothing to normalize."""
@@ -550,6 +563,125 @@ class TestSemanticContentIsPreserved(unittest.TestCase):
             assert twice.num_inputs == circuit.num_inputs, circuit
             assert twice.num_outputs == circuit.num_outputs, circuit
             assert _leaf_signatures(twice) == _leaf_signatures(circuit), circuit
+
+
+class TestContractedDiagramHandling(unittest.TestCase):
+    """`ContractedDiagram` is treated as one opaque leaf (module docstring), not a bail-out.
+
+    Each test's structural check is a direct `==` comparison against the
+    original `ContractedDiagram` object (not `_leaf_signatures`, which
+    only recognizes `kind in {"proper", "compact"}` leaves and would
+    silently skip a container-kind `ContractedDiagram` node entirely) --
+    `reconstruct_contracted_node` rebuilds an equal, if not `is`-identical,
+    object, exactly like `to_diagram()` itself already does elsewhere.
+    """
+
+    def test_contraction_sandwiched_between_real_gates_normalizes_around_it(self):
+        """A `ContractedDiagram` composed between two ordinary 1-mode gates keeps its own value.
+
+        The two flanking gates are real content, not filler -- unlike
+        the bail-out tests' bare identity wire, this checks that
+        `normalize_diagram` correctly threads real wiring on both sides
+        of the opaque contraction leaf.
+        """
+        contracted = ContractedDiagram(QSpider(1, 1, ZxPoly({})), PSpider(1, 1, ZxPoly({})), [0], [0], [], [])
+        left = SqueezingGate(2.0)
+        right = PhaseRotationGate(0.5)
+        circuit = CompositionDiagram([left, contracted, right])
+
+        result = normalize_diagram(circuit)
+
+        assert result.num_inputs == circuit.num_inputs
+        assert result.num_outputs == circuit.num_outputs
+        sigs = _leaf_signatures(result)
+        # `_leaf_signatures` only sees proper/compact leaves, so it
+        # correctly picks up the two flanking gates even though it can't
+        # see the contraction itself.
+        assert ("SqueezingGate", 1, 1, None, None, repr(2.0)) in sigs
+        assert ("PhaseRotationGate", 1, 1, None, None, repr(0.5)) in sigs
+        # The contraction itself must appear somewhere, unchanged.
+        found = [d for d in _all_leaves(result) if isinstance(d, ContractedDiagram)]
+        assert len(found) == 1
+        assert found[0] == contracted
+
+    def test_two_adjacent_top_level_contractions_both_preserved(self):
+        """Two side-by-side (non-nested) `ContractedDiagram`s each keep their own identity.
+
+        Regression test for the leaf-level dependency graph incorrectly
+        redirecting a raw edge on one contraction's `first`/`second` to
+        the WRONG contraction, or losing track of which of two adjacent
+        contractions' kept ports feeds which.
+        """
+        c1 = ContractedDiagram(QSpider(1, 2, ZxPoly({})), PSpider(2, 1, ZxPoly({})), [1], [0], [], [])
+        c2 = ContractedDiagram(PSpider(1, 2, ZxPoly({})), QSpider(2, 1, ZxPoly({})), [1], [0], [], [])
+        middle = TensorDiagram([SqueezingGate(1.5), SqueezingGate(0.5)])
+        circuit = CompositionDiagram([c1, middle, c2])
+
+        result = normalize_diagram(circuit)
+
+        assert result.num_inputs == circuit.num_inputs
+        assert result.num_outputs == circuit.num_outputs
+        found = [d for d in _all_leaves(result) if isinstance(d, ContractedDiagram)]
+        assert len(found) == 2
+        assert c1 in found
+        assert c2 in found
+
+    def test_beamsplitter_general_case_normalizes_and_still_reduces(self):
+        """A symbolic (non-balanced) `BeamsplitterGate.expand()` -- two contractions plus 3 squeezes.
+
+        End-to-end regression for the `sq1`/`sq4` object-identity fix in
+        `BeamsplitterGate.expand()`'s general branch: reusing the same
+        instance at both ends used to make `normalize_diagram` see a
+        cyclic leaf-level dependency. Also checks that rules can still
+        run to a meaningful fixed point on the normalized form.
+        """
+        from sympy import Symbol
+
+        theta = Symbol("theta", real=True)
+        expanded = BeamsplitterGate(theta, parametric=True).expand()
+
+        result = normalize_diagram(expanded)
+        assert result.num_inputs == expanded.num_inputs
+        assert result.num_outputs == expanded.num_outputs
+
+        graph = to_graph(result)
+        ChainReductionRule().apply_rule(graph)
+        graph.rebuild_registry()
+        # Should not raise, and should still be a valid, same-arity diagram.
+        from cvzx.backends.nx.graph import to_diagram as _to_diagram
+
+        reduced = _to_diagram(graph)
+        assert reduced.num_inputs == expanded.num_inputs
+        assert reduced.num_outputs == expanded.num_outputs
+
+    def test_contraction_nested_inside_another_still_bails_out_safely(self):
+        """A `ContractedDiagram` whose own `first`/`second` is ANOTHER `ContractedDiagram` is left unchanged.
+
+        This module only handles a top-level contraction whose kept
+        ports resolve down to a genuine leaf -- a nested one is exactly
+        the shape `_build_contracted_port_remaps` refuses (returns
+        `None` for), and `normalize_diagram` must fall back to leaving
+        the input untouched rather than guessing.
+        """
+        inner = ContractedDiagram(QSpider(2, 1, ZxPoly({})), PSpider(1, 2, ZxPoly({})), [], [], [1], [0])
+        outer = ContractedDiagram(inner, PSpider(2, 2, ZxPoly({})), [0], [0], [], [])
+        result = normalize_diagram(outer)
+        assert result is outer
+
+
+def _all_leaves(diagram):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    """Every leaf `Diagram` object in `diagram`'s tree, `ContractedDiagram`s included as atomic leaves.
+
+    Unlike `_leaf_signatures` (which reads graph-node attrs and only
+    ever sees `kind in {"proper", "compact"}` nodes), this walks the
+    `Diagram` object tree directly so a `ContractedDiagram` -- itself
+    the thing under test -- is found rather than skipped.
+    """
+    if isinstance(diagram, ContractedDiagram):
+        return [diagram]
+    if isinstance(diagram, (CompositionDiagram, TensorDiagram)):
+        return [leaf for sub in diagram.diagrams for leaf in _all_leaves(sub)]
+    return [diagram]
 
 
 def _visualize_normalize_diagram_examples() -> None:

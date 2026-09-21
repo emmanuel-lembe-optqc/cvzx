@@ -1670,7 +1670,9 @@ class FusionRule(RewriteRule):
         is_root = contracted_attrs.get("is_root", False)
 
         if special_case:
+            down = True
             if second_type != "TensorDiagram":
+                down = False
                 first_id, second_id = second_id, first_id
                 # `first_attrs` was captured against the pre-swap
                 # `first_id` (the `TensorDiagram`, whose own `phase` is
@@ -1699,7 +1701,10 @@ class FusionRule(RewriteRule):
             })
 
             graph[id_map[second_id]]["sub_diagram_ids"].pop(-1)
-            graph[id_map[second_id]]["sub_diagram_ids"] = [first_id] + graph[id_map[second_id]]["sub_diagram_ids"]
+            if down:
+                graph[id_map[second_id]]["sub_diagram_ids"] = [first_id] + graph[id_map[second_id]]["sub_diagram_ids"]
+            else:
+                graph[id_map[second_id]]["sub_diagram_ids"].append(first_id)
             num_output = graph[id_map[second_id]]["num_outputs"]
             graph[id_map[second_id]]["external_output_mapping"][num_output] = (0, 0)
             graph[id_map[second_id]]["external_outputs"].append(num_output)
@@ -2647,7 +2652,239 @@ class ChainReductionRule(RewriteRule):
             used_nodes.update(identity_chain)
 
         matches.sort(key=lambda m: m["node_ids"][0])
+
+        matches.extend(self._find_commute_matches(graph, id_map, used_nodes))
+
         return matches
+
+    def _get_squeeze_param(self, graph: rx.PyDiGraph, id_map: dict[int, int], node_id: int) -> Any:  # ruff: ignore[any-type]
+        """Return a bare `(1, 1)` `SqueezingGate` node's own `tau`, else `None`.
+
+        Returns
+        -------
+        Any | None
+        """
+        attrs = graph[id_map[node_id]]
+        if attrs.get("type") != "SqueezingGate" or attrs.get("num_inputs") != 1 or attrs.get("num_outputs") != 1:
+            return None
+        return attrs.get("phase")
+
+    def _get_disp_param(self, graph: rx.PyDiGraph, id_map: dict[int, int], node_id: int) -> tuple[str, ZxPoly] | None:
+        """Return `(color, phase)` if `node_id` is a bare `(1, 1)` spider with phase in R1[x].
+
+        Ported from the nx backend -- see its own docstring for the full
+        rationale.
+
+        Returns
+        -------
+        tuple[str, ZxPoly] | None
+        """
+        attrs = graph[id_map[node_id]]
+        node_type = attrs.get("type")
+        if node_type not in {"QSpider", "PSpider"}:
+            return None
+        if attrs.get("num_inputs") != 1 or attrs.get("num_outputs") != 1:
+            return None
+        phase = attrs.get("phase")
+        if phase is None or phase.is_zero or phase.degree() > 1:
+            return None
+        return node_type, phase
+
+    @staticmethod
+    def _squeeze_cross(phase: ZxPoly, tau: Any, is_q_spider: bool) -> ZxPoly:  # ruff: ignore[any-type, boolean-type-hint-positional-argument]
+        """`Sq(tau)` crossing a spider with phase `phase`. Same formula as the nx backend's own helper.
+
+        Returns
+        -------
+        ZxPoly
+        """
+        factor = tau if is_q_spider else 1 / tau
+        return ZxPoly({degree: coeff * factor**degree for degree, coeff in phase.coeffs.items()})
+
+    @staticmethod
+    def _shift_cross(phase: ZxPoly, a: Any) -> ZxPoly:  # ruff: ignore[any-type]
+        """A "Disp" (linear coefficient `a`) crossing its opposite-color spider.
+
+        Same formula as the nx backend's own helper.
+
+        Returns
+        -------
+        ZxPoly
+        """
+        x = ZxPoly._var  # ruff: ignore[private-member-access]
+        shifted_expr = (phase.as_expr().subs(x, x + a)).expand()
+        shifted_poly = Poly(shifted_expr, x)
+        return ZxPoly({int(monom[0]): coeff for monom, coeff in shifted_poly.as_dict().items()})
+
+    def _try_mover_target_mover(
+        self, graph: rx.PyDiGraph, id_map: dict[int, int], a_id: int, b_id: int, c_id: int
+    ) -> dict | None:
+        """Check `Sq/Disp(a_id) -- Spider(b_id) -- Sq/Disp(c_id)`. Ported from the nx backend -- see its own docstring.
+
+        Returns
+        -------
+        dict | None
+        """
+        b_attrs = graph[id_map[b_id]]
+        if b_attrs.get("type") not in {"QSpider", "PSpider"}:
+            return None
+        b_phase = b_attrs.get("phase")
+        is_q = b_attrs["type"] == "QSpider"
+
+        a_tau = self._get_squeeze_param(graph, id_map, a_id)
+        c_tau = self._get_squeeze_param(graph, id_map, c_id)
+        if a_tau is not None and c_tau is not None:
+            new_b_phase = self._squeeze_cross(b_phase, a_tau, is_q)
+            reduced = self.reduce_chain("Sq", [a_tau, c_tau])
+            return {
+                "kind": "commute",
+                "node_ids": [a_id, b_id, c_id],
+                "reset_id": a_id,
+                "target_update": (b_id, new_b_phase),
+                "reduce_update": (c_id, reduced),
+                "container_id": ("commute", a_id, b_id, c_id),
+            }
+
+        a_disp = self._get_disp_param(graph, id_map, a_id)
+        c_disp = self._get_disp_param(graph, id_map, c_id)
+        if a_disp is not None and c_disp is not None:
+            a_color, a_phase = a_disp
+            c_color, c_phase = c_disp
+            if a_color == c_color and a_color != b_attrs["type"]:
+                new_b_phase = self._shift_cross(b_phase, a_phase.coeffs.get(1, 0))
+                letter = "Q" if a_color == "QSpider" else "P"
+                reduced = self.reduce_chain(letter, [a_phase, c_phase], {"num_inputs": 1, "num_outputs": 1})
+                return {
+                    "kind": "commute",
+                    "node_ids": [a_id, b_id, c_id],
+                    "reset_id": a_id,
+                    "target_update": (b_id, new_b_phase),
+                    "reduce_update": (c_id, reduced),
+                    "container_id": ("commute", a_id, b_id, c_id),
+                }
+        return None
+
+    def _try_target_mover_target(
+        self, graph: rx.PyDiGraph, id_map: dict[int, int], a_id: int, b_id: int, c_id: int
+    ) -> dict | None:
+        """Check `Spider(a_id) -- Sq/Disp(b_id) -- Spider(c_id)`. Ported from the nx backend -- see its own docstring.
+
+        Returns
+        -------
+        dict | None
+        """
+        a_attrs = graph[id_map[a_id]]
+        c_attrs = graph[id_map[c_id]]
+        color = a_attrs.get("type")
+        if color not in {"QSpider", "PSpider"} or c_attrs.get("type") != color:
+            return None
+        # See the nx backend's own comment: both flanks must be bare
+        # (1, 1) spiders, not just non-terminal -- the fuse step's
+        # hardcoded (1, 1) `gate_info` would otherwise silently discard
+        # a wider flank's other ports.
+        if a_attrs.get("num_inputs") != 1 or a_attrs.get("num_outputs") != 1:
+            return None
+        if c_attrs.get("num_inputs") != 1 or c_attrs.get("num_outputs") != 1:
+            return None
+        a_phase = a_attrs.get("phase")
+        c_phase = c_attrs.get("phase")
+        is_q = color == "QSpider"
+        letter = "Q" if is_q else "P"
+
+        b_tau = self._get_squeeze_param(graph, id_map, b_id)
+        if b_tau is not None:
+            crossed_c_phase = self._squeeze_cross(c_phase, b_tau, is_q)
+            reduced = self.reduce_chain(letter, [a_phase, crossed_c_phase], {"num_inputs": 1, "num_outputs": 1})
+            return {
+                "kind": "commute",
+                "node_ids": [a_id, b_id, c_id],
+                "reset_id": c_id,
+                "reduce_update": (a_id, reduced),
+                "container_id": ("commute", a_id, b_id, c_id),
+            }
+
+        b_disp = self._get_disp_param(graph, id_map, b_id)
+        if b_disp is not None:
+            b_color, b_phase = b_disp
+            if b_color != color:
+                crossed_c_phase = self._shift_cross(c_phase, b_phase.coeffs.get(1, 0))
+                reduced = self.reduce_chain(letter, [a_phase, crossed_c_phase], {"num_inputs": 1, "num_outputs": 1})
+                return {
+                    "kind": "commute",
+                    "node_ids": [a_id, b_id, c_id],
+                    "reset_id": c_id,
+                    "reduce_update": (a_id, reduced),
+                    "container_id": ("commute", a_id, b_id, c_id),
+                }
+        return None
+
+    def _find_commute_matches(
+        self, graph: rx.PyDiGraph, id_map: dict[int, int], exclude_nodes: set[int]
+    ) -> list[dict]:
+        """Find every `mover-target-mover`/`target-mover-target` triple to commute-and-fuse.
+
+        Ported from the nx backend -- see its own docstring for the full
+        rationale.
+
+        Returns
+        -------
+        list[dict]
+        """
+        matches: list[dict] = []
+        used = set(exclude_nodes)
+
+        for b_id in sorted(id_map):
+            if b_id in used:
+                continue
+            b_attrs = graph[id_map[b_id]]
+            if b_attrs.get("kind") not in {"proper", "compact"}:
+                continue
+            if b_attrs.get("num_inputs") != 1 or b_attrs.get("num_outputs") != 1:
+                continue
+
+            a_id, _, a_chain = self._chase_identity_chain(graph, id_map, b_id, forward=False)
+            c_id, _, c_chain = self._chase_identity_chain(graph, id_map, b_id, forward=True)
+            if a_id is None or c_id is None or a_id == c_id:
+                continue
+            identity_chain = a_chain + c_chain
+            claimed = {a_id, c_id, *identity_chain}
+            if claimed & used:
+                continue
+
+            match = self._try_mover_target_mover(graph, id_map, a_id, b_id, c_id)
+            if match is None:
+                match = self._try_target_mover_target(graph, id_map, a_id, b_id, c_id)
+            if match is not None:
+                match["identity_chain"] = identity_chain
+                matches.append(match)
+                used.update(match["node_ids"])
+                used.update(identity_chain)
+
+        return matches
+
+    def _apply_commute(self, graph: rx.PyDiGraph, id_map: dict[int, int], match: dict) -> None:
+        """Apply a commute-and-fuse match: update, fuse, and reset in place.
+
+        Ported from the nx backend -- see its own docstring for the full
+        rationale.
+        """
+        if any(node_id not in id_map for node_id in match["node_ids"]):
+            return
+
+        target_update = match.get("target_update")
+        if target_update is not None:
+            node_id, new_phase = target_update
+            graph[id_map[node_id]]["phase"] = new_phase
+
+        reduce_node_id, reduced_gate = match["reduce_update"]
+        self._update_node_for_reduced_gate(graph, id_map, reduce_node_id, reduced_gate)
+
+        self._reset_to_identity(graph, id_map, match["reset_id"])
+
+        for passthrough_id in match.get("identity_chain", []):
+            if passthrough_id not in id_map or graph[id_map[passthrough_id]]["type"] == "Swap":
+                continue
+            self._reset_to_identity(graph, id_map, passthrough_id)
 
     def _is_chain_start(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
         self,
@@ -3017,6 +3254,11 @@ class ChainReductionRule(RewriteRule):
         """
         graph = cvzx_graph.graph
         id_map = _get_id_map(graph)
+
+        if match.get("kind") == "commute":
+            self._apply_commute(graph, id_map, match)
+            return
+
         gate_type = match["gate_type"]
         values = match["values"]
         node_ids = match["node_ids"]
@@ -3638,7 +3880,9 @@ class TerminalAbsorptionRule(RewriteRule):
         """
         self.assume_infinite_squeezing = assume_infinite_squeezing
 
-    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:  # ruff: ignore[too-many-locals, complex-structure]
+    def match(  # ruff: ignore[too-many-locals, complex-structure, too-many-branches, too-many-statements]
+        self, cvzx_graph: CVZXGraph
+    ) -> list[dict]:
         """Find all gate/terminal pairs that can be absorbed.
 
         Uses the same candidate-and-chase scan as `CopyRule.match` (see
@@ -3768,7 +4012,153 @@ class TerminalAbsorptionRule(RewriteRule):
             used_nodes.update(identity_chain)
 
         ordered_matches.sort(key=operator.itemgetter(0, 1))
-        return [entry[2] for entry in ordered_matches]
+        matches = [entry[2] for entry in ordered_matches]
+
+        used_ids = {nid for m in matches for nid in m.get("node_ids", [m.get("terminal_id")])}
+        for contracted_id in sorted(registry.contracted_diagrams):
+            if contracted_id in used_ids:
+                continue
+            cap_match = self._try_fuse_bare_contracted_terminal(graph, id_map, contracted_id)
+            if cap_match is None:
+                continue
+            if used_ids & {cap_match["state_id"], cap_match["survivor_id"]}:
+                continue
+            matches.append(cap_match)
+            used_ids.update({contracted_id, cap_match["state_id"], cap_match["survivor_id"]})
+
+        return matches
+
+    def _try_fuse_bare_contracted_terminal(  # ruff: ignore[too-many-branches, too-many-locals, complex-structure]
+        self, graph: rx.PyDiGraph, id_map: dict[int, int], contracted_id: int
+    ) -> dict | None:
+        """Fuse a `ContractedDiagram` whose one half is *already* a fully-internal terminal.
+
+        Ported from the nx backend's `TerminalAbsorptionRule` -- see its
+        own docstring for the full rationale (an already-terminal spider
+        directly occupying one of `contracted_id`'s own two halves, its
+        single port entirely consumed by the contraction itself with
+        nothing external connecting to it, fuses directly into its
+        partner and the whole `ContractedDiagram` collapses into just
+        the partner).
+
+        Returns
+        -------
+        dict | None
+            A match with `kind: "bare_cap_fusion"`, or `None` if neither
+            half qualifies.
+        """
+        attrs = graph[id_map[contracted_id]]
+        first_id, second_id = attrs.get("first_id"), attrs.get("second_id")
+        i1, i2 = attrs.get("I1", []), attrs.get("I2", [])
+        j1, j2 = attrs.get("J1", []), attrs.get("J2", [])
+
+        candidates = [
+            (second_id, True, first_id, False, i2, i1),
+            (first_id, False, second_id, True, i1, i2),
+            (first_id, True, second_id, False, j1, j2),
+            (second_id, False, first_id, True, j2, j1),
+        ]
+        for state_id, state_is_input, survivor_id, survivor_is_input, state_link, survivor_link in candidates:
+            if len(state_link) != 1 or state_link[0] != 0:
+                continue
+            state_attrs = graph[id_map[state_id]]
+            if state_attrs.get("type") not in {"QSpider", "PSpider"}:
+                continue
+            s_in, s_out = state_attrs.get("num_inputs", 0), state_attrs.get("num_outputs", 0)
+            if s_in + s_out != 1 or (s_in if state_is_input else s_out) != 1:
+                continue
+
+            survivor_attrs = graph[id_map[survivor_id]]
+            survivor_type = survivor_attrs.get("type")
+            if survivor_type not in {"QSpider", "PSpider"}:
+                continue
+            if len(survivor_link) != 1:
+                continue
+            survivor_count = survivor_attrs.get("num_inputs" if survivor_is_input else "num_outputs", 0)
+            if survivor_link[0] != survivor_count - 1:
+                continue
+            survivor_other_count = survivor_attrs.get("num_outputs" if survivor_is_input else "num_inputs", 0)
+            if survivor_count - 1 == 0 and survivor_other_count == 0:
+                # See the nx backend's own comment: both halves fully
+                # mutually consumed by this one wire is a closed scalar,
+                # not a spider with a phase left to carry -- this
+                # codebase has no scalar bookkeeping, so leave it alone.
+                continue
+
+            state_phase = state_attrs.get("phase")
+            survivor_phase = survivor_attrs.get("phase")
+            if state_phase is None or survivor_phase is None:
+                continue
+
+            state_type = state_attrs["type"]
+            if state_type == survivor_type:
+                new_phase = survivor_phase + state_phase
+            else:
+                if not self.assume_infinite_squeezing:
+                    continue
+                if state_phase.is_zero or state_phase.degree() > 1:
+                    continue
+                new_phase = self._displacement_shift(survivor_phase, state_phase.coeffs.get(1, 0))
+
+            new_count = survivor_count - 1
+            return {
+                "kind": "bare_cap_fusion",
+                "contracted_id": contracted_id,
+                "state_id": state_id,
+                "survivor_id": survivor_id,
+                "survivor_is_input": survivor_is_input,
+                "new_count": new_count,
+                "new_phase": new_phase,
+            }
+        return None
+
+    @staticmethod
+    def _displacement_shift(phase: ZxPoly, a: Any) -> ZxPoly:  # ruff: ignore[any-type]
+        """Shift `phase`'s variable by `a`. Same formula as the nx backend's own helper.
+
+        Returns
+        -------
+        ZxPoly
+        """
+        x = ZxPoly._var  # ruff: ignore[private-member-access]
+        shifted_expr = (phase.as_expr().subs(x, x + a)).expand()
+        shifted_poly = Poly(shifted_expr, x)
+        return ZxPoly({int(monom[0]): coeff for monom, coeff in shifted_poly.as_dict().items()})
+
+    def _apply_bare_cap_fusion(self, graph: rx.PyDiGraph, id_map: dict[int, int], match: dict) -> None:
+        """Fold `state_id` into `survivor_id` and replace `contracted_id` with `survivor_id`.
+
+        Parameters
+        ----------
+        graph : rx.PyDiGraph
+            The graph to modify.
+        id_map : dict[int, int]
+            Logical node ID -> `graph` index map.
+        match : dict
+            Match from `_try_fuse_bare_contracted_terminal`.
+        """
+        contracted_id = match["contracted_id"]
+        state_id = match["state_id"]
+        survivor_id = match["survivor_id"]
+        if contracted_id not in id_map or state_id not in id_map or survivor_id not in id_map:
+            return
+
+        survivor_attrs = graph[id_map[survivor_id]]
+        count_key = "num_inputs" if match["survivor_is_input"] else "num_outputs"
+        list_key = "external_inputs" if match["survivor_is_input"] else "external_outputs"
+        survivor_attrs["phase"] = match["new_phase"]
+        survivor_attrs[count_key] = match["new_count"]
+        survivor_attrs[list_key] = list(range(match["new_count"]))
+
+        parent_id = graph[id_map[contracted_id]].get("container_id")
+        if parent_id is not None and parent_id in id_map:
+            self._replace_in_parent(graph, id_map, parent_id, contracted_id, survivor_id)
+        survivor_attrs["container_id"] = parent_id
+        if graph[id_map[contracted_id]].get("is_root", False):
+            survivor_attrs["is_root"] = True
+
+        _remove_node(graph, id_map, state_id)
+        _remove_node(graph, id_map, contracted_id)
 
     def _check_pair(self, graph: rx.PyDiGraph, id_map: dict[int, int], first_id: int, second_id: int) -> dict | None:
         """Check if a pair of adjacent nodes forms an absorbable gate/terminal pattern.
@@ -4206,6 +4596,9 @@ class TerminalAbsorptionRule(RewriteRule):
         if match.get("kind") == "contracted_child":
             self._apply_contracted_child(graph, id_map, match)
             return
+        if match.get("kind") == "bare_cap_fusion":
+            self._apply_bare_cap_fusion(graph, id_map, match)
+            return
 
         terminal_id, gate_id = match["node_ids"]
         if terminal_id not in id_map or gate_id not in id_map:
@@ -4286,12 +4679,212 @@ class TerminalAbsorptionRule(RewriteRule):
         arity_change = self._recompute_contracted_arity(graph, id_map, contracted_id)
         self._propagate_arity_to_parent(graph, id_map, contracted_id, *arity_change)
 
-        # 7. Every identity/Swap passthrough the chase crossed is reset in
-        # place, same as ordinary absorption.
+        # 7. Unlike ordinary absorption -- where the terminal keeps its own
+        # slot and the identity chain still carries a real wire onward, so
+        # resetting each crossed node in place to a same-arity identity is
+        # correct -- here the terminal has moved into the contraction and
+        # its old slot got a VoidDiagram instead. The wire the chain used
+        # to carry (from the terminal's old slot to state1's old port) no
+        # longer goes anywhere: every crossed node is now fully dead, not a
+        # live pass-through. Collapse each to a `VoidDiagram(0, 0)` and
+        # propagate the resulting arity shrink up through its own parent,
+        # the same way the contraction's own shrink was just propagated
+        # above -- reset_to_identity would leave it at its old (nonzero)
+        # arity, stranding a port with nothing feeding it.
         for passthrough_id in match.get("identity_chain", []):
             if passthrough_id not in id_map or graph[id_map[passthrough_id]]["type"] == "Swap":
                 continue
-            self._reset_to_identity(graph, id_map, passthrough_id)
+            chain_attrs = graph[id_map[passthrough_id]]
+            chain_parent_id = chain_attrs.get("container_id")
+            old_chain_inputs = chain_attrs.get("num_inputs", 0)
+            old_chain_outputs = chain_attrs.get("num_outputs", 0)
+            if chain_parent_id is None or chain_parent_id not in id_map:
+                continue
+            void_id = self._install_void_placeholder(
+                graph, id_map, chain_parent_id, passthrough_id, num_inputs=0, num_outputs=0
+            )
+            if old_chain_inputs != 0 or old_chain_outputs != 0:
+                id_map = _get_id_map(graph)
+                self._propagate_arity_to_parent(
+                    graph, id_map, void_id, old_chain_inputs, 0, old_chain_outputs, 0, {}, {}
+                )
+                id_map = _get_id_map(graph)
+
+
+class VoidPortPruningRule(RewriteRule):
+    r"""Drop a proper node's port when it dead-ends directly at a `VoidDiagram`.
+
+    Ported from the nx backend's `VoidPortPruningRule` -- see its
+    docstring for the full rationale. A `VoidDiagram` carries no
+    physical content, so a genuine gate's port wired by a single
+    "composition" edge straight to one is provably dead; this rule trims
+    that port off the live node and its mirror off the `VoidDiagram`,
+    restricted to a port that is already the *last* one on its side on
+    both ends (so neither endpoint needs its remaining ports renumbered),
+    and ripples each shrink up via `_propagate_arity_to_parent`.
+    """
+
+    def match(self, cvzx_graph: CVZXGraph) -> list[dict]:
+        """Find every proper node with a last port wired directly to a `VoidDiagram`.
+
+        Returns
+        -------
+        list[dict]
+            One entry per prunable port: `node_id`, `is_input`, `port`,
+            `void_id`, `void_port`, and a synthetic `container_id`.
+        """
+        graph = cvzx_graph.graph
+        id_map = _get_id_map(graph)
+        matches: list[dict] = []
+        used: set[int] = set()
+
+        for node_id in sorted(id_map):
+            if node_id in used:
+                continue
+            attrs = graph[id_map[node_id]]
+            # Restricted to bare QSpider/PSpider -- see the nx backend's
+            # own comment: every other "proper" gate type (Swap,
+            # ControlledZGate, ...) has fixed, paired port semantics that
+            # a blind port-count decrement would corrupt.
+            if attrs.get("kind") != "proper" or attrs.get("type") not in {"QSpider", "PSpider"}:
+                continue
+
+            # See the nx backend's own match() docstring comment: never
+            # prune a node already down to its last port if it still
+            # carries a non-zero phase -- that would silently discard
+            # the physical contribution that phase represents.
+            phase = attrs.get("phase")
+            has_phase = phase is not None and not phase.is_zero
+            num_inputs_now = attrs.get("num_inputs", 0)
+            num_outputs_now = attrs.get("num_outputs", 0)
+            if has_phase and num_inputs_now + num_outputs_now <= 1:
+                continue
+
+            num_outputs = attrs.get("num_outputs", 0)
+            if num_outputs > 0:
+                port = num_outputs - 1
+                neighbor_id, neighbor_port = self._composition_step(graph, id_map, node_id, port, forward=True)
+                if (
+                    neighbor_id is not None
+                    and neighbor_id not in used
+                    and graph[id_map[neighbor_id]].get("type") == "VoidDiagram"
+                    and neighbor_port == graph[id_map[neighbor_id]].get("num_inputs", 0) - 1
+                ):
+                    matches.append({
+                        "node_id": node_id,
+                        "is_input": False,
+                        "port": port,
+                        "void_id": neighbor_id,
+                        "void_port": neighbor_port,
+                        "container_id": ("void_prune", node_id, False),
+                    })
+                    used.add(node_id)
+                    used.add(neighbor_id)
+                    continue
+
+            num_inputs = attrs.get("num_inputs", 0)
+            if num_inputs > 0:
+                port = num_inputs - 1
+                neighbor_id, neighbor_port = self._composition_step(graph, id_map, node_id, port, forward=False)
+                if (
+                    neighbor_id is not None
+                    and neighbor_id not in used
+                    and graph[id_map[neighbor_id]].get("type") == "VoidDiagram"
+                    and neighbor_port == graph[id_map[neighbor_id]].get("num_outputs", 0) - 1
+                ):
+                    matches.append({
+                        "node_id": node_id,
+                        "is_input": True,
+                        "port": port,
+                        "void_id": neighbor_id,
+                        "void_port": neighbor_port,
+                        "container_id": ("void_prune", node_id, True),
+                    })
+                    used.add(node_id)
+                    used.add(neighbor_id)
+
+        return matches
+
+    def apply_single(self, cvzx_graph: CVZXGraph, match: dict) -> None:
+        """Trim the matched port off `node_id` and its mirror off `void_id`.
+
+        Parameters
+        ----------
+        cvzx_graph : CVZXGraph
+            The graph to modify.
+        match : dict
+            Match from `match()`.
+        """
+        graph = cvzx_graph.graph
+        id_map = _get_id_map(graph)
+        node_id = match["node_id"]
+        void_id = match["void_id"]
+        if node_id not in id_map or void_id not in id_map:
+            return
+        is_input = match["is_input"]
+
+        if is_input:
+            _remove_edge(graph, id_map, void_id, node_id)
+        else:
+            _remove_edge(graph, id_map, node_id, void_id)
+
+        # See the nx backend's own `apply_single` docstring: shrinking
+        # `node_id` can already shrink `void_id` as a side effect via
+        # `_propagate_arity_to_parent`'s sibling-shrink fallback, so
+        # check first and only shrink it ourselves if that didn't
+        # already happen.
+        void_count_key = "num_outputs" if is_input else "num_inputs"
+        void_old_count = graph[id_map[void_id]].get(void_count_key, 0)
+
+        self._shrink_last_port(graph, id_map, node_id, is_input=is_input)
+
+        id_map = _get_id_map(graph)
+        if void_id in id_map and graph[id_map[void_id]].get(void_count_key, 0) == void_old_count:
+            self._shrink_last_port(graph, id_map, void_id, is_input=not is_input)
+
+    def _shrink_last_port(self, graph: rx.PyDiGraph, id_map: dict[int, int], node_id: int, *, is_input: bool) -> None:
+        """Drop `node_id`'s last input/output port in place and propagate the shrink.
+
+        Parameters
+        ----------
+        graph : rx.PyDiGraph
+            The graph to modify.
+        id_map : dict[int, int]
+            Logical node ID -> `graph` index map.
+        node_id : int
+            The node whose last port (on the `is_input` side) disappears.
+        is_input : bool
+            True to drop the node's last input, False for its last
+            output.
+        """
+        attrs = graph[id_map[node_id]]
+        old_num_inputs = attrs.get("num_inputs", 0)
+        old_num_outputs = attrs.get("num_outputs", 0)
+
+        count_key = "num_inputs" if is_input else "num_outputs"
+        list_key = "external_inputs" if is_input else "external_outputs"
+        new_count = attrs[count_key] - 1
+        attrs[count_key] = new_count
+        attrs[list_key] = list(range(new_count))
+
+        new_num_inputs = attrs.get("num_inputs", 0)
+        new_num_outputs = attrs.get("num_outputs", 0)
+        input_remap = {p: p for p in range(new_num_inputs)}
+        output_remap = {p: p for p in range(new_num_outputs)}
+
+        parent_id = attrs.get("container_id")
+        if parent_id is not None and parent_id in id_map:
+            self._propagate_arity_to_parent(
+                graph,
+                id_map,
+                node_id,
+                old_num_inputs,
+                new_num_inputs,
+                old_num_outputs,
+                new_num_outputs,
+                input_remap,
+                output_remap,
+            )
 
 
 class CopyRule(RewriteRule):

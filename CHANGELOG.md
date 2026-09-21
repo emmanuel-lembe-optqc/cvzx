@@ -240,6 +240,64 @@ development on `main` to date, grouped by area rather than by commit.
   for the full derivation. `CubicPhaseGate` (genuinely non-Gaussian)
   remains the only unsupported compact gate.
 
+- **`VoidPortPruningRule`** (both backends): drops a bare `QSpider`/
+  `PSpider`'s last port when it's wired, by a single "composition" edge
+  (or a chase through zero-phase identities), directly to a
+  `VoidDiagram` — a real gate stranded with one port feeding, or fed by,
+  nothing, typically left behind by a cross-container splice (e.g.
+  `TerminalAbsorptionRule._apply_contracted_child`). Restricted to bare
+  spiders and to a port already last on its side, so neither the port
+  nor its remaining siblings ever need renumbering, and refuses to prune
+  a node already down to one port if its phase is non-zero (that would
+  leave a `(0, 0)` node with a phase nothing binds to). Wired into
+  `optimize()`'s rule list for both backends.
+- **`ChainReductionRule`'s commute-and-fuse match kind** (both backends):
+  a `SqueezingGate`/linear-phase ("Disp") spider directly adjacent to
+  another spider — with a matching mover or same-color target on its
+  far side — commutes across it (`Sq(tau)` scales the crossed phase's
+  variable by `tau`/`1/tau`; a Disp shifts it by its own linear
+  coefficient) and fuses with whatever it lands next to. Covers all four
+  shapes: `Sq/Spider/Sq`, `Disp/Spider/Disp` (opposite color), and
+  `Q/[Sq|Disp]/Q`, `P/[Sq|Disp]/P`. Exact, unconditional identities (no
+  `assume_infinite_squeezing` gate) — unlike absorbing a genuine
+  terminal state/effect, this moves a `(1, 1)` gate across a spider,
+  which is exact regardless of squeezing.
+- **`TerminalAbsorptionRule`'s `bare_cap_fusion` match kind** (both
+  backends): collapses a `ContractedDiagram` whose one half is *already*
+  a genuine `(0, 1)`/`(1, 0)` terminal directly occupying `first_id`/
+  `second_id`, with its single port entirely consumed by the contraction
+  itself (nothing external connects to it) — a shape neither ordinary
+  absorption nor `PassthroughRule` covers. Same-color folds via addition
+  (exact); opposite-color via the shift formula (gated on
+  `assume_infinite_squeezing`, an idealized-eigenstate assumption).
+  Refuses to fold when the survivor's own remaining role would also
+  collapse to `(0, 0)` — that's a genuine closed scalar (a state composed
+  directly into its own opposite effect), which this codebase has no
+  scalar bookkeeping to represent correctly.
+- **`normalize_diagram` now handles a `ContractedDiagram`** instead of
+  unconditionally leaving the whole input untouched the moment one
+  appears anywhere in the tree. A top-level `ContractedDiagram` (one not
+  itself nested inside another's `first`/`second`) is treated as a
+  single opaque leaf: its own kept (external) `num_inputs`/`num_outputs`
+  — already tracked on the graph node — are what the leaf-level
+  dependency graph and row bookkeeping see, while `first`/`second`
+  (and whatever they contain) are reconstructed as one atomic unit via
+  `reconstruct_contracted_node`, never decomposed into separate rows —
+  a contraction's two halves generally can't be represented as
+  independent leaves, since plain `Tensor`/`Compose` nesting has no way
+  to express "these two, though far apart, still share an internal
+  wire." A raw composition edge landing directly on `first`/`second`
+  (never on the `ContractedDiagram` node itself) is redirected to the
+  contraction's own external port via a new reverse-mapping step
+  (`_build_contracted_port_remaps`) before `_build_pred_map` reads it.
+  Falls back to the old unconditional "leave it unchanged" behavior only
+  if a top-level contraction's own kept port resolves down through
+  *another*, nested `ContractedDiagram` instead of a genuine leaf — a
+  shape not yet handled. Unlocks real reductions previously blocked by
+  `optimize()`'s outer loop silently no-op'ing its own per-round
+  `normalize_diagram()` call the moment any contraction survived into a
+  later round (common under `assume_infinite_squeezing=True`).
+
 ### Changed
 
 - Migrated the rewrite-rule engine from a class-based, `Diagram`-walking
@@ -422,3 +480,74 @@ development on `main` to date, grouped by area rather than by commit.
   round-trips after each rule application, matching the manual workflow;
   this alone would have surfaced the `Diagram`-id-collision bug above as
   outright crashes, which is how that bug was actually found and fixed.
+- `ChainReductionRule`'s commute-and-fuse `_try_target_mover_target`
+  (both backends) hardcoded `(1, 1)` as the fused survivor's `gate_info`
+  when checking whether a same-color flank could fuse across a crossed
+  `Sq`/`Disp`, without confirming the flank actually *was* `(1, 1)` —
+  only that it wasn't a terminal. When a flank was really a wider spider
+  (e.g. a `ContractedDiagram` child with further ports of its own,
+  reached because one of its ports happened to chase-connect to the
+  crossed gate), `_update_node_for_reduced_gate` force-overwrote its true
+  arity down to `(1, 1)`, leaving any `I1`/`I2`/`J1`/`J2` list that still
+  referenced the now-missing port pointing at a nonexistent index —
+  surfacing as an `ArityMismatchError` on the next `to_diagram()` call.
+  Now requires both flanks to already be bare `(1, 1)` spiders, matching
+  the restriction `_get_squeeze_param`/`_get_disp_param` already enforce
+  on the mover side of the other commute shape. Found via `optimize()`
+  crashing on `examples/example_4_cubic_phase_injection_nonunit_gain.ipynb`'s
+  diagram under the default `rustworkx` backend.
+- `VoidPortPruningRule` (both backends) matched *any* "proper" node type,
+  not just bare spiders, and its port-shrink is a blind decrement --
+  correct for a `QSpider`/`PSpider` (whose shape is just "however many
+  legs its phase function is applied to"), but wrong for a gate with
+  fixed, paired port semantics, such as `Swap` (whose two inputs/outputs
+  are cross-wired to each other, not independently meaningful). Pruning
+  a `Swap`'s port produced a malformed node (a `Swap` that wasn't
+  `(2, 2)`), corrupting a containing `CompositionDiagram`'s connectivity
+  and crashing on the next `to_diagram()` call. Restricted to
+  `QSpider`/`PSpider` in both backends. Found via `optimize()` crashing
+  on `examples/measurement_induced_squeezer.ipynb`'s diagram -- with
+  both fixes in place, that example now reduces to exactly
+  `SqueezingGate(sin(theta))` (matching the paper) on both backends,
+  where it previously reduced incorrectly or crashed depending on
+  backend and rule ordering.
+- `ChainReductionRule`'s entire commute-and-fuse match kind existed only
+  in the `nx` backend -- never ported to `rx` -- despite being wired into
+  `optimize()`'s shared rule list for both. Since `rx` is
+  `DEFAULT_BACKEND` whenever `rustworkx` is installed, `optimize()`'s
+  default path was silently missing this capability entirely. Ported.
+- `BeamsplitterGate.expand()`'s general (non-balanced-angle) branch
+  reused the *same* `SqueezingGate` object instance (`sq1`) at two
+  different positions in the returned `CompositionDiagram`, instead of
+  building two separate instances with the same `tau`. `to_graph()` keys
+  its nodes by `Diagram.id`, so the two physically distinct wires this
+  decomposition actually has collapsed onto one graph node carrying
+  edges from both positions. Harmless for anything that only walks
+  container structure (`to_diagram()` never noticed), but a genuine
+  wire-level corruption for anything reading predecessor/successor
+  edges -- surfaced as `normalize_diagram: leaf-level wire graph is not
+  a DAG (cycle detected)` once `normalize_diagram` gained the ability to
+  see through a `ContractedDiagram` (see `Added`, above) and tried to
+  build a real dependency graph through this shape for the first time.
+  Fixed by constructing a second, independent `SqueezingGate` instance.
+- `FusionRule._apply_contracted`'s `special_case` branch had its
+  `down`/no-`down` fix (correctly swapping which side a fused spider
+  gets spliced into, and whether it's prepended or appended to the
+  survivor's `sub_diagram_ids`, depending on which of `first`/`second`
+  was actually the `TensorDiagram`) applied only to the `nx` backend --
+  `rx` still unconditionally prepended, exactly reproducing the bug the
+  `nx` fix addressed. Same root cause for the *other* half of the
+  `TerminalAbsorptionRule._apply_contracted_child` identity-chain fix
+  from earlier in this changelog (reset-to-identity leaving a dead
+  passthrough at its old, nonzero arity instead of voiding it and
+  propagating the shrink): that fix, too, had only ever been applied to
+  `nx`. Together these two `rx`-only gaps were the actual cause of
+  `optimize()` reaching a visibly less-reduced fixed point under `rx`
+  than under `nx` on realistic multi-contraction circuits (e.g.
+  `examples/example_4_cubic_phase_injection_nonunit_gain.ipynb`) --
+  traced by diffing a step-by-step rule trace between backends on
+  identical starting states until the first rule (`FusionRule`) that
+  produced different output from structurally identical matches. Both
+  ported to `rx`; all three example notebooks' diagrams now reduce to
+  byte-identical results on both backends, in both a single manual pass
+  and through `optimize()`.

@@ -103,12 +103,46 @@ source of further worked examples for that specific rule's match fields.
   `ControlledSumGate`, `ControlledZGate`) directly adjacent in one `CompositionDiagram`, and
   collapses the whole chain into one gate (or the identity) using the composition law for
   that gate type — see `ChainReductionRule.reduce_chain` for the closed-form per type.
+
+  It also has a second, unrelated match kind: **commute-and-fuse**, which moves a
+  `SqueezingGate` or a linear-phase ("Disp") spider across an adjacent spider so that two
+  matching elements end up next to each other and fuse. Both directions are exact identities
+  (no `assume_infinite_squeezing` gate needed — unlike absorbing a genuine terminal
+  state/effect, this moves a $(1,1)$ *gate* across a spider, which is exact regardless of
+  squeezing) and cover four shapes:
+
+  | Pattern | Crossing formula | Result |
+  | --- | --- | --- |
+  | $\mathrm{Sq}(\tau) \circ \mathrm{Spider}(f) \circ \mathrm{Sq}(\kappa)$ | $f(x) \to f(\tau x)$ (QSpider) or $f(x/\tau)$ (PSpider) | $\mathrm{Spider}(f') \circ \mathrm{Sq}(\tau\kappa)$ |
+  | $\mathrm{Disp}(a) \circ \mathrm{Spider}(f) \circ \mathrm{Disp}(b)$ (opposite color) | $f(x) \to f(x+a)$ | $\mathrm{Spider}(f') \circ \mathrm{Disp}(a+b)$ |
+  | $Q(f) \circ [\mathrm{Sq}\vert\mathrm{Disp}] \circ Q(g)$ | crosses into $g$ | $Q(f+g')$, mover unchanged, relocated |
+  | $P(f) \circ [\mathrm{Sq}\vert\mathrm{Disp}] \circ P(g)$ | crosses into $g$ | $P(f+g')$, mover unchanged, relocated |
+
+  Here "Spider"/$Q$/$P$ carry no phase restriction (any degree); a "Disp" is specifically a
+  bare $(1,1)$ `QSpider`/`PSpider` with phase in $\mathbb{R}_1[X]$ (not a `DisplacementGate`
+  node, which decomposes into exactly this shape elsewhere) and may only cross its *opposite*
+  color. "Spider"/$Q$/$P$ here is never a terminal — that's `TerminalAbsorptionRule`'s
+  territory, which starts at $(0,1)$/$(1,0)$, one port narrower than this rule's $(1,1)$
+  scope. Implemented by leaving the moved-across element in its own slot, reset to a
+  same-arity zero-phase identity (an identity commutes with everything, so this is
+  diagrammatically equivalent to actually relocating it) — see `IdentityRule` for how that
+  leftover identity is swept on a later pass.
+- **`VoidPortPruningRule`** — drops a bare `QSpider`/`PSpider`'s last port when it's wired, by
+  a single composition edge (or a chase through zero-phase identities), directly to a
+  `VoidDiagram` — a real gate stranded with one port feeding, or fed by, nothing, typically
+  left behind by a cross-container splice (e.g. `TerminalAbsorptionRule`'s contracted-child
+  absorption, below). Restricted to bare spiders (every other gate type has fixed, paired port
+  semantics — e.g. a `Swap`'s two inputs/outputs are cross-wired to each other, not
+  independently prunable) and to a port already last on its side, so neither it nor its
+  remaining siblings ever need renumbering. Refuses to prune a node already down to its last
+  port if its phase is non-zero — that would leave a $(0,0)$ node with a phase nothing binds
+  to, silently discarding whatever physical contribution it represented.
 - **`FourierNormalizationRule`** — matches a `Fourier`/`FourierInv`/`Fourier2` adjacent to a
   `PhaseRotationGate`, `BeamsplitterGate`, or `SqueezingGate` and folds it into that gate's
   parameter.
 - **`TerminalAbsorptionRule`** — matches a gate adjacent to a $(1,0)$-effect or
   $(0,1)$-state `QSpider`/`PSpider` terminal, and folds the gate into the terminal's phase.
-  Five sub-cases, each a different closed-form fold (the gate may sit on either side of the
+  Six sub-cases, each a different closed-form fold (the gate may sit on either side of the
   terminal, whichever its own arity allows — an effect's gate is upstream, a state's gate is
   downstream):
   - *Rotation* (QSpider terminal, input phase degree $\le 1$): a terminal with phase
@@ -136,15 +170,29 @@ source of further worked examples for that specific rule's match fields.
     way `state1` disappears, the terminal takes over its exact slot in the contraction (with
     the contraction's arity re-derived from the terminal's own $(1,0)$/$(0,1)$ shape), and the
     terminal's own vacated slot becomes a `VoidDiagram`.
+  - *Bare-cap fusion* (`bare_cap_fusion`): the mirror image of contracted-child absorption —
+    a `ContractedDiagram` where one half is **already** a genuine $(0,1)$/$(1,0)$ terminal
+    directly occupying `first_id`/`second_id`, with its single port entirely consumed by the
+    contraction itself (nothing external connects to it at all, unlike contracted-child
+    absorption's `state1`, which still has one live connecting port). No terminal needs to
+    chase in from outside — the shape is self-contained. Same color: phases add (exact,
+    unconditional, like ordinary same-color `FusionRule`). Opposite color: the shift formula,
+    gated on `assume_infinite_squeezing`. Either way the whole `ContractedDiagram` collapses
+    into just the surviving partner. Refuses to fold when the survivor's own remaining role
+    would *also* collapse to $(0,0)$ — that's a genuine closed scalar (a state composed
+    directly into its own opposite effect), which this library has no scalar bookkeeping to
+    represent.
 
-  Squeezing, cross-color discard, displacement, and contracted-child absorption are all only
-  exact for an idealized (infinitely squeezed) terminal eigenstate, and only run when
-  constructed as `TerminalAbsorptionRule(assume_infinite_squeezing=True)`; the default `False`
-  restricts matching to rotation absorption. The terminal itself may never be directly one of
-  a `ContractedDiagram`'s own two halves (it must stay a genuine standalone leaf); `state1`
-  being one of those two halves is precisely the new sub-case above rather than
-  `PassthroughRule`'s territory, since a real terminal — not a bare identity — is being folded
-  in.
+  Squeezing, cross-color discard, displacement, contracted-child absorption, and the
+  opposite-color case of bare-cap fusion are all only exact for an idealized (infinitely
+  squeezed) terminal eigenstate, and only run when constructed as
+  `TerminalAbsorptionRule(assume_infinite_squeezing=True)`; the default `False` restricts
+  matching to rotation absorption plus bare-cap fusion's same-color (exact, unconditional)
+  case. The terminal itself may never be directly one of a `ContractedDiagram`'s own two
+  halves (it must stay a genuine standalone leaf); `state1` being one of those two halves is
+  precisely the contracted-child/bare-cap-fusion sub-cases above rather than
+  `PassthroughRule`'s territory, since a real terminal or phase-bearing spider — not a bare
+  identity — is being folded in.
 - **`CopyRule`** — matches a $(0,1)$/$(1,0)$ spider adjacent to a wide ($n$-input or
   $n$-output) opposite-color spider whose phase is in $\mathbb{R}_1[X]$
   (`CopyRule.is_in_R1`), and copies the narrow spider through, producing $n$ copies in a

@@ -1214,8 +1214,8 @@ class BeamsplitterGate(CompactDiagram):
             csum21 = ControlledSumGate(gain=1, control=2, target=1)
 
             tensor = TensorDiagram([
-                _build_gate(self, SqueezingGate, "tau", sqrt2),
                 _build_gate(self, SqueezingGate, "tau", inv_sqrt2),
+                _build_gate(self, SqueezingGate, "tau", sqrt2),
             ])
 
             return CompositionDiagram([csum12.expand(), tensor, csum21.expand()])
@@ -1234,6 +1234,16 @@ class BeamsplitterGate(CompactDiagram):
         sq1 = _build_gate(self, SqueezingGate, "tau", 1 / tan_theta)
         sq2 = _build_gate(self, SqueezingGate, "tau", sin2_theta / cos_theta)
         sq3 = _build_gate(self, SqueezingGate, "tau", 1 / cos_theta)
+        # A fresh instance for the second `1/tan_theta` squeeze -- reusing
+        # `sq1` itself here would put the SAME `Diagram` id at two
+        # different positions in the tree. `to_graph()` keys graph nodes
+        # by id, so the two physically distinct wires this decomposition
+        # actually has would collapse onto one graph node with edges from
+        # both positions -- harmless for `to_diagram()` (which only ever
+        # walks container structure, never wiring), but a real,
+        # wire-level bug for anything that reads predecessor/successor
+        # edges instead, e.g. `normalize_diagram`'s leaf-dependency graph.
+        sq4 = _build_gate(self, SqueezingGate, "tau", 1 / tan_theta)
         tensor3 = sq2.tensor(sq3)
 
         csum12 = ControlledSumGate(gain=1, control=1, target=2)
@@ -1244,7 +1254,7 @@ class BeamsplitterGate(CompactDiagram):
             csum12.expand(),
             tensor3,
             csum21.expand(),
-            sq1.tensor(QSpider(1, 1, ZxPoly({}))),
+            sq4.tensor(QSpider(1, 1, ZxPoly({}))),
         ])
 
     def _rebuild(self, values: dict[str, Any], new_map: dict[Symbol, set[int]]) -> "BeamsplitterGate":

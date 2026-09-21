@@ -96,6 +96,7 @@ def _build_rules(rules_mod: ModuleType, *, assume_infinite_squeezing: bool) -> "
         rules_mod.FusionRule(),
         rules_mod.PassthroughRule(),
         rules_mod.ChainReductionRule(),
+        rules_mod.VoidPortPruningRule(),
         rules_mod.FourierNormalizationRule(),
         rules_mod.TerminalAbsorptionRule(assume_infinite_squeezing=assume_infinite_squeezing),
     ]

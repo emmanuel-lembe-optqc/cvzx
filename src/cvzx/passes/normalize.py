@@ -19,9 +19,24 @@ match two leaves that are directly adjacent elements of one flat
 `CompositionDiagram`; normalizing first makes that check sufficient
 everywhere, instead of requiring every such rule to grow `CopyRule`-style
 cross-container matching logic. This is only designed to run on
-*compact*-form diagrams (before `expand_two_mode_gates`) -- if the graph
-contains any `ContractedDiagram`, it conservatively returns the input
-diagram unchanged. See the docs' dev guide ("Type-1/type-2 stage
+*compact*-form diagrams (before `expand_two_mode_gates`).
+
+A `ContractedDiagram` is treated as a single opaque "leaf" -- its own
+kept (external) `num_inputs`/`num_outputs`, already tracked on the graph
+node itself, are what this module sees; whatever it does internally
+(`I1`/`I2`/`J1`/`J2`, `first`/`second`) is reconstructed as one atomic
+unit via `reconstruct_contracted_node`, never decomposed into separate
+leaves -- a contraction's two halves generally can't be represented as
+independent rows without the `ContractedDiagram` wrapper itself, since
+plain `Tensor`/`Compose` nesting has no way to express "these two,
+though far apart, still share an internal wire." Only a top-level
+`ContractedDiagram` (not itself nested inside another one's `first`/
+`second`) is treated this way; if any top-level contraction's own kept
+port resolves down through *another*, nested `ContractedDiagram` instead
+of a genuine leaf -- a shape this module doesn't handle -- normalization
+conservatively returns the input diagram unchanged, the same fallback
+this module used unconditionally for any `ContractedDiagram` before this
+capability was added. See the docs' dev guide ("Type-1/type-2 stage
 normalization") for the full algorithm walkthrough and design rationale.
 """
 
@@ -32,7 +47,13 @@ import logging
 import math
 from typing import TYPE_CHECKING
 
-from cvzx.backends.nx.graph import GateRegister, get_root_node, reconstruct_proper_node, to_graph
+from cvzx.backends.nx.graph import (
+    GateRegister,
+    get_root_node,
+    reconstruct_contracted_node,
+    reconstruct_proper_node,
+    to_graph,
+)
 from cvzx.ir.base import CompositionDiagram, Diagram, QSpider, TensorDiagram, ZxPoly
 
 if TYPE_CHECKING:
@@ -73,15 +94,120 @@ def _leaf_diagram(graph: nx.DiGraph, leaf_id: int, reg: GateRegister) -> Diagram
     every node before returning (so the graph doesn't hold stale
     references once rewrite rules start mutating node attributes in
     place) -- exactly the same situation `to_diagram()` itself is
-    always in, so this reuses its own leaf-reconstruction helper rather
+    always in, so this reuses its own leaf-reconstruction helpers rather
     than inventing a second way to rebuild a leaf from its attributes.
+    Dispatches to `reconstruct_contracted_node` for a `ContractedDiagram`
+    leaf (see module docstring) -- that helper recurses into `first`/
+    `second` itself, so it rebuilds the whole contraction as one atomic
+    unit regardless of what's nested inside it.
 
     Returns
     -------
     Diagram
         The rebuilt leaf.
     """
+    if graph.nodes[leaf_id].get("container_type") == "contracted":
+        return reconstruct_contracted_node(graph, leaf_id, reg)
     return reconstruct_proper_node(graph, leaf_id, reg)
+
+
+def _collect_subtree_ids(graph: nx.DiGraph, node_id: int) -> set[int]:
+    """Every node id in `node_id`'s own subtree, `node_id` included.
+
+    Recurses through `TensorDiagram`/`CompositionDiagram` wrappers (via
+    `sub_diagram_ids`) and `ContractedDiagram` wrappers (via `first_id`/
+    `second_id`) down to every leaf. Used to find every id "absorbed"
+    into a top-level `ContractedDiagram` leaf, so the main leaf list
+    never double-counts them.
+
+    Returns
+    -------
+    set[int]
+        Every node id in the subtree rooted at `node_id`.
+    """
+    attrs = graph.nodes[node_id]
+    ids = {node_id}
+    container_type = attrs.get("container_type")
+    if container_type in {"tensor", "composition"}:
+        for sub_id in attrs.get("sub_diagram_ids", []):
+            ids |= _collect_subtree_ids(graph, sub_id)
+    elif container_type == "contracted":
+        ids |= _collect_subtree_ids(graph, attrs["first_id"])
+        ids |= _collect_subtree_ids(graph, attrs["second_id"])
+    return ids
+
+
+def _top_level_contracted_ids(graph: nx.DiGraph) -> set[int]:
+    """Every `ContractedDiagram` node id NOT itself nested inside another one.
+
+    A `ContractedDiagram` nested inside another one's `first`/`second`
+    subtree is reconstructed as part of that outer contraction's own
+    atomic unit (see `_leaf_diagram`) -- only the outermost ones become
+    their own leaves in this module's model.
+
+    Returns
+    -------
+    set[int]
+        The top-level `ContractedDiagram` node ids.
+    """
+    all_contracted = {n for n, attrs in graph.nodes(data=True) if attrs.get("container_type") == "contracted"}
+    nested: set[int] = set()
+    for cid in all_contracted:
+        attrs = graph.nodes[cid]
+        nested |= _collect_subtree_ids(graph, attrs["first_id"]) & all_contracted
+        nested |= _collect_subtree_ids(graph, attrs["second_id"]) & all_contracted
+    return all_contracted - nested
+
+
+def _build_contracted_port_remaps(
+    graph: nx.DiGraph, top_level_ids: set[int]
+) -> tuple[dict[tuple[int, int], tuple[int, int]], dict[tuple[int, int], tuple[int, int]]] | None:
+    """Map each top-level `ContractedDiagram`'s kept ports back to its own external numbering.
+
+    For every kept (external) input/output of every `cid` in
+    `top_level_ids`, resolves down (via `_resolve_input`/
+    `_resolve_output`, so it sees through any `Tensor`/`Composition`
+    wrapping `first`/`second` too) to the genuine leaf that actually owns
+    the wire, and records `{(leaf, leaf_port): (cid, external_port)}` --
+    used by `_build_pred_map` to redirect a raw composition edge that
+    lands directly on `first`/`second` (never on `cid` itself -- see
+    module docstring) to `cid`'s own external port instead.
+
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        The graph to search.
+    top_level_ids : set[int]
+        Node ids from `_top_level_contracted_ids`.
+
+    Returns
+    -------
+    tuple[dict, dict] | None
+        `(output_remap, input_remap)`, or `None` if some `cid`'s own
+        kept port resolves down through *another* (necessarily nested)
+        `ContractedDiagram` instead of a genuine leaf -- a shape this
+        module doesn't handle; the caller falls back to leaving the
+        diagram unchanged.
+    """
+    output_remap: dict[tuple[int, int], tuple[int, int]] = {}
+    input_remap: dict[tuple[int, int], tuple[int, int]] = {}
+    for cid in top_level_ids:
+        attrs = graph.nodes[cid]
+        first_id = attrs["first_id"]
+        second_id = attrs["second_id"]
+        for ext_idx, (side, raw_port) in attrs.get("external_input_mapping", {}).items():
+            side_id = first_id if side == "first" else second_id
+            leaf_id, leaf_port = _resolve_input(graph, side_id, raw_port)
+            if graph.nodes[leaf_id].get("container_type") == "contracted":
+                return None
+            input_remap[leaf_id, leaf_port] = (cid, ext_idx)
+        for ext_idx, (side, raw_port) in attrs.get("external_output_mapping", {}).items():
+            side_id = first_id if side == "first" else second_id
+            leaf_id, leaf_port = _resolve_output(graph, side_id, raw_port)
+            if graph.nodes[leaf_id].get("container_type") == "contracted":
+                return None
+            output_remap[leaf_id, leaf_port] = (cid, ext_idx)
+    return output_remap, input_remap
 
 
 def _resolve_input(graph: nx.DiGraph, node_id: int, port: int) -> tuple[int, int]:
@@ -248,13 +374,34 @@ def _is_wide(attrs: dict) -> bool:
     return bool(max(attrs.get("num_inputs", 0), attrs.get("num_outputs", 0)) > 1)
 
 
-def _build_pred_map(
+def _build_pred_map(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
     graph: nx.DiGraph,
     leaves: list[int],
     root_id: int,
     num_inputs: int,
+    output_remap: dict[tuple[int, int], tuple[int, int]] | None = None,
+    input_remap: dict[tuple[int, int], tuple[int, int]] | None = None,
 ) -> dict[tuple[int, int], _Token]:
     """Build the leaf-level predecessor wire map.
+
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        The graph to search.
+    leaves : list[int]
+        Every leaf id in this module's model (ordinary proper/compact
+        leaves plus any top-level `ContractedDiagram` leaves).
+    root_id : int
+        The graph's root node id.
+    num_inputs : int
+        The diagram's own external input count.
+    output_remap, input_remap : dict | None
+        From `_build_contracted_port_remaps`: redirects a raw edge
+        endpoint that actually lands on a `ContractedDiagram`'s `first`/
+        `second` (never on the `ContractedDiagram` node itself) to that
+        contraction's own external port instead, so it's recognized as
+        touching a leaf in `leaves`. `None`/absent entries mean "use the
+        raw endpoint unchanged" -- the ordinary, no-contraction case.
 
     Returns
     -------
@@ -264,15 +411,19 @@ def _build_pred_map(
         `(other_leaf, other_out_port)` for an internal wire.
     """
     leaf_set = set(leaves)
+    output_remap = output_remap or {}
+    input_remap = input_remap or {}
     pred_of: dict[tuple[int, int], _Token] = {}
 
     for u, v, data in graph.edges(data=True):
         if data.get("edge_type") != "composition":
             continue
-        if u not in leaf_set or v not in leaf_set:
-            continue
         for src_port, tgt_port in zip(data["source_ports"], data["target_ports"], strict=True):
-            pred_of[v, tgt_port] = (u, src_port)
+            u_leaf, u_port = output_remap.get((u, src_port), (u, src_port))
+            v_leaf, v_port = input_remap.get((v, tgt_port), (v, tgt_port))
+            if u_leaf not in leaf_set or v_leaf not in leaf_set:
+                continue
+            pred_of[v_leaf, v_port] = (u_leaf, u_port)
 
     for j in range(num_inputs):
         leaf_id, leaf_port = _resolve_input(graph, root_id, j)
@@ -709,19 +860,41 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
         logger.debug("normalize_diagram: empty diagram, nothing to do")
         return diagram
 
-    for _n, attrs in graph.nodes(data=True):
-        if attrs.get("container_type") == "contracted":
-            logger.debug("normalize_diagram: contains a ContractedDiagram, left unchanged")
+    # A ContractedDiagram is treated as one opaque leaf (see module
+    # docstring) -- computed up front so `leaves` below can both exclude
+    # everything a top-level contraction absorbs and include the
+    # contraction itself.
+    top_level_contracted_ids = _top_level_contracted_ids(graph)
+    output_remap: dict[tuple[int, int], tuple[int, int]] = {}
+    input_remap: dict[tuple[int, int], tuple[int, int]] = {}
+    excluded_ids: set[int] = set()
+    if top_level_contracted_ids:
+        remaps = _build_contracted_port_remaps(graph, top_level_contracted_ids)
+        if remaps is None:
+            logger.debug(
+                "normalize_diagram: a ContractedDiagram's kept port resolves through "
+                "another nested ContractedDiagram, left unchanged"
+            )
             return diagram
+        output_remap, input_remap = remaps
+        for cid in top_level_contracted_ids:
+            cid_attrs = graph.nodes[cid]
+            excluded_ids |= _collect_subtree_ids(graph, cid_attrs["first_id"])
+            excluded_ids |= _collect_subtree_ids(graph, cid_attrs["second_id"])
 
-    leaves = [n for n, attrs in graph.nodes(data=True) if attrs.get("kind") in {"proper", "compact"}]
+    leaves = [
+        n
+        for n, attrs in graph.nodes(data=True)
+        if attrs.get("kind") in {"proper", "compact"} and n not in excluded_ids
+    ]
+    leaves.extend(top_level_contracted_ids)
     if not leaves:
         return diagram
 
     num_inputs = diagram.num_inputs
     num_outputs = diagram.num_outputs
 
-    pred_of = _build_pred_map(graph, leaves, root_id, num_inputs)
+    pred_of = _build_pred_map(graph, leaves, root_id, num_inputs, output_remap, input_remap)
 
     # Elide any bare identity leaf the *input* diagram already contains
     # (as opposed to filler this module inserts itself) -- see

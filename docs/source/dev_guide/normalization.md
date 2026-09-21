@@ -84,9 +84,29 @@ edge already connects two fully-resolved leaves regardless of container nesting 
 
 ## Scope
 
-`normalize_diagram` only understands **compact-form** two-mode gates (a single leaf), not
-the `ContractedDiagram` form `expand_two_mode_gates` produces. If the graph contains any
-`ContractedDiagram`, it conservatively returns the input diagram unchanged rather than risk
-mis-normalizing internal wire-bending it doesn't attempt to trace through — which is exactly
-why `optimize()` always normalizes *before* the (optional) expansion step in each round, not
-after (see {doc}`architecture`).
+`normalize_diagram` is primarily designed for **compact-form** diagrams — before
+`expand_two_mode_gates` turns a two-mode gate into its `ContractedDiagram` form — which is
+exactly why `optimize()` always normalizes *before* the (optional) expansion step in each
+round, not after (see {doc}`architecture`). But a `ContractedDiagram` can still legitimately
+show up by the time a *later* round's normalization runs — a contraction one round didn't
+finish reducing survives into the diagram `optimize()` hands to the next round's
+`normalize_diagram()` call — so it isn't simply out of scope.
+
+A **top-level** `ContractedDiagram` (one not itself nested inside another one's `first`/
+`second`) is treated as a single opaque leaf: its own kept (external) `num_inputs`/
+`num_outputs` — already tracked on the graph node itself — are what the leaf-level dependency
+graph and stage-building machinery above see, while `first`/`second` (and whatever they
+contain) are reconstructed as one atomic unit via `reconstruct_contracted_node`, never
+decomposed into separate rows. This isn't just a simplification: a contraction's two halves
+generally *can't* be represented as independent leaves at all, since plain `Tensor`/`Compose`
+nesting has no way to express "these two, though far apart in the normalized stages, still
+share an internal wire" — that shape is precisely what `ContractedDiagram` exists to name.
+Since a raw `"composition"` edge from `to_graph()` lands directly on `first`/`second`
+themselves (never on the `ContractedDiagram` node — see {doc}`rewrite_engine`), a small
+reverse-mapping step (`_build_contracted_port_remaps`) redirects such an edge to the
+contraction's own external port before the leaf-level predecessor map is built.
+
+This still bails out — leaving the input diagram completely unchanged, the same fallback used
+unconditionally before this capability existed — in the one shape not handled: a top-level
+contraction whose own kept port resolves down through *another*, nested `ContractedDiagram`
+instead of a genuine leaf.

@@ -2,6 +2,7 @@ line-length = 119
 include = ["**/*.py", "**/pyproject.toml"]
 exclude = [
     "tests/**",                  # exclude test files from linting
+    "scripts/**",                # exclude dev/investigation tooling, not shipped library code
     "**/*.ipynb",                # exclude Jupyter notebooks from linting
     "**/pb/mqc3_cloud/**/*.py",  # exclude protobuf generated files
     "**/pb/mqc3_cloud/**/*.pyi", # exclude protobuf generated files

@@ -1019,7 +1019,18 @@ class TestTerminalAbsorptionContractedChild(unittest.TestCase):
         assert match["result_phase"] == expected
 
     def test_apply_rule_state_absorbs_output_role_state1(self):
-        """Applying the match moves the terminal into the contraction and voids both old slots."""
+        """Applying the match moves the terminal into the contraction and voids both old slots.
+
+        `apply_rule` runs to a fixed point, not just one match: once the
+        terminal has moved into the contraction, its own single port is
+        now entirely internal (nothing external connects to it at all --
+        the "connecting" wire disappeared along with the move), so a
+        second round's `_try_fuse_bare_contracted_terminal` fires too,
+        collapsing the whole `ContractedDiagram` into the surviving bare
+        spider. The intermediate `ContractedDiagram` shape a single round
+        produces is covered by `test_match_state_absorbs_output_role_state1_cross_color`
+        above; this test covers the fully-reduced end state.
+        """
         m, gamma = Symbol("m", real=True), Symbol("gamma", real=True)
         diagram = self._cubic_phase_injection_diagram(m, gamma)
         graph = to_graph(diagram)
@@ -1030,19 +1041,73 @@ class TestTerminalAbsorptionContractedChild(unittest.TestCase):
 
         assert result.num_inputs == 1
         assert result.num_outputs == 1
-        contract = result.diagrams[1]
-        assert isinstance(contract, ContractedDiagram)
-        assert contract.second.num_inputs == 0
-        assert contract.second.num_outputs == 1
+        survivor = result.diagrams[1]
+        assert isinstance(survivor, QSpider)
+        assert survivor.num_inputs == 1
+        assert survivor.num_outputs == 1
         # QSpider drops the constant term (-gamma*m**3, an unobservable global phase) at
         # construction, when `to_diagram` rebuilds it -- unlike `match["result_phase"]`
         # above, which is the raw pre-construction ZxPoly and still carries it.
-        assert contract.second.phase == ZxPoly({3: gamma, 2: -3 * gamma * m, 1: 3 * gamma * m**2})
-        assert contract.J2 == [0]
+        assert survivor.phase == ZxPoly({3: gamma, 2: -3 * gamma * m, 1: 3 * gamma * m**2})
         # The cubic-phase state's old slot (stage0) is now void.
         assert isinstance(result.diagrams[0].diagrams[1], VoidDiagram)
         assert result.diagrams[0].diagrams[1].num_inputs == 0
         assert result.diagrams[0].diagrams[1].num_outputs == 0
+
+    def test_apply_contracted_child_voids_a_nonempty_identity_chain(self):
+        """A real (non-empty) identity chain crossed en route to `state1` is voided, not reset.
+
+        Regression test: `_apply_contracted_child`'s identity-chain step
+        must collapse each crossed passthrough to a `VoidDiagram(0, 0)`
+        and propagate the resulting arity shrink up through its own
+        parent -- resetting it in place to a same-arity identity instead
+        (correct for *ordinary* absorption, where the terminal keeps its
+        own slot) leaves a stranded, nonzero-arity node with nothing
+        feeding it once the terminal has moved away, corrupting a
+        containing `CompositionDiagram`'s connectivity on
+        reconstruction. The worked-example fixture above never exercises
+        this: its terminal composes directly onto the contraction with
+        no identity in between (`identity_chain == []`), so this needs
+        its own fixture with a real spider spliced into the chase path.
+        """
+        m, gamma = Symbol("m", real=True), Symbol("gamma", real=True)
+        passthrough = QSpider(1, 1, self.zero_phase)
+        stage0 = TensorDiagram([
+            QSpider(1, 1, self.zero_phase),
+            CompositionDiagram([QSpider(0, 1, ZxPoly({3: gamma}), parametric=True), passthrough]),
+        ])
+        stage1 = ContractedDiagram(
+            QSpider(2, 1, self.zero_phase),
+            PSpider(1, 2, ZxPoly({1: -m}), parametric=True),
+            [],
+            [],
+            [1],
+            [0],
+        )
+        correction = QSpider(1, 1, ZxPoly({1: -3 * gamma * m**2, 2: -3 * gamma * m}), parametric=True)
+        stage2 = TensorDiagram([correction, VoidDiagram(1, 0)])
+        diagram = CompositionDiagram([stage0, stage1, stage2])
+        graph = to_graph(diagram)
+
+        matches = self.rule.match(graph)
+        assert len(matches) == 1
+        assert matches[0]["identity_chain"] != []
+
+        self.rule.apply_rule(graph)
+        graph.rebuild_registry()
+        result = to_diagram(graph)  # must not raise (e.g. ArityMismatchError)
+
+        assert result.num_inputs == 1
+        assert result.num_outputs == 1
+        survivor = result.diagrams[1]
+        assert isinstance(survivor, QSpider)
+        assert survivor.phase == ZxPoly({3: gamma, 2: -3 * gamma * m, 1: 3 * gamma * m**2})
+        # The crossed passthrough is now a fully-dead (0, 0) void, not a
+        # same-arity (1, 1) identity stranded with nothing feeding it.
+        voided_chain_node = result.diagrams[0].diagrams[1].diagrams[1]
+        assert isinstance(voided_chain_node, VoidDiagram)
+        assert voided_chain_node.num_inputs == 0
+        assert voided_chain_node.num_outputs == 0
 
     def test_match_effect_absorbs_input_role_state1_cross_color(self):
         """A measurement (effect) absorbs a state1 whose internal port is input-like (I2)."""
