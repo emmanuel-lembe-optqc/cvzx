@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from cvzx.ir.base import CompositionDiagram, ContractedDiagram, TensorDiagram
+from cvzx.ir.base import CompositionDiagram, TensorDiagram
 from cvzx.visualization.geometry import Position, reorder_positions, require
 
 if TYPE_CHECKING:
@@ -128,7 +128,6 @@ class _CompositionMixin:
                 sent_kept_inputs = draw_kept_inputs
                 sent_kept_outputs: Sequence[int] = range(sub_diagram.num_outputs)
             elif i == diagram_length - 1:
-                # output_positions was set by the previous iteration (i > 0 here).
                 output_positions = require(output_positions, "output_positions must be set for i > 0")
                 input_pos = reorder_positions(diagram.connectivity[i - 1], output_positions)
                 sent_kept_inputs = range(sub_diagram.num_inputs)
@@ -165,7 +164,7 @@ class _CompositionMixin:
         output_positions = require(output_positions, "output_positions must be set after a non-empty composition")
         return output_positions, init_input_positions, output_radius
 
-    def _draw_tensor(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-locals, too-many-statements, too-many-positional-arguments]
+    def _draw_tensor(  # ruff: ignore[complex-structure, too-many-arguments, too-many-locals, too-many-positional-arguments]
         self: Visualizer,
         ax: plt.Axes,
         diagram: TensorDiagram,
@@ -261,10 +260,7 @@ class _CompositionMixin:
         h = vertical_spacing
         for sub_diagram in diagram.diagrams:
             is_sub_tensor = isinstance(sub_diagram, CompositionDiagram)
-            if contract_shift != 0:
-                h -= contract_shift
-            else:
-                h -= vertical_spacing
+            h -= max(vertical_spacing, contract_shift)
             # Draw sub-diagram with local coordinates
             sub_input_positions: list[Position] | None = None
             sub_kept_inputs: list[int] | None = None
@@ -299,11 +295,10 @@ class _CompositionMixin:
                 draw_kept_outputs=sub_kept_outputs,
                 draw_kept_inputs=sub_kept_inputs,
             )
-            if isinstance(sub_diagram, ContractedDiagram):
-                contract_shift, _ = self.vertical_shift_in_contraction(sub_diagram)
-                contract_shift += 2 * self.config.node_radius
-            else:
-                contract_shift = 0.0
+            # The vertical shift accounts of how many contracted diagrams are inside
+            # sub_diagram
+            contract_shift, _ = self.vertical_shift_in_contraction(sub_diagram)
+            contract_shift += 2 * radius
             output_positions = output_pos + output_positions
             init_input_positions = init_input_pos + init_input_positions
             # NOTE: sub_radius is float | list[float] in general — it is only a

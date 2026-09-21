@@ -222,9 +222,9 @@ class _ProperDiagramMixin:
                         )
                         ax.add_patch(output_i)
                 ax.plot()
-            # A Hack to not draw outgoing arrows from void diagrams
-            if is_void:
-                output_positions = [() for i in range(diagram.num_outputs)]  # type: ignore[misc]
+            # A Hack not to draw outgoing arrows from void diagrams
+            # if is_void:
+            #     output_positions = [() for i in range(diagram.num_outputs)]  # type: ignore[misc]
         elif isinstance(diagram, Swap):
             output_positions, init_input_positions, radius = self._draw_swap(
                 ax, x, y, diagram, comp_idx, sub_comp_idx, input_positions, radius, draw_kept_inputs, draw_kept_outputs

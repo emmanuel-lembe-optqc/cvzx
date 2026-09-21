@@ -426,7 +426,7 @@ def run_graphical_tests():  # ruff: ignore[too-many-locals, too-many-statements]
 
     q_spider_5x5_large = QSpider(5, 5, 20 * (phase_poly_simple + phase_poly_complex), True)
 
-    large_tensor_with_contracted = contracted_diagram_1.tensor(q_spider_5x5_large)
+    large_tensor_with_contracted = composition_with_contracted_1_conn.tensor(q_spider_5x5_large)
     large_tensor_with_contracted = p_spider_5x5.tensor(large_tensor_with_contracted)
     large_tensor_with_contracted = contracted_diagram_2.tensor(large_tensor_with_contracted)
     save_and_close(
