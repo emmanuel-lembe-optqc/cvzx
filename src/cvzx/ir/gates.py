@@ -204,7 +204,7 @@ class CompactDiagram(Diagram, Parametrized):
                 return self.expand().compose(other, connectivity=connectivity)
             if isinstance(other, CompositionDiagram):
                 diagrams = list(other.diagrams)
-                old_connectivity = other.connectivity
+                old_connectivity = dict(other.connectivity)
                 last_idx = len(diagrams) - 1
                 old_connectivity[last_idx] = connectivity
                 return CompositionDiagram([*diagrams, self], old_connectivity)
@@ -227,7 +227,7 @@ class CompactDiagram(Diagram, Parametrized):
             )
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            old_connectivity = other.connectivity
+            old_connectivity = dict(other.connectivity)
             # Add this diagram as the last element
             old_connectivity[len(diagrams) - 1] = connectivity
             return CompositionDiagram([*diagrams, self], old_connectivity)

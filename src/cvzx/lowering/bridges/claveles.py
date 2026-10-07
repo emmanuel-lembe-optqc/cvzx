@@ -1191,6 +1191,18 @@ def _walk_row(
     return [mode_id] if mode_id is not None else []
 
 
+def _modes_entering(conn: dict[int, int], prev_output_modes: list[int]) -> list[int]:
+    """The modes entering a stage, in its input-port order, from ``conn`` = {previous output port: input port}.
+
+    Returns
+    -------
+    list[int]
+        ``modes[k]`` is the mode on input port ``k``.
+    """
+    by_input = {in_port: out_port for out_port, in_port in conn.items()}
+    return [prev_output_modes[by_input[k]] for k in sorted(by_input)]
+
+
 def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr:
     """Translate a cvzx `Diagram` into a claveles `CircuitRepr`.
 
@@ -1260,8 +1272,8 @@ def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr
         if stage_index == 0:
             active_modes: list[int] = []
         else:
-            conn = connectivity.get(stage_index - 1, {})
-            active_modes = [prev_output_modes[conn[k]] for k in range(len(conn))]
+            conn = connectivity.get(stage_index - 1, {})  # {output port of the previous stage: input port of this one}
+            active_modes = _modes_entering(conn, prev_output_modes)
 
         rows = stage.diagrams if isinstance(stage, TensorDiagram) else [stage]
 

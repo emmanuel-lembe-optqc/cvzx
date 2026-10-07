@@ -6,14 +6,6 @@ the two halves of a round trip between a claveles `CircuitRepr` and a `cvzx` `Di
 to claveles' own `DependencyDAG`. See {doc}`../dev_guide/architecture` for how these modules fit
 into the full pipeline.
 
-```{warning}
-`from_circuit_repr(circuit)` normalizes by default, and `normalize_diagram` currently rewires multi-mode circuits whose
-two-mode gates act on non-adjacent modes (in a random test, 32 of 40 circuits of 3-5 modes come back with different
-outcome statistics; `tests/lowering/bridges/test_claveles_conventions.py::test_normalize_diagram_keeps_multi_mode_semantics`
-records it). Until it is fixed, use `from_circuit_repr(circuit, normalize=False)` when the circuit has to round-trip
-faithfully; that path is checked on random circuits of 3-5 modes.
-```
-
 ## claveles `CircuitRepr` to a `Diagram`
 
 ```python

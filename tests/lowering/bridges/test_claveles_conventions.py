@@ -295,13 +295,11 @@ def test_random_multi_mode_circuits_round_trip(seed):
     assert _same_up_to_relabelling(_outcome_moments(circuit), _outcome_moments(back))
 
 
-@pytest.mark.xfail(
-    reason="normalize_diagram rewires multi-mode circuits with two-mode gates on non-adjacent modes "
-    "(32 of 40 random 3-5 mode circuits change); known bug, independent of the bridge",
-    strict=False,
-)
-def test_normalize_diagram_keeps_multi_mode_semantics():
-    circuit = _random_circuit(3, 10, 2)
+@pytest.mark.parametrize("seed", range(20))
+def test_random_multi_mode_circuits_round_trip_normalized(seed):
+    """The same through normalize_diagram (on import, and again inside to_circuit_repr): its stage wiring must use
+    the {output: next input} convention it reads, or normalizing twice scrambles the circuit."""
+    circuit = _random_circuit(3 + seed % 3, 10, seed)
     assert _same_up_to_relabelling(_outcome_moments(circuit), _outcome_moments(_round_trip(circuit)))
 
 

@@ -31,13 +31,14 @@ development on `main` to date, grouped by area rather than by commit.
   `theta` folded so that `sqrt_r` stays in [0, 1]; the bare `BeamSplitter(cos theta, 0)` mixed x1 with p2.
 - The importer wrote each layer's `connectivity` inverted ({next input: previous output}) while `to_graph`,
   `normalize_diagram` and the exporter read {previous output: next input}: any circuit whose gates permute the open
-  modes (3+ modes) came back rewired. Fixed; random 3-5 mode circuits now round-trip exactly with `normalize=False`.
+  modes (3+ modes) came back rewired. Fixed.
+- `normalize_diagram` read its input in that {output: next input} convention but wrote its stages' `connectivity` the
+  other way round (a comment there had "corrected" it after `compose()`'s misleading docstring), and the exporter read
+  the normalized stages that way too: normalizing twice (import, then `to_circuit_repr`) rewired 32 of 40 random
+  circuits of 3-5 modes. Both now use the one convention; the docstrings of `CompositionDiagram.connectivity` and
+  `compose()` say what it is (`compose()`'s behaviour is unchanged), and `compose()` no longer modifies the other
+  composition's map in place. Random 3-5 mode circuits round-trip exactly with and without normalization.
 - New `tests/lowering/bridges/test_claveles_conventions.py` pins every intrinsic gate's conventions numerically.
-
-### Known issues
-
-- `normalize_diagram` rewires multi-mode circuits whose two-mode gates act on non-adjacent modes (an `xfail` test
-  records it); `from_circuit_repr(..., normalize=False)` is exact.
 
 ## [0.1.0] - Unreleased
 

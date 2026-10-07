@@ -265,7 +265,8 @@ class Diagram(ABC):
         other : Diagram
             Diagram to apply after self (other ∘ self).
         connectivity: dict
-            Dictionary indicating how the diagrams are connected.
+            Maps each output port of the diagram applied first to the input port of the one applied next
+            (stored as is in `CompositionDiagram.connectivity`). None: straight through.
 
         Returns
         -------
@@ -376,7 +377,8 @@ class ProperDiagram(Diagram):
         other : Diagram
             Diagram to apply after self.
         connectivity: dict
-            Dictionary indicating how the diagrams are connected.
+            Maps each output port of the diagram applied first to the input port of the one applied next
+            (stored as is in `CompositionDiagram.connectivity`). None: straight through.
 
         Returns
         -------
@@ -395,14 +397,12 @@ class ProperDiagram(Diagram):
         keys = list(connectivity.keys())
         keys.sort()
         if keys != list(range(self.num_inputs)):
-            msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
+            msg = "The keys of the connectivity dictionary do not correspond the output ports of `other`."
             raise ArityMismatchError(msg)
         values = list(connectivity.values())
         values.sort()
         if values != list(range(other.num_outputs)):
-            msg = (
-                "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
-            )
+            msg = "The values of the connectivity dictionary do not correspond the input ports of this diagram."
             raise ArityMismatchError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
@@ -636,7 +636,8 @@ class ContractedDiagram(Diagram):
         other : Diagram
             Diagram to apply after self.
         connectivity: dict
-            Dictionary indicating how the diagrams are connected.
+            Maps each output port of the diagram applied first to the input port of the one applied next
+            (stored as is in `CompositionDiagram.connectivity`). None: straight through.
 
         Returns
         -------
@@ -655,18 +656,16 @@ class ContractedDiagram(Diagram):
         keys = list(connectivity.keys())
         keys.sort()
         if keys != list(range(self.num_inputs)):
-            msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
+            msg = "The keys of the connectivity dictionary do not correspond the output ports of `other`."
             raise ArityMismatchError(msg)
         values = list(connectivity.values())
         values.sort()
         if values != list(range(other.num_outputs)):
-            msg = (
-                "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
-            )
+            msg = "The values of the connectivity dictionary do not correspond the input ports of this diagram."
             raise ArityMismatchError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            old_connectivity = other.connectivity
+            old_connectivity = dict(other.connectivity)
             old_connectivity[len(diagrams) - 1] = connectivity
             return CompositionDiagram([*diagrams, self], old_connectivity)
         return CompositionDiagram([other, self], {0: connectivity})
@@ -907,7 +906,8 @@ class TensorDiagram(Diagram):
         other : Diagram
             Diagram to apply after self.
         connectivity: dict
-            Dictionary indicating how the diagrams are connected.
+            Maps each output port of the diagram applied first to the input port of the one applied next
+            (stored as is in `CompositionDiagram.connectivity`). None: straight through.
 
         Returns
         -------
@@ -926,18 +926,16 @@ class TensorDiagram(Diagram):
         keys = list(connectivity.keys())
         keys.sort()
         if keys != list(range(self.num_inputs)):
-            msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
+            msg = "The keys of the connectivity dictionary do not correspond the output ports of `other`."
             raise ArityMismatchError(msg)
         values = list(connectivity.values())
         values.sort()
         if values != list(range(other.num_outputs)):
-            msg = (
-                "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
-            )
+            msg = "The values of the connectivity dictionary do not correspond the input ports of this diagram."
             raise ArityMismatchError(msg)
         if isinstance(other, CompositionDiagram):
             diagrams = list(other.diagrams)
-            old_connectivity = other.connectivity
+            old_connectivity = dict(other.connectivity)
             old_connectivity[len(diagrams) - 1] = connectivity
             return CompositionDiagram([*diagrams, self], old_connectivity)
         return CompositionDiagram([other, self], {0: connectivity})
@@ -1048,6 +1046,9 @@ class CompositionDiagram(Diagram):
 
     diagrams: Sequence[Diagram]
     connectivity: dict[int, dict[int, int]] = field(default_factory=dict)
+    """``connectivity[i]`` maps each output port of ``diagrams[i]`` to the input port of ``diagrams[i + 1]`` it feeds
+    (empty: straight through), as `to_graph`, the rewrite rules, `normalize_diagram`, the visualizer and the claveles
+    bridge read it; `compose(other, connectivity)` stores its argument in this form."""
 
     def tensor(self, other: Diagram) -> Diagram:
         """Parallelize composition with another diagram.
@@ -1075,7 +1076,8 @@ class CompositionDiagram(Diagram):
         other : Diagram
             Diagram to apply after self.
         connectivity: dict
-            Dictionary indicating how the diagrams are connected.
+            Maps each output port of the diagram applied first to the input port of the one applied next
+            (stored as is in `CompositionDiagram.connectivity`). None: straight through.
 
         Returns
         -------
@@ -1094,14 +1096,12 @@ class CompositionDiagram(Diagram):
         keys = list(connectivity.keys())
         keys.sort()
         if keys != list(range(self.num_inputs)):
-            msg = "The keys of the connectivity dictionary do not correspond the input indices of the current diagram."
+            msg = "The keys of the connectivity dictionary do not correspond the output ports of `other`."
             raise ArityMismatchError(msg)
         values = list(connectivity.values())
         values.sort()
         if values != list(range(other.num_outputs)):
-            msg = (
-                "The values of the connectivity dictionary do not correspond the output indices of the input diagram."
-            )
+            msg = "The values of the connectivity dictionary do not correspond the input ports of this diagram."
             raise ArityMismatchError(msg)
         # Composition
         diagrams = list(self.diagrams)
@@ -1189,21 +1189,22 @@ class CompositionDiagram(Diagram):
         # Check connectivity
         for i in range(len(self.diagrams) - 1):
             # Check keys
+            # connectivity[i] = {output port of diagrams[i]: input port of diagrams[i + 1]}
             keys = list(self.connectivity[i].keys())
             keys.sort()
-            if keys != list(range(self.diagrams[i + 1].num_inputs)):
+            if keys != list(range(self.diagrams[i].num_outputs)):
                 msg = (
                     "The keys of the connectivity dictionary do not correspond "
-                    f"the input indices of the sub_diagram {i + 1}."
+                    f"the output indices of the sub_diagram {i}."
                 )
                 raise ArityMismatchError(msg)
             # Check values
             values = list(self.connectivity[i].values())
             values.sort()
-            if values != list(range(self.diagrams[i].num_outputs)):
+            if values != list(range(self.diagrams[i + 1].num_inputs)):
                 msg = (
                     "The values of the connectivity dictionary do not "
-                    f"correspond the output indices of the sub_diagram {i}."
+                    f"correspond the input indices of the sub_diagram {i + 1}."
                 )
                 raise ArityMismatchError(msg)
 

@@ -1082,24 +1082,11 @@ def normalize_diagram(  # ruff: ignore[complex-structure, too-many-branches, too
         _elements, input_tokens, new_active = stage_records[stage_idx]
         if stage_idx > 0:
             prev_pos = {token: i for i, token in enumerate(prev_new_active)}
-            # `CompositionDiagram.connectivity[i]` is keyed by *input*
-            # port of `diagrams[i+1]` (the later stage) and valued by
-            # *output* port of `diagrams[i]` (the earlier stage) -- see
-            # `CompositionDiagram.__post_init__`, which validates
-            # `connectivity[i]`'s keys against
-            # `range(diagrams[i+1].num_inputs)` and its values against
-            # `range(diagrams[i].num_outputs)`. (A prior version of this
-            # comment claimed the opposite convention based on a
-            # misleading docstring on `_add_composition_node` in
-            # nx_graph.py -- that function's *own* edge materialization
-            # is backwards relative to `__post_init__`'s validated,
-            # authoritative contract, which is what actually governs a
-            # `CompositionDiagram`'s semantics. Getting this backwards
-            # here produces a `connectivity` dict that is still a
-            # well-formed bijection -- so `__post_init__` never raises --
-            # but wires every boundary to the *inverse* permutation of
-            # the one actually needed.)
-            connectivity[stage_idx - 1] = {b_port: prev_pos[token] for b_port, token in enumerate(input_tokens)}
+            # `CompositionDiagram.connectivity[i]` maps an *output* port of `diagrams[i]` (the earlier stage) to the
+            # *input* port of `diagrams[i+1]` it feeds, the convention `to_graph` (and so this function's own input)
+            # reads. Writing the inverse is still a well-formed bijection, so `__post_init__` cannot catch it, but it
+            # rewires every boundary with the inverse permutation (and normalizing twice scrambles the circuit).
+            connectivity[stage_idx - 1] = {prev_pos[token]: b_port for b_port, token in enumerate(input_tokens)}
         prev_new_active = new_active
 
     return CompositionDiagram(stages, connectivity)
