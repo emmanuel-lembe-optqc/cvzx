@@ -463,7 +463,7 @@ def generate_pipeline_overview() -> None:
 
     sub_top = lower_y - 1.0
     sub_h = 3.15
-    claveles_ref = _box(ax, lower_x + 0.35, sub_top, 3.9, sub_h, 'Mqc3ReferenceBackend ("claveles")', "", edgecolor=_BLUE, title_size=10.6)
+    claveles_ref = _box(ax, lower_x + 0.35, sub_top, 3.9, sub_h, 'ClavelesReferenceBackend ("claveles")', "", edgecolor=_BLUE, title_size=10.6)
     ax.text(lower_x + 0.55, sub_top - 0.62, "to_circuit_repr(diagram)", fontsize=9.6, fontweight="bold", color=_BLUE)
     ax.text(lower_x + 0.55, sub_top - 0.90, "cvzx.lowering.bridges.claveles", fontsize=8.2, color=_GRAY, style="italic")
     ax.annotate("", xy=(lower_x + 2.3, sub_top - 1.35), xytext=(lower_x + 2.3, sub_top - 1.0), arrowprops={"arrowstyle": "-|>", "color": _BLUE, "lw": 1.4})

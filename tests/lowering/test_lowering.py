@@ -19,7 +19,7 @@ from claveles.graph.embed.dep_dag import DependencyDAG
 from cvzx.lowering.bridges.claveles import from_circuit_repr
 from cvzx.lowering.lowering import (
     LoweringBackend,
-    Mqc3ReferenceBackend,
+    ClavelesReferenceBackend,
     get_backend,
     graph_to_dependency_dag,
     list_backends,
@@ -39,7 +39,7 @@ def _simple_diagram() -> Diagram:
 
 def test_claveles_backend_is_registered_by_default():
     assert "claveles" in list_backends()
-    assert isinstance(get_backend("claveles"), Mqc3ReferenceBackend)
+    assert isinstance(get_backend("claveles"), ClavelesReferenceBackend)
 
 
 def test_graph_to_dependency_dag_default_backend_constructs_real_dag():
@@ -76,7 +76,7 @@ def test_register_backend_adds_a_new_dispatchable_backend():
             # Delegate to the reference backend; this test only checks
             # that dispatch reaches a freshly-registered backend, not
             # that it does anything different.
-            return Mqc3ReferenceBackend().to_dependency_dag(diagram)
+            return ClavelesReferenceBackend().to_dependency_dag(diagram)
 
     try:
         assert "_test_dummy_backend" in list_backends()

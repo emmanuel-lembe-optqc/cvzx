@@ -279,7 +279,7 @@ dep_dag = graph_to_dependency_dag(diagram)  # backend="claveles" by default
 
 ### The bundled backends
 
-The bundled `"claveles"` backend (`Mqc3ReferenceBackend`) is `to_circuit_repr` followed by claveles'
+The bundled `"claveles"` backend (`ClavelesReferenceBackend`) is `to_circuit_repr` followed by claveles'
 own `DependencyDAG(circuit)` constructor — every limitation of `to_circuit_repr` above applies
 transitively to it. A second bundled backend, `"cvzx-direct"` (`CvzxDirectBackend`), skips the
 `CircuitRepr` round-trip entirely: it discovers execution order directly from the diagram's

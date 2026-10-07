@@ -21,7 +21,7 @@ development on `main` to date, grouped by area rather than by commit.
   `to_circuit_repr`, `placed_operations`), `graph_to_dependency_dag(backend="claveles")` on claveles' `DependencyDAG`,
   and the `[claveles]` / `[dev]` extras install `claveles-core` from OptQC's `sdk-optqc`. claveles keeps an operation's
   modes on its placement and places input states as `StatePreparation` operations; the bridge follows both. The
-  unused `grpcio`, `protobuf` and `requests` dependencies (mqc3's) are dropped.
+  unused `grpcio`, `protobuf` and `requests` dependencies (mqc3's) are dropped. The reference lowering backend is `ClavelesReferenceBackend` (was `Mqc3ReferenceBackend`).
 
 ### Fixed
 

@@ -195,7 +195,7 @@ is the pluggable dispatch point that turns that closed diagram into a claveles `
 
 `cvzx.lowering.lowering` exists as a plugin point (rather than hardcoding one fixed
 `Diagram -> DependencyDAG` path) because a `DependencyDAG` can be built more than one way: the
-bundled `"claveles"` backend (`Mqc3ReferenceBackend`) is the simplest correct implementation —
+bundled `"claveles"` backend (`ClavelesReferenceBackend`) is the simplest correct implementation —
 `to_circuit_repr` then claveles' own `DependencyDAG(circuit)` constructor — while `"cvzx-direct"`
 (`CvzxDirectBackend`) skips the `CircuitRepr` round-trip entirely and discovers execution order
 directly from the diagram's own `CVZXGraph` structure (dual-backend, via `cvzx.lowering.dag`),

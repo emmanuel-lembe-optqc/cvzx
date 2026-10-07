@@ -1,6 +1,6 @@
 """Extract a claveles `DependencyDAG` directly from a `CVZXGraph`.
 
-An alternative to `cvzx.lowering.Mqc3ReferenceBackend` (which canonicalizes
+An alternative to `cvzx.lowering.ClavelesReferenceBackend` (which canonicalizes
 into `normalize_diagram`'s alternating stages first): `extract_dependency_dag()`
 builds the same kind of `DependencyDAG` via a single deterministic forward
 sweep over the `CVZXGraph`'s own node/edge structure, anchored at

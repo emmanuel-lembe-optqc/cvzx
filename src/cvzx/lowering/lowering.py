@@ -26,9 +26,9 @@ if TYPE_CHECKING:
     from cvzx.ir.base import Diagram
 
 __all__ = [
+    "ClavelesReferenceBackend",
     "CvzxDirectBackend",
     "LoweringBackend",
-    "Mqc3ReferenceBackend",
     "get_backend",
     "graph_to_dependency_dag",
     "list_backends",
@@ -149,7 +149,7 @@ def graph_to_dependency_dag(diagram: Diagram, backend: str = "claveles") -> Depe
 
 
 @register_backend("claveles")
-class Mqc3ReferenceBackend(LoweringBackend):
+class ClavelesReferenceBackend(LoweringBackend):
     """Reference lowering backend: `Diagram` -> `CircuitRepr` -> `DependencyDAG`.
 
     Converts via `cvzx.lowering.bridges.claveles.to_circuit_repr` and then builds the
