@@ -312,3 +312,32 @@ def _same_up_to_relabelling(a, b, atol: float = 1e-9) -> bool:
         np.allclose(m2[list(p)], m1, atol=atol) and np.allclose(c2[np.ix_(p, p)], c1, atol=atol)
         for p in permutations(range(len(m1)))
     )
+
+
+@pytest.mark.parametrize("normalize", [False, True])
+@pytest.mark.parametrize("seed", range(10))
+def test_pruning_random_circuits_moves_moments_by_epsilon_only(seed, normalize):
+    """Random 3-5 mode circuits with near-identity gates mixed in: pruning them keeps every outcome moment within
+    O(epsilon), through either import path."""
+    from cvzx.passes.pruning import prune_small_gaussian_gates
+
+    rng = np.random.default_rng(100 + seed)
+    base = _random_circuit(3 + seed % 3, 8, seed)
+    c = CircuitRepr("tiny")
+    for m, s in base.placed_states.items():
+        c.Q(m) | s
+    n = base.n_modes
+    for op, modes in placed_operations(base):
+        if type(op).__name__ == "Measurement":
+            continue
+        c.Q(*modes) | op
+        a, b = (int(v) for v in rng.choice(n, 2, replace=False))
+        c.Q(a, b) | intrinsic.ControlledZ(float(rng.uniform(-1e-4, 1e-4)))
+        c.Q(a) | intrinsic.PhaseRotation(float(rng.uniform(-1e-4, 1e-4)))
+    for op, modes in placed_operations(base):
+        if type(op).__name__ == "Measurement":
+            c.Q(*modes) | op
+    res = prune_small_gaussian_gates(from_circuit_repr(c, normalize=normalize), 1e-3)
+    assert len(res.pruned) >= 2 * 8
+    m1, c1 = _outcome_moments(c)
+    assert _same_up_to_relabelling((m1, c1), _outcome_moments(to_circuit_repr(res.diagram)), atol=5e-3)

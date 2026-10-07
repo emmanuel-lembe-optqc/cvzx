@@ -139,12 +139,12 @@ def _threshold(epsilon: float | Mapping[str, float], kind: str) -> float:
     return float(epsilon.get(kind, 0.0))
 
 
-def _drop_identities(d: CompositionDiagram, children: list[Diagram], made: set[int]) -> Diagram:
+def _drop_identities(d: CompositionDiagram, children: list[Diagram], made: dict[int, Diagram]) -> Diagram:
     """Rebuild a composition without the identities pruning created, composing the wiring maps around each one.
 
-    ``connectivity[i]`` maps each input port of child i+1 to an output port of child i. Dropping an identity child j
-    in the middle gives ``new[x] = c[j-1][c[j][x]]``; at either end it is dropped only if its map is the identity,
-    since otherwise the composition's own port order would change.
+    ``connectivity[i]`` maps each output port of child i to the input port of child i+1 it feeds. Dropping an
+    identity child j in the middle gives ``new[x] = c[j][c[j-1][x]]``; at either end it is dropped only if its map is
+    the identity, since otherwise the composition's own port order would change.
 
     Returns
     -------
@@ -155,12 +155,12 @@ def _drop_identities(d: CompositionDiagram, children: list[Diagram], made: set[i
     conn = {i: dict(m) for i, m in d.connectivity.items()}
     j = 0
     while j < len(kids) and len(kids) > 1:
-        if id(kids[j]) not in made:
+        if made.get(id(kids[j])) is not kids[j]:
             j += 1
             continue
         if 0 < j < len(kids) - 1:
             before, after = conn[j - 1], conn[j]
-            merged = {x: before[after[x]] for x in after}
+            merged = {x: after[before[x]] for x in before}
             conn = {(i if i < j - 1 else i - 1): m for i, m in conn.items() if i not in {j - 1, j}}
             conn[j - 1] = merged
         elif j == 0 and all(k == v for k, v in conn[0].items()):
@@ -200,7 +200,8 @@ def prune_small_gaussian_gates(
         The new diagram (the input is not mutated) and the pruned gates.
     """
     result = PruneResult(diagram)
-    made: set[int] = set()  # ids of the identities this pass created (only these are dropped)
+    # the identities this pass created (only these are dropped), kept alive so their ids cannot be reused
+    made: dict[int, Diagram] = {}
 
     def visit(d: Diagram) -> Diagram:  # ruff: ignore[too-many-return-statements]
         if isinstance(d, CompositionDiagram):
@@ -213,8 +214,8 @@ def prune_small_gaussian_gates(
             if all(a is b for a, b in zip(new, d.diagrams, strict=True)):
                 return d
             out = replace(d, diagrams=new)
-            if all(id(c) in made for c in new):
-                made.add(id(out))  # a layer of pruned gates only: an identity on all its wires
+            if all(made.get(id(c)) is c for c in new):
+                made[id(out)] = out  # a layer of pruned gates only: an identity on all its wires
             return out
         distance = gate_distance(d)
         if distance is None or is_feedforward_target(d):
@@ -224,11 +225,11 @@ def prune_small_gaussian_gates(
             return d
         result.pruned.append(PrunedGate(kind, distance, d))
         wires = [QSpider(1, 1, ZxPoly({})) for _ in range(d.num_inputs)]
-        made.update(id(w) for w in wires)
+        made.update((id(w), w) for w in wires)
         if len(wires) == 1:
             return wires[0]
         out = TensorDiagram(wires)
-        made.add(id(out))
+        made[id(out)] = out
         return out
 
     result.diagram = visit(diagram)

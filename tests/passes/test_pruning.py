@@ -117,3 +117,18 @@ def test_optimize_option():
     plain = optimize(d).graph.graph.num_nodes()
     pruned = optimize(d, prune_epsilon=1e-3).graph.graph.num_nodes()
     assert pruned < plain
+
+
+def test_dropping_an_identity_stage_composes_permutations():
+    """A pruned stage between two permutations: the wiring around it must be composed in the {output: input} order."""
+    states = TensorDiagram([_state(), _state(), _state()])
+    gate_stage = TensorDiagram([PhaseRotationGate(1e-5), PhaseRotationGate(-1e-5), PhaseRotationGate(2e-5)])
+    tail = TensorDiagram([SqueezingGate(1.5), SqueezingGate(2.0), SqueezingGate(3.0)])
+    perm_a, perm_b = {0: 1, 1: 2, 2: 0}, {0: 2, 1: 0, 2: 1}
+    d = CompositionDiagram([states, gate_stage, tail], {0: perm_a, 1: perm_b})
+    res = prune_small_gaussian_gates(d, 1e-3)
+    assert len(res.pruned) == 3
+    out = res.diagram
+    assert isinstance(out, CompositionDiagram) and len(out.diagrams) == 2
+    # state k leaves on port k, enters the rotation stage on perm_a[k], and the tail on perm_b[perm_a[k]]
+    assert out.connectivity[0] == {k: perm_b[perm_a[k]] for k in range(3)}
