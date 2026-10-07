@@ -224,6 +224,27 @@ dag = DependencyDAG(circuit2)
 assert dag.dag.number_of_nodes() > 0
 ```
 
+### Phased spiders and states (lowering `optimize`'s output)
+
+After `optimize`, gates are expanded and fused into Q/P spiders, so the exporters (`to_circuit_repr` and the
+`"cvzx-direct"` backend) also accept them:
+
+- a 1-in-1-out Q-spider with Gaussian phase `c x^2 + b x` acts as `p -> p + 2c x + b` and is emitted as
+  `intrinsic.ShearXInvariant(c)` then `intrinsic.Displacement(0, b)`; a P-spider (`x -> x + 2c p + b`) as
+  `ShearPInvariant(c)` then `Displacement(b, 0)`;
+- a phased state is the zero-phase state followed by a spider with that phase (spider fusion); a phased effect is that
+  spider followed by the zero-phase measurement;
+- phases of degree 3 or more (non-Gaussian) or with free symbols are refused.
+
+```{note}
+cvzx's states are idealized, infinitely squeezed eigenstates: a rotation and a shear of one give the same state, so
+`optimize` may fuse either into it. A real machine's inputs are finitely squeezed (claveles'
+`HardwareConstrainedSqueezedState`), where the two differ, and a fused state no longer says which gate it absorbed.
+To lower an optimized circuit exactly, optimize the open part (the circuit without its input states) and compose the
+states back afterwards; on random 3-5 mode circuits this lowers exactly. On MoQuren, cvzx's canonical gate forms
+(e.g. a beam splitter's conjugating quarter turns) still compile to more macronodes than the original claveles circuit.
+```
+
 ## Lowering straight to a `DependencyDAG`
 
 `cvzx.lowering.lowering.graph_to_dependency_dag` skips the `to_circuit_repr`/`DependencyDAG`

@@ -935,6 +935,61 @@ def _measurement_symbol(elt: Diagram) -> Symbol | None:
 # --------------------------------------------------------------------------
 
 
+_GAUSSIAN_DEGREE = 2
+
+
+def _spider_phase_ops(elt: Diagram) -> list[Operation] | None:
+    """The claveles gates of a Q/P spider's (Gaussian) phase, or None if `elt` is not a phased Q/P spider.
+
+    A Q-spider with phase ``c x^2 + b x`` acts as ``p -> p + 2c x + b`` (cvzx's spider semantics, as in
+    `ir/gates.py`), i.e. ``ShearXInvariant(c)`` then ``Displacement(0, b)``; a P-spider as ``x -> x + 2c p + b``, i.e.
+    ``ShearPInvariant(c)`` then ``Displacement(b, 0)``. A constant is a global phase.
+
+    Returns
+    -------
+    list | None
+        The claveles operations, in time order.
+
+    Raises
+    ------
+    NotImplementedError
+        For a phase of degree 3 or more (non-Gaussian) or with free symbols.
+    """
+    # ruff: ignore[import-outside-top-level]
+    from claveles.circuit.ops import intrinsic
+
+    if not isinstance(elt, (QSpider, PSpider)):
+        return None
+    coeffs = dict(elt.phase.coeffs)
+    if any(d > _GAUSSIAN_DEGREE for d in coeffs) or any(
+        isinstance(v, Expr) and v.free_symbols for v in coeffs.values()
+    ):
+        msg = (
+            f"Cannot convert {type(elt).__name__} with phase {elt.phase}: only Gaussian (degree <= 2) numeric phases."
+        )
+        raise NotImplementedError(msg)
+    c, b = float(complex(coeffs.get(2, 0.0)).real), float(complex(coeffs.get(1, 0.0)).real)
+    ops: list[Operation] = []
+    if c:
+        ops.append(intrinsic.ShearXInvariant(c) if isinstance(elt, QSpider) else intrinsic.ShearPInvariant(c))
+    if b:
+        ops.append(intrinsic.Displacement(0.0, b) if isinstance(elt, QSpider) else intrinsic.Displacement(b, 0.0))
+    return ops
+
+
+def _state_phase_ops(elt: Diagram) -> list:
+    """The gates that follow `_open_mode_state`'s zero-phase state for a phased Q/P state leaf.
+
+    Returns
+    -------
+    list
+        claveles operations, possibly empty.
+    """
+    if isinstance(elt, (QSpider, PSpider)) and elt.num_inputs == 0 and elt.num_outputs == 1:
+        return _spider_phase_ops(elt) or []
+    return []
+
+
 def _open_mode_state(elt: Diagram, mode_index: int) -> InitialState:
     """Translate a 0-in-1-out state leaf into a claveles `InitialState`.
 
@@ -950,7 +1005,11 @@ def _open_mode_state(elt: Diagram, mode_index: int) -> InitialState:
     """
     from claveles.circuit.state import HardwareConstrainedSqueezedState  # ruff: ignore[import-outside-top-level]
 
-    if _is_zero_phase_leaf(elt, 0, 1):
+    if _is_zero_phase_leaf(elt, 0, 1) or (
+        isinstance(elt, (QSpider, PSpider)) and elt.num_inputs == 0 and elt.num_outputs == 1
+    ):
+        # a phased Q/P state is the zero-phase one followed by a spider with that phase (spider fusion): the phase's
+        # gates are emitted after the state by `_state_phase_ops`
         phi = 0.0 if isinstance(elt, QSpider) else np.pi / 2
         return HardwareConstrainedSqueezedState(phi=phi)
     msg = (
@@ -1006,6 +1065,15 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
         # placing a measurement returns the value it will read: the feedforward source claveles expects
         measurement_ops[symbol] = circuit.Q(mode_id) | intrinsic.Measurement(theta)
         return False
+
+    if isinstance(elt, (QSpider, PSpider)) and elt.num_inputs == 1 and elt.num_outputs in {0, 1}:
+        # a phased spider: its Gaussian phase as gates, then (for an effect) the zero-phase measurement
+        for op in _spider_phase_ops(elt) or []:
+            circuit.Q(mode_id) | op
+        if elt.num_outputs == 0:
+            circuit.Q(mode_id) | intrinsic.Measurement(np.pi / 2 if isinstance(elt, QSpider) else 0.0)
+            return False
+        return True
 
     if isinstance(elt, PhaseRotationGate):
         raw_theta = _resolve_scalar(elt.theta, "PhaseRotationGate", measurement_ops)
@@ -1178,6 +1246,8 @@ def _walk_row(
         elif elt.num_inputs == 0:
             mode_id = mode_counter.fresh()
             circuit.Q(mode_id) | _open_mode_state(elt, mode_id)
+            for op in _state_phase_ops(elt):
+                circuit.Q(mode_id) | op
         else:
             # A row's non-first element always has an input port -- only
             # the first element of a chain can be a 0-in state leaf -- so

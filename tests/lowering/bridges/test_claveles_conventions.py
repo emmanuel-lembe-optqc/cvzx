@@ -173,6 +173,8 @@ def _bs_cvzx(theta: float) -> np.ndarray:
 def _unitary_matrix(circuit: CircuitRepr) -> np.ndarray:
     m = np.eye(2 * circuit.n_modes)
     for op, modes in placed_operations(circuit):
+        if type(op).__name__ in {"Displacement", "Measurement"}:
+            continue  # the linear part only
         idx = [2 * k + j for k in modes for j in (0, 1)]
         u = np.eye(2 * circuit.n_modes)
         u[np.ix_(idx, idx)] = _matrix(op)
@@ -341,3 +343,46 @@ def test_pruning_random_circuits_moves_moments_by_epsilon_only(seed, normalize):
     assert len(res.pruned) >= 2 * 8
     m1, c1 = _outcome_moments(c)
     assert _same_up_to_relabelling((m1, c1), _outcome_moments(to_circuit_repr(res.diagram)), atol=5e-3)
+
+
+def _one_mode_export(*leaves):
+    from cvzx.ir.base import CompositionDiagram, QSpider, ZxPoly
+
+    return to_circuit_repr(CompositionDiagram([QSpider(0, 1, ZxPoly({})), *leaves]))
+
+
+@pytest.mark.parametrize(("c", "b"), [(0.3, 0.0), (-0.7, 0.4), (0.0, 1.2)])
+def test_phased_spiders_lower_like_shears_and_displacements(c, b):
+    """Q-spider phase c x^2 + b x: p -> p + 2c x + b; P-spider: x -> x + 2c p + b (cvzx's spider semantics)."""
+    from cvzx.ir.base import PSpider, QSpider, ZxPoly
+    from cvzx.ir.gates import ShearPInvariantGate, ShearXInvariantGate
+
+    phase = ZxPoly({2: c, 1: b})
+    for spider, shear in ((QSpider(1, 1, phase), ShearXInvariantGate(c)), (PSpider(1, 1, phase), ShearPInvariantGate(c))):
+        got = _one_mode_export(spider)
+        ref = _one_mode_export(shear)
+        np.testing.assert_allclose(_unitary_matrix(got), _unitary_matrix(ref), atol=1e-12)
+        disp = [list(map(float, op.parameters())) for op, _ in placed_operations(got) if type(op).__name__ == "Displacement"]
+        assert disp == ([] if b == 0 else [[0.0, b]] if isinstance(spider, QSpider) else [[b, 0.0]])
+
+
+def test_phased_state_is_the_zero_phase_state_then_its_phase():
+    from cvzx.ir.base import CompositionDiagram, PSpider, QSpider, ZxPoly
+
+    for spider, state_phi, op_name in ((QSpider, 0.0, "ShearXInvariant"), (PSpider, math.pi / 2, "ShearPInvariant")):
+        circuit = to_circuit_repr(CompositionDiagram([spider(0, 1, ZxPoly({2: 0.25})), MeasurementGateRef(0.3)]))
+        assert float(circuit.placed_states[0].phi) == pytest.approx(state_phi)
+        assert [type(op).__name__ for op, _ in placed_operations(circuit)][:1] == [op_name]
+
+
+def test_non_gaussian_spider_phase_is_refused():
+    from cvzx.ir.base import QSpider, ZxPoly
+
+    with pytest.raises(NotImplementedError, match="Gaussian"):
+        _one_mode_export(QSpider(1, 1, ZxPoly({3: 0.1})))
+
+
+def MeasurementGateRef(theta):  # noqa: N802
+    from cvzx.ir.gates import MeasurementGate
+
+    return MeasurementGate(theta)

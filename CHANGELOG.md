@@ -9,6 +9,11 @@ development on `main` to date, grouped by area rather than by commit.
 
 ### Added
 
+- **Lowering of phased Q/P spiders and states** (`to_circuit_repr` and `"cvzx-direct"`): Gaussian spider phases
+  become claveles shears and displacements, a phased state is the zero-phase state followed by its phase's gates, a
+  phased effect is those gates followed by the measurement; non-Gaussian phases are refused. This lets `optimize`'s
+  output be lowered (optimize the open part: cvzx's idealized states make state fusions inexact for finitely squeezed
+  inputs; see the conversion guide).
 - **Pruning of near-identity Gaussian gates** (`cvzx.passes.pruning.prune_small_gaussian_gates`, and
   `optimize(..., prune_epsilon=, prune_keep=)`): per-type distances from identity, thresholds per gate type,
   a `keep` callback for outside cost models, feedforward targets and symbolic gates protected. Pruned gates become

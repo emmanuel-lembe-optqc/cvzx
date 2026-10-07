@@ -20,7 +20,13 @@ from typing import TYPE_CHECKING
 from cvzx.backend import get_backend_modules
 from cvzx.config import Backend
 from cvzx.ir.base import Diagram, VoidDiagram
-from cvzx.lowering.bridges.claveles import MeasurementOps, _apply_1mode_leaf, _apply_2mode_leaf, _open_mode_state
+from cvzx.lowering.bridges.claveles import (
+    MeasurementOps,
+    _apply_1mode_leaf,
+    _apply_2mode_leaf,
+    _open_mode_state,
+    _state_phase_ops,
+)
 from cvzx.passes.completion import complete_boundaries
 
 if TYPE_CHECKING:
@@ -233,6 +239,8 @@ def _build_circuit_repr(diagram_name: str, access: _GraphAccess, graph_mod: obje
                 continue
             (mode_id,) = modes
             circuit.Q(mode_id) | _open_mode_state(leaf, mode_id)
+            for op in _state_phase_ops(leaf):
+                circuit.Q(mode_id) | op
             continue
 
         if len(modes) == 2:  # ruff: ignore[magic-value-comparison]

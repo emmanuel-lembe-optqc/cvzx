@@ -163,28 +163,17 @@ def test_cubic_phase_gate_raises():
     raise AssertionError(msg)
 
 
-def test_nonzero_phase_state_leaf_raises():
-    """Reject a nonzero-phase state leaf rather than silently mistranslating it.
+def test_nonzero_phase_state_leaf_becomes_state_then_gates():
+    """A phased state is the zero-phase state followed by a spider with that phase (spider fusion).
 
-    Only the bare idealized zero-phase state leaf is recognized as an
-    `InitialState`; anything else has no documented translation. A phase's
-    constant (degree 0) term is dropped at construction -- an unobservable
-    global phase -- so this uses a linear term instead to stay genuinely
-    nonzero.
-
-    Raises
-    ------
-    AssertionError
-        If `to_circuit_repr` does not raise `NotImplementedError`.
+    `to_circuit_repr` emits the zero-phase state and the phase's Gaussian gates (here a p displacement by the linear
+    coefficient); a non-Gaussian phase is still refused (see `test_claveles_conventions.py`).
     """
     nonzero_state = QSpider(0, 1, ZxPoly({1: 0.3}))
-    try:
-        to_circuit_repr(nonzero_state)
-    except NotImplementedError:
-        return
-    msg = "expected NotImplementedError for a nonzero-phase state leaf"
-    raise AssertionError(msg)
-
+    circuit = to_circuit_repr(nonzero_state)
+    assert float(circuit.placed_states[0].phi) == 0.0
+    ops = [(type(op).__name__, [float(v) for v in op.parameters()]) for op, _ in placed_operations(circuit)]
+    assert ops == [("Displacement", [0.0, 0.3])]
 
 def test_symbolic_parameter_raises():
     """A symbolic parameter not bound to any upstream measurement effect is rejected.
