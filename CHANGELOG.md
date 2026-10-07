@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 This project has not yet made a tagged release; the entries below summarize
 development on `main` to date, grouped by area rather than by commit.
 
+## [Unreleased]
+
+### Changed
+
+- **claveles replaces mqc3** as the circuit SDK: `cvzx.lowering.bridges.claveles` (`from_circuit_repr`,
+  `to_circuit_repr`, `placed_operations`), `graph_to_dependency_dag(backend="claveles")` on claveles' `DependencyDAG`,
+  and the `[claveles]` / `[dev]` extras install `claveles-core` from OptQC's `sdk-optqc`. claveles keeps an operation's
+  modes on its placement and places input states as `StatePreparation` operations; the bridge follows both. The
+  unused `grpcio`, `protobuf` and `requests` dependencies (mqc3's) are dropped.
+
+### Fixed
+
+- `intrinsic.Arbitrary` crosses the bridge with `lam -> -lam` (and `SqueezingGate(tau)` is emitted as
+  `Arbitrary(0, 0, -ln tau)`): claveles' compiler and the machine squeeze with the opposite sign to its docstring.
+- `BeamsplitterGate(theta)` is emitted as `R(-pi/2)` on mode 2, `BeamSplitter(cos eta, 0)`, `R(pi/2)` on mode 2, with
+  `theta` folded so that `sqrt_r` stays in [0, 1]; the bare `BeamSplitter(cos theta, 0)` mixed x1 with p2.
+- New `tests/lowering/bridges/test_claveles_conventions.py` pins every intrinsic gate's conventions numerically.
+
 ## [0.1.0] - Unreleased
 
 ### Added

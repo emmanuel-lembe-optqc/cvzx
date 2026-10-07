@@ -28,7 +28,7 @@ across the rule set, not a `CopyRule`-only special case.
 The corollary is that **normalization is still useful, just not for matching correctness** —
 {doc}`normalization` exists so that every diagram settles into the same canonical shape
 (same micro-layers, same `connectivity`-dict convention between stages) for rules — and
-non-rule consumers like `cvzx.lowering.bridges.mqc3.to_circuit_repr` — to reason about, rather
+non-rule consumers like `cvzx.lowering.bridges.claveles.to_circuit_repr` — to reason about, rather
 than because any rule would otherwise fail to find a match.
 
 ### Which container shapes cross-container matching supports

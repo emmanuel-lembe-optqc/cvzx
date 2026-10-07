@@ -47,7 +47,7 @@ R_sym = PhaseRotationGate(theta=theta, parametric=True)        # symbolic
 
 The tables above give each gate's exact Heisenberg-picture action; each class's own
 docstring keeps only the key step its `expand()` performs. The derivations behind the
-non-obvious steps — mqc3 sign-convention corrections, special-case reductions to other
+non-obvious steps — claveles sign-convention corrections, special-case reductions to other
 gates, and why certain `conjugate()` formulas hold — are collected in the "Gate
 decompositions" section below.
 
@@ -55,7 +55,7 @@ decompositions" section below.
 
 ### `ArbitraryGate` — general one-mode Gaussian gate
 
-mqc3 defines `intrinsic.Arbitrary(alpha, beta, lam)` as the operator product
+claveles defines `intrinsic.Arbitrary(alpha, beta, lam)` as the operator product
 `R(alpha) . S(lam) . R(beta)` (rightmost applied first, i.e. the mode meets `R(beta)`
 first, then `S(lam)`, then `R(alpha)` last), where
 
@@ -63,7 +63,7 @@ $$R^\dagger(\phi)\,(\hat q, \hat p)\,R(\phi) = \begin{pmatrix}\cos\phi & -\sin\p
 
 Two conversions are needed to express this with cvzx's existing gates:
 
-- cvzx's `PhaseRotationGate(theta)` implements mqc3's `R(-theta)`, not `R(theta)`
+- cvzx's `PhaseRotationGate(theta)` implements claveles' `R(-theta)`, not `R(theta)`
   (verified directly from its own three-spider decomposition) — so `R(phi)` here becomes
   `PhaseRotationGate(-phi)`.
 - cvzx's `SqueezingGate(tau)` implements $\mathrm{diag}(\tau, 1/\tau)$, exactly `S(lam)`
@@ -77,7 +77,7 @@ ArbitraryGate(alpha, beta, lam).expand()
     = PhaseRotationGate(-beta) . SqueezingGate(e^lam) . PhaseRotationGate(-alpha)
 ```
 
-Verified numerically against the raw mqc3 matrix product for random `(alpha, beta, lam)`.
+Verified numerically against the raw claveles matrix product for random `(alpha, beta, lam)`.
 
 `conjugate()`: `(R(alpha) S(lam) R(beta))^dagger = R(-beta) S(-lam) R(-alpha)`, which is
 again of the form `R(alpha') S(lam') R(beta')` with `alpha' = -beta`, `lam' = -lam`,
@@ -86,7 +86,7 @@ again of the form `R(alpha') S(lam') R(beta')` with `alpha' = -beta`, `lam' = -l
 
 ### `Squeezing45Gate` — special case of `ArbitraryGate`
 
-mqc3 defines `intrinsic.Squeezing45(theta)` as `R(-pi/4) S_V(cot theta) R(pi/4)`, where
+claveles defines `intrinsic.Squeezing45(theta)` as `R(-pi/4) S_V(cot theta) R(pi/4)`, where
 `S_V(c)` has matrix $\mathrm{diag}(1/c, c)$. This is exactly `ArbitraryGate` with
 `alpha = -pi/4`, `beta = pi/4`, and `lam` chosen so that `S(lam) = S_V(cot theta)`: since
 $e^{\lambda} = 1/\cot\theta = \tan\theta$, cvzx's `SqueezingGate(tau)` can be used directly
@@ -97,14 +97,14 @@ with `tau = tan(theta)`, no logarithm required.
 
 ### `TwoModeShearGate` — combined diagonal shear and `ControlledZGate`
 
-mqc3's `intrinsic.TwoModeShear(a, b)` Heisenberg transformation is
+claveles' `intrinsic.TwoModeShear(a, b)` Heisenberg transformation is
 
 $$P_2^\dagger(a,b)\,(\hat q_1,\hat q_2,\hat p_1,\hat p_2)\,P_2(a,b) = \begin{pmatrix}1&0&0&0\\0&1&0&0\\2a&b&1&0\\b&2a&0&1\end{pmatrix}(\hat q_1,\hat q_2,\hat p_1,\hat p_2).$$
 
 The diagonal `2a` terms are exactly `ShearXInvariantGate(a)` applied to each mode; the
 cross `b` term is exactly cvzx's `ControlledZGate` generator $\exp(-ig\hat q_1\hat q_2)$
 evaluated at `g = -b` (cvzx's `ControlledZGate(g)` produces `p1 -= g*q2, p2 -= g*q1`, the
-negative of mqc3's `ControlledZ(g)` convention — verified directly from its own
+negative of claveles' `ControlledZ(g)` convention — verified directly from its own
 decomposition's generator). Both pieces are shears of the same abelian family (they only
 ever add a linear function of the $\hat q$'s to the $\hat p$'s, leaving the $\hat q$'s
 invariant), so they commute and `expand()` needs no new primitive — just
@@ -118,13 +118,13 @@ coefficients negated.
 
 ### `MeasurementGate` — rotate into alignment, then measure x
 
-mqc3's `intrinsic.Measurement(theta)` measures the quadrature
+claveles' `intrinsic.Measurement(theta)` measures the quadrature
 $\hat q\sin\theta + \hat p\cos\theta$. Measuring $\hat q$ directly is a plain q-spider
 effect, `QSpider(1, 0, 0)`; to measure the rotated quadrature, `expand()` rotates the mode
 into alignment first. Solving `R(phi)`'s Heisenberg matrix (top row) for
 $\cos\phi\,\hat q - \sin\phi\,\hat p = \sin\theta\,\hat q + \cos\theta\,\hat p$ gives
 `phi = theta - pi/2`; composed in signal-flow order (rotate first, measure second) and
-converted to cvzx's rotation convention (`PhaseRotationGate(psi)` = mqc3's `R(-psi)`, see
+converted to cvzx's rotation convention (`PhaseRotationGate(psi)` = claveles' `R(-psi)`, see
 `ArbitraryGate` above):
 
 ```text

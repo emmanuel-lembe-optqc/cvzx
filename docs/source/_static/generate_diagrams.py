@@ -268,38 +268,38 @@ def generate_module_map() -> None:
         y[5],
         [
             ("optimize", "passes/optimize.py", "Backend-dispatched fixed-point\nrewrite loop.", _BLUE),
-            ("mqc3_bridge", "lowering/bridges/mqc3.py", "mqc3 CircuitRepr <-> Diagram (both directions).", _ORANGE),
+            ("claveles_bridge", "lowering/bridges/claveles.py", "claveles CircuitRepr <-> Diagram (both directions).", _ORANGE),
         ],
         h=box_h,
     )
-    _branch(ax, l4["normalize_diagram"], [l5["optimize"], l5["mqc3_bridge"]])
+    _branch(ax, l4["normalize_diagram"], [l5["optimize"], l5["claveles_bridge"]])
 
     l6 = _row_boxes(
         ax,
         y[6],
-        [("dag_extraction", "lowering/dag.py", "Direct CVZXGraph forward sweep -> mqc3 DependencyDAG.", _ORANGE)],
+        [("dag_extraction", "lowering/dag.py", "Direct CVZXGraph forward sweep -> claveles DependencyDAG.", _ORANGE)],
         h=box_h,
     )
-    _elbow(ax, _center_bottom(l5["mqc3_bridge"]), _center_top(l6["dag_extraction"]))
+    _elbow(ax, _center_bottom(l5["claveles_bridge"]), _center_top(l6["dag_extraction"]))
 
     l7 = _row_boxes(
         ax,
         y[7],
-        [("lowering", "lowering/lowering.py", 'LoweringBackend plugin registry ("mqc3", "cvzx-direct").', _ORANGE)],
+        [("lowering", "lowering/lowering.py", 'LoweringBackend plugin registry ("claveles", "cvzx-direct").', _ORANGE)],
         h=box_h,
     )
     _elbow(ax, _center_bottom(l6["dag_extraction"]), _center_top(l7["lowering"]), dashed=True)
 
     _side_route(ax, l1["backend"], l5["optimize"], 12.55, label="backend.py")
     _side_route(ax, l2["completion"], l6["dag_extraction"], 13.15, label="passes/completion.py")
-    _side_route(ax, l5["mqc3_bridge"], l7["lowering"], 13.75, label="deferred import")
+    _side_route(ax, l5["claveles_bridge"], l7["lowering"], 13.75, label="deferred import")
 
     ax.text(
         7,
         y[7] - box_h - 0.4,
         "Dashed arrows are deferred (function-local) imports in the real source, not eager top-level ones --\n"
-        "lowering/lowering.py only imports lowering/bridges/mqc3.py / lowering/dag.py inside to_dependency_dag(), so registering\n"
-        "a LoweringBackend never pulls in mqc3 (or the rest of the bridge) until it's actually used.",
+        "lowering/lowering.py only imports lowering/bridges/claveles.py / lowering/dag.py inside to_dependency_dag(), so registering\n"
+        "a LoweringBackend never pulls in claveles (or the rest of the bridge) until it's actually used.",
         ha="center",
         va="top",
         fontsize=9.6,
@@ -320,7 +320,7 @@ def generate_pipeline_overview() -> None:
     version of this diagram continued on into a `graph_to_machinery_repr`/
     `MachineryRepr` step that was never actually implemented in
     `lowering/lowering.py`; this version stops at `DependencyDAG` and shows the
-    remaining mqc3-internal steps (`GraphEmbedder`, `MachineryRepr`) as an
+    remaining claveles-internal steps (`GraphEmbedder`, `MachineryRepr`) as an
     explicitly out-of-package continuation instead.
     """
     fig, ax = plt.subplots(figsize=(16, 23), dpi=140)
@@ -335,7 +335,7 @@ def generate_pipeline_overview() -> None:
         7.5,
         0.78,
         'CircuitRepr -> DependencyDAG, through optimize() and the cvzx.lowering.lowering plugin registry -- every box is the real function/class\n'
-        "performing that step; the greyed-out tail is mqc3's own downstream machinery, not part of cvzx",
+        "performing that step; the greyed-out tail is claveles' own downstream machinery, not part of cvzx",
         ha="center",
         va="top",
         fontsize=10.6,
@@ -344,7 +344,7 @@ def generate_pipeline_overview() -> None:
     )
 
     circuit_repr = _box(ax, 5.4, -0.15, 4.2, 0.75, "CircuitRepr", "", edgecolor=_PURPLE, fill=_LAVENDER_FILL, title_size=15)
-    ax.text(7.5, -1.05, "mqc3.circuit.CircuitRepr", ha="center", fontsize=9, color=_GRAY, style="italic")
+    ax.text(7.5, -1.05, "claveles.circuit.CircuitRepr", ha="center", fontsize=9, color=_GRAY, style="italic")
 
     from_repr = _box(
         ax,
@@ -353,7 +353,7 @@ def generate_pipeline_overview() -> None:
         7.8,
         1.05,
         "from_circuit_repr(circuit)",
-        "cvzx.lowering.bridges.mqc3 -- walks the circuit in time order (_naive_translate),\nproducing a compact-form Diagram, then canonicalizes it with normalize_diagram().",
+        "cvzx.lowering.bridges.claveles -- walks the circuit in time order (_naive_translate),\nproducing a compact-form Diagram, then canonicalizes it with normalize_diagram().",
     )
     _elbow(ax, _center_bottom(circuit_repr), _center_top(from_repr))
 
@@ -450,11 +450,11 @@ def generate_pipeline_overview() -> None:
     ax.add_patch(
         FancyBboxPatch((lower_x, lower_y - lower_h), lower_w, lower_h, boxstyle="round,pad=0.02,rounding_size=0.1", linewidth=1.9, edgecolor=_PURPLE, facecolor="white", zorder=1.5)
     )
-    ax.text(lower_x + 0.25, lower_y - 0.22, 'graph_to_dependency_dag(diagram, backend="mqc3" | "cvzx-direct")', fontsize=12.3, fontweight="bold", color=_PURPLE, zorder=4)
+    ax.text(lower_x + 0.25, lower_y - 0.22, 'graph_to_dependency_dag(diagram, backend="claveles" | "cvzx-direct")', fontsize=12.3, fontweight="bold", color=_PURPLE, zorder=4)
     ax.text(
         lower_x + 0.25,
         lower_y - 0.58,
-        'cvzx.lowering.lowering -- dispatches via the LoweringBackend registry (default backend: "mqc3")',
+        'cvzx.lowering.lowering -- dispatches via the LoweringBackend registry (default backend: "claveles")',
         fontsize=9.6,
         color=_TEXT,
         zorder=4,
@@ -463,12 +463,12 @@ def generate_pipeline_overview() -> None:
 
     sub_top = lower_y - 1.0
     sub_h = 3.15
-    mqc3_ref = _box(ax, lower_x + 0.35, sub_top, 3.9, sub_h, 'Mqc3ReferenceBackend ("mqc3")', "", edgecolor=_BLUE, title_size=10.6)
+    claveles_ref = _box(ax, lower_x + 0.35, sub_top, 3.9, sub_h, 'Mqc3ReferenceBackend ("claveles")', "", edgecolor=_BLUE, title_size=10.6)
     ax.text(lower_x + 0.55, sub_top - 0.62, "to_circuit_repr(diagram)", fontsize=9.6, fontweight="bold", color=_BLUE)
-    ax.text(lower_x + 0.55, sub_top - 0.90, "cvzx.lowering.bridges.mqc3", fontsize=8.2, color=_GRAY, style="italic")
+    ax.text(lower_x + 0.55, sub_top - 0.90, "cvzx.lowering.bridges.claveles", fontsize=8.2, color=_GRAY, style="italic")
     ax.annotate("", xy=(lower_x + 2.3, sub_top - 1.35), xytext=(lower_x + 2.3, sub_top - 1.0), arrowprops={"arrowstyle": "-|>", "color": _BLUE, "lw": 1.4})
     ax.text(lower_x + 0.55, sub_top - 1.55, "DependencyDAG(circuit)", fontsize=9.6, fontweight="bold", color=_BLUE)
-    ax.text(lower_x + 0.55, sub_top - 1.83, "mqc3.graph.embed.dep_dag, from the CircuitRepr", fontsize=8.0, color=_GRAY, style="italic")
+    ax.text(lower_x + 0.55, sub_top - 1.83, "claveles.graph.embed.dep_dag, from the CircuitRepr", fontsize=8.0, color=_GRAY, style="italic")
 
     cvzx_direct = _box(ax, lower_x + 4.4, sub_top, 3.9, sub_h, 'CvzxDirectBackend ("cvzx-direct")', "", edgecolor=_BLUE, title_size=10.6)
     ax.text(lower_x + 4.6, sub_top - 0.62, "extract_dependency_dag(diagram)", fontsize=9.6, fontweight="bold", color=_BLUE)
@@ -476,17 +476,17 @@ def generate_pipeline_overview() -> None:
     ax.text(
         lower_x + 4.6,
         sub_top - 1.40,
-        "dual-backend forward sweep over the diagram's\nown CVZXGraph wire/classical edges -- reuses\nthe mqc3 bridge's per-leaf translators directly.",
+        "dual-backend forward sweep over the diagram's\nown CVZXGraph wire/classical edges -- reuses\nthe claveles bridge's per-leaf translators directly.",
         fontsize=8.0,
         color=_TEXT,
         va="top",
         linespacing=1.5,
     )
 
-    _branch(ax, (lower_x + lower_w / 2 - 0.01, lower_y - 0.68, 0.02, 0.0), [mqc3_ref, cvzx_direct], color=_PURPLE, drop=0.18)
+    _branch(ax, (lower_x + lower_w / 2 - 0.01, lower_y - 0.68, 0.02, 0.0), [claveles_ref, cvzx_direct], color=_PURPLE, drop=0.18)
 
     dep_dag = _box(ax, lower_x + 1.75, sub_top - sub_h - 0.55, 5.2, 0.75, "DependencyDAG", "", edgecolor=_PURPLE, fill=_LAVENDER_FILL, title_size=14)
-    _branch(ax, mqc3_ref, [dep_dag], color=_BLUE, drop=0.35)
+    _branch(ax, claveles_ref, [dep_dag], color=_BLUE, drop=0.35)
     _branch(ax, cvzx_direct, [dep_dag], color=_BLUE, drop=0.35)
 
     lower_bottom = lower_y - lower_h
@@ -501,20 +501,20 @@ def generate_pipeline_overview() -> None:
     )
 
     tail_x, tail_w = lower_x + 0.6, lower_w - 1.2
-    embed_b = _box(ax, tail_x, lower_bottom - 0.5, tail_w, 0.75, "GraphEmbedder.embed(dep_dag)", "mqc3.graph.embed -- beamsearch.py / greedy.py", edgecolor=_GRAY, fill=_GRAY_FILL, title_size=10.8)
+    embed_b = _box(ax, tail_x, lower_bottom - 0.5, tail_w, 0.75, "GraphEmbedder.embed(dep_dag)", "claveles.graph.embed -- beamsearch.py / greedy.py", edgecolor=_GRAY, fill=_GRAY_FILL, title_size=10.8)
     _elbow(ax, (lower_x + lower_w / 2, lower_bottom), _center_top(embed_b), color=_GRAY, dashed=True)
 
     graph_repr_b = _box(ax, tail_x, _center_bottom(embed_b)[1] - 0.35, tail_w, 0.6, "GraphRepr", "", edgecolor=_GRAY, fill=_GRAY_FILL, title_size=11)
     _elbow(ax, _center_bottom(embed_b), _center_top(graph_repr_b), color=_GRAY, dashed=True)
 
-    machinery_b = _box(ax, tail_x, _center_bottom(graph_repr_b)[1] - 0.35, tail_w, 0.75, "MachineryRepr", "mqc3.machinery -- QPU-ready output", edgecolor=_GRAY, fill=_GRAY_FILL, title_size=11)
+    machinery_b = _box(ax, tail_x, _center_bottom(graph_repr_b)[1] - 0.35, tail_w, 0.75, "MachineryRepr", "claveles.machinery -- QPU-ready output", edgecolor=_GRAY, fill=_GRAY_FILL, title_size=11)
     _elbow(ax, _center_bottom(graph_repr_b), _center_top(machinery_b), color=_GRAY, dashed=True)
 
     tail_bottom = _center_bottom(machinery_b)[1]
     ax.text(
         tail_x + tail_w / 2,
         tail_bottom - 0.4,
-        "downstream of cvzx -- mqc3's own embedding + machinery pipeline, not implemented in this package",
+        "downstream of cvzx -- claveles' own embedding + machinery pipeline, not implemented in this package",
         ha="center",
         fontsize=9,
         color=_GRAY,

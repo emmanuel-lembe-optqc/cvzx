@@ -1,18 +1,18 @@
-# Converting to and from mqc3 circuits
+# Converting to and from claveles circuits
 
-`cvzx.lowering.bridges.mqc3.from_circuit_repr` and `cvzx.lowering.bridges.mqc3.to_circuit_repr` are
-the two halves of a round trip between an mqc3 `CircuitRepr` and a `cvzx` `Diagram`, and
+`cvzx.lowering.bridges.claveles.from_circuit_repr` and `cvzx.lowering.bridges.claveles.to_circuit_repr` are
+the two halves of a round trip between a claveles `CircuitRepr` and a `cvzx` `Diagram`, and
 `cvzx.lowering.lowering.graph_to_dependency_dag` carries a closed `Diagram` the rest of the way
-to mqc3's own `DependencyDAG`. See {doc}`../dev_guide/architecture` for how these modules fit
+to claveles' own `DependencyDAG`. See {doc}`../dev_guide/architecture` for how these modules fit
 into the full pipeline.
 
-## mqc3 `CircuitRepr` to a `Diagram`
+## claveles `CircuitRepr` to a `Diagram`
 
 ```python
-from mqc3.circuit import CircuitRepr
-from mqc3.circuit.ops import intrinsic
+from claveles.circuit import CircuitRepr
+from claveles.circuit.ops import intrinsic
 
-from cvzx.lowering.bridges.mqc3 import from_circuit_repr
+from cvzx.lowering.bridges.claveles import from_circuit_repr
 
 circuit = CircuitRepr("simple")
 circuit.Q(0) | intrinsic.PhaseRotation(0.4)
@@ -21,30 +21,36 @@ circuit.Q(0) | intrinsic.Measurement(0.1)
 diagram = from_circuit_repr(circuit)
 ```
 
-`from_circuit_repr` naively translates each mqc3 operation and initial state into the
+`from_circuit_repr` naively translates each claveles operation and initial state into the
 compact-form `cvzx.ir.gates` equivalent (exact per-gate formulas below), then canonicalizes
 the result via `cvzx.passes.normalize.normalize_diagram` — pass `normalize=False` to get the
-raw, non-canonical translation instead. A handful of mqc3 features have no `cvzx` counterpart
+raw, non-canonical translation instead. A handful of claveles features have no `cvzx` counterpart
 yet and raise `NotImplementedError`: the `Manual` gate (reached directly, or indirectly via a
 `std.*` operation that lowers to it), a feedforward parameter outside the affine/single-symbol
 case described below, and any initial state outside the idealized-squeezed-state /
 pure-Gaussian-`BosonicState` set described below.
 
-### Per-gate conversion formulas (mqc3 -> cvzx)
+### Per-gate conversion formulas (claveles -> cvzx)
 
-Every formula below was derived from mqc3's own docstrings (see `mqc3.circuit.ops.intrinsic`)
-and numerically verified against cvzx's own gate matrices:
+Every formula below was derived from claveles' own docstrings (see `claveles.circuit.ops.intrinsic`), corrected where
+claveles' compiler differs from its docstring, and is pinned by `tests/lowering/bridges/test_claveles_conventions.py`:
+each intrinsic gate round-trips claveles -> cvzx -> claveles with identical exact outcome moments, and the beam-splitter
+and controlled-sum exports reproduce cvzx's own gate definitions.
 
 - `intrinsic.PhaseRotation(phi)` -> `PhaseRotationGate(-phi)`.
 - `intrinsic.ControlledZ(g)` -> `ControlledZGate(gain=-g)`.
-- `intrinsic.ShearXInvariant`, `ShearPInvariant`, `Squeezing45`, `Arbitrary`, `TwoModeShear`,
+- `intrinsic.ShearXInvariant`, `ShearPInvariant`, `Squeezing45`, `TwoModeShear`,
   `Measurement` all map 1:1 onto the correspondingly-named cvzx gate with the *same*
   parameter(s) — the sign corrections are already baked into each gate's own `expand()`.
+- `intrinsic.Arbitrary(alpha, beta, lam)` -> `ArbitraryGate(alpha, beta, -lam)`. claveles' docstring prints
+  `R(alpha) S(lam) R(beta)` with the opposite squeezing sign to what claveles compiles and the machine runs:
+  `Arbitrary(0, 0, lam)` scales x by `exp(-lam)`, like `std.Squeezing(lam)` (checked on the emulated MoQuren,
+  moquren-emu). cvzx's `ArbitraryGate` follows the printed form, so `lam` changes sign at the bridge.
 - `intrinsic.Displacement(x, p)` -> `DisplacementGate(alpha)` with
   `alpha = (x + 1j*p) / sqrt(2)`. Derived from `D(a) = exp(a a^dag - a* a)` with
   `a = (x_hat + i p_hat) / sqrt(2)`, giving the standard result
   `D^dagger(a) (x_hat + i p_hat) D(a) = x_hat + i p_hat + sqrt(2) a`.
-- `intrinsic.Squeezing(theta)` (mqc3: `R(-pi/2) . S_V(cot theta)`) has no direct 1:1 cvzx gate;
+- `intrinsic.Squeezing(theta)` (claveles: `R(-pi/2) . S_V(cot theta)`) has no direct 1:1 cvzx gate;
   it is translated as the 2-step composition
   `[SqueezingGate(tan(theta)), PhaseRotationGate(pi/2)]`.
 - `intrinsic.BeamSplitter(sqrt_r, theta_rel)` has no direct 1:1 cvzx gate either. Its 4x4
@@ -61,7 +67,7 @@ and numerically verified against cvzx's own gate matrices:
                   PhaseRotationGate(pi/2 - theta_rel)])]
   ```
 
-  Both formulas were checked numerically against mqc3's exact docstring matrices to machine
+  Both formulas were checked numerically against claveles' exact docstring matrices to machine
   precision across many random parameter values.
 
 ### Initial states
@@ -96,7 +102,7 @@ the `FeedForwardFunction` numerically at `0.0` and `1.0` to recover that affine 
 and threaded into the corresponding cvzx gate as a symbolic (`parametric=True`) parameter — the
 exact algebraic inverse of `to_circuit_repr`'s own feedforward resolution (below). A
 `FeedForward` depending on more than one measurement symbol, or a nonlinear function of one
-(mqc3's `FeedForwardFunction` supports arbitrary Python callables; only the affine case is
+(claveles' `FeedForwardFunction` supports arbitrary Python callables; only the affine case is
 inverted here), is not supported and raises `NotImplementedError`.
 
 The reconstructed cvzx gate also carries `param_measurement_map={m: {measurement_leaf.id}}` —
@@ -111,10 +117,10 @@ Note: a measurement's own `theta` parameter could itself be feedforward-dependen
 selects `QSpider`/`PSpider` above does not handle a symbolic `theta` — this is a pre-existing,
 separate limitation, out of scope here.
 
-## `Diagram` back to mqc3 `CircuitRepr`
+## `Diagram` back to claveles `CircuitRepr`
 
 ```python
-from cvzx.lowering.bridges.mqc3 import to_circuit_repr
+from cvzx.lowering.bridges.claveles import to_circuit_repr
 
 circuit2 = to_circuit_repr(diagram)
 ```
@@ -134,25 +140,30 @@ purely structural ones): a fused spider's phase polynomial may no longer match a
 shape this module recognizes, in which case conversion raises `NotImplementedError` rather than
 silently producing something else.
 
-### Per-leaf conversion formulas (cvzx -> mqc3)
+### Per-leaf conversion formulas (cvzx -> claveles)
 
 Each of these is the algebraic inverse of the corresponding formula above:
 
 - `PhaseRotationGate(theta)` -> `intrinsic.PhaseRotation(-theta)`.
 - `Fourier()` -> `intrinsic.PhaseRotation(pi/2)`; `FourierInv()` -> `intrinsic.PhaseRotation(-pi/2)`;
   `Fourier2()` -> `intrinsic.PhaseRotation(pi)`.
-- `ShearXInvariantGate(kappa)`, `ShearPInvariantGate(eta)`, `ArbitraryGate(alpha, beta, lam)`,
+- `ArbitraryGate(alpha, beta, lam)` -> `intrinsic.Arbitrary(alpha, beta, -lam)` (see above).
+- `ShearXInvariantGate(kappa)`, `ShearPInvariantGate(eta)`,
   `Squeezing45Gate(theta)`, `TwoModeShearGate(a, b)`, `MeasurementGate(theta)` all map 1:1 onto
-  their correspondingly-named mqc3 op with the *same* parameter(s).
-- `SqueezingGate(tau)` has no bare mqc3 primitive (mqc3's `Squeezing` op has a different,
+  their correspondingly-named claveles op with the *same* parameter(s).
+- `SqueezingGate(tau)` has no bare claveles primitive (claveles' `Squeezing` op has a different,
   fixed-rotation definition — see the formulas above); it is instead expressed via
-  `ArbitraryGate`'s own `alpha = beta = 0` special case: `intrinsic.Arbitrary(0, 0, ln(tau))`.
+  `ArbitraryGate`'s own `alpha = beta = 0` special case: `intrinsic.Arbitrary(0, 0, -ln(tau))` (the
+  sign as in the `Arbitrary` entry above).
 - `DisplacementGate(alpha)` -> `intrinsic.Displacement(x, p)` with `x = sqrt(2)*Re(alpha)`,
   `p = sqrt(2)*Im(alpha)`.
 - `ControlledZGate(gain=g)` -> `intrinsic.ControlledZ(-g)`.
-- `BeamsplitterGate(theta)` -> `intrinsic.BeamSplitter(sqrt_r, 0)` with `sqrt_r = cos(theta)` —
-  the `theta_rel = 0` special case of the general formula above.
-- `ControlledSumGate(gain=g, control=c, target=t)` has no bare mqc3 primitive (mqc3's intrinsic
+- `BeamsplitterGate(theta)` -> `intrinsic.PhaseRotation(-pi/2)` on mode 2, `intrinsic.BeamSplitter(cos(eta), 0)`,
+  `intrinsic.PhaseRotation(pi/2)` on mode 2: the inverse of the general formula above (claveles' beam splitter is
+  sigma_x-generated, cvzx's sigma_y-generated). claveles requires `sqrt_r = cos(eta)` in [0, 1], so `theta` is folded
+  to `eta` in [0, pi/2]: a negative angle adds `R(pi)` to both mode-2 rotations, and `BS(pi) = -I` adds `R(pi)` on both
+  modes. (The bare `BeamSplitter(cos(theta), 0)` emitted before 2026-10-07 mixed x1 with p2 and was wrong.)
+- `ControlledSumGate(gain=g, control=c, target=t)` has no bare claveles primitive (claveles' intrinsic
   set has `ControlledZ` but no CSUM/CNOT-style analogue). cvzx's `ControlledSumGate(g)` is
   `exp(-i g q̂_c p̂_t)` and `ControlledZGate(g)` is `exp(-i g q̂₁ q̂₂)` — conjugating `ControlledZ`
   by a Fourier rotation on the *target* mode converts CZ's q-q coupling into CSUM's q-p
@@ -176,12 +187,12 @@ Each of these is the algebraic inverse of the corresponding formula above:
 A `(1, 0)` `QSpider`/`PSpider` effect with phase *exactly* `ZxPoly({1: -m})` for a single symbol
 `m` — the leaf shape `cvzx.passes.completion.complete_diagram()` produces to close an open
 output port — is recognized specially: it becomes a plain `intrinsic.Measurement` (`pi/2`/`0`
-for `QSpider`/`PSpider`, same as the bare zero-phase case above), and the resulting mqc3
+for `QSpider`/`PSpider`, same as the bare zero-phase case above), and the resulting claveles
 `Operation` is tracked against `m` for the rest of the walk.
 
 Any later leaf whose own parameter is affine (`slope*m + intercept`, for that same single
-symbol `m`) in a tracked symbol has that parameter translated into an mqc3
-`FeedForward[MeasuredVariable]` (via `mqc3.feedforward.ff_to_mul_constant`/`ff_to_add_constant`,
+symbol `m`) in a tracked symbol has that parameter translated into a claveles
+`FeedForward[MeasuredVariable]` (via `claveles.feedforward.ff_to_mul_constant`/`ff_to_add_constant`,
 composed to match the affine relationship) instead of a plain float — the exact algebraic
 inverse of `from_circuit_repr`'s own feedforward reconstruction above.
 
@@ -191,23 +202,23 @@ nonlinearly on its symbol, raises `NotImplementedError` (first and third cases) 
 
 ### Not (yet) supported -- raises `NotImplementedError`
 
-- `CubicPhaseGate`: a genuinely non-Gaussian gate; mqc3's intrinsic set is Gaussian-only.
+- `CubicPhaseGate`: a genuinely non-Gaussian gate; claveles' intrinsic set is Gaussian-only.
 - Any state/effect leaf with a nonzero phase polynomial, other than the single
   measurement-effect shape described above.
 - A symbolic (parametric, unresolved) gate parameter that isn't a tracked feedforward symbol as
   described above (a genuinely free, measurement-unrelated symbol; more than one symbol at
   once; a nonlinear function of one symbol).
-- A `Diagram` with `num_inputs != 0`: mqc3 `CircuitRepr` has no concept of an externally
+- A `Diagram` with `num_inputs != 0`: claveles `CircuitRepr` has no concept of an externally
   supplied input mode — every mode must originate from a state leaf.
 - `ContractedDiagram` anywhere in `diagram` (same limitation `normalize_diagram` itself
   documents).
 
 Since `cvzx` has no numeric simulation backend of its own, the round trip is checked
 structurally rather than against a reference statevector — that the translated circuit is
-well-formed and that mqc3's own `DependencyDAG` accepts it:
+well-formed and that claveles' own `DependencyDAG` accepts it:
 
 ```python
-from mqc3.graph.embed.dep_dag import DependencyDAG
+from claveles.graph.embed.dep_dag import DependencyDAG
 
 dag = DependencyDAG(circuit2)
 assert dag.dag.number_of_nodes() > 0
@@ -217,7 +228,7 @@ assert dag.dag.number_of_nodes() > 0
 
 `cvzx.lowering.lowering.graph_to_dependency_dag` skips the `to_circuit_repr`/`DependencyDAG`
 boilerplate at the call site — it dispatches to a registered `LoweringBackend` that performs
-the `Diagram -> DependencyDAG` step however it sees fit, defaulting to `"mqc3"`. `diagram` must
+the `Diagram -> DependencyDAG` step however it sees fit, defaulting to `"claveles"`. `diagram` must
 already be closed first (`num_inputs == num_outputs == 0` — see below, and {doc}`optimization`):
 
 ### Closing open boundaries first
@@ -232,7 +243,7 @@ dedicated post-`optimize()` pass that closes them.
 output port: a `(1, 0)` `QSpider`/`PSpider` with phase `ZxPoly({1: -m})` for a fresh
 `sympy.Symbol` `m` — the standard CV-ZX notation for "the idealized homodyne effect whose own
 outcome is `m`" (see `MeasurementGate`'s own docstring for the same `QSpider(1, 0, 0)`
-convention at a *fixed* outcome). `QSpider` measures the x-quadrature (mqc3
+convention at a *fixed* outcome). `QSpider` measures the x-quadrature (claveles
 `intrinsic.Measurement(theta=pi/2)`); `PSpider` measures the p-quadrature (`theta=0`).
 `complete_boundaries(diagram)` does the same for output ports and additionally closes any open
 input ports first with a fresh idealized (zero-phase) state leaf — there's no outcome to name
@@ -263,12 +274,12 @@ attribute (not a copy), so this intentionally also updates that `Diagram` object
 ```python
 from cvzx.lowering.lowering import graph_to_dependency_dag
 
-dep_dag = graph_to_dependency_dag(diagram)  # backend="mqc3" by default
+dep_dag = graph_to_dependency_dag(diagram)  # backend="claveles" by default
 ```
 
 ### The bundled backends
 
-The bundled `"mqc3"` backend (`Mqc3ReferenceBackend`) is `to_circuit_repr` followed by mqc3's
+The bundled `"claveles"` backend (`Mqc3ReferenceBackend`) is `to_circuit_repr` followed by claveles'
 own `DependencyDAG(circuit)` constructor — every limitation of `to_circuit_repr` above applies
 transitively to it. A second bundled backend, `"cvzx-direct"` (`CvzxDirectBackend`), skips the
 `CircuitRepr` round-trip entirely: it discovers execution order directly from the diagram's
@@ -290,32 +301,32 @@ class MyQpuBackend(LoweringBackend):
 
 `list_backends()` lists every currently-registered backend name, and `get_backend(name)` looks
 one up directly; `graph_to_dependency_dag(diagram, backend="my_qpu")` then dispatches to it —
-nothing else in the pipeline needs to change. From there, `DependencyDAG` is ready for mqc3's
+nothing else in the pipeline needs to change. From there, `DependencyDAG` is ready for claveles'
 own `GraphEmbedder`/`GraphRepr`/`MachineryRepr` chain, which is outside `cvzx`'s own scope (see
 {doc}`../dev_guide/architecture`).
 
 #### Why a `LoweringBackend` plugin registry
 
 Different QPUs can require different lowering strategies once a circuit leaves cvzx's
-diagrammatic representation. mqc3 already has exactly this kind of plugin point *downstream* of
-`DependencyDAG`: `mqc3.graph.embed.embed.GraphEmbedder` is an abstract base class with concrete
+diagrammatic representation. claveles already has exactly this kind of plugin point *downstream* of
+`DependencyDAG`: `claveles.graph.embed.embed.GraphEmbedder` is an abstract base class with concrete
 per-strategy subclasses (`beamsearch.py`, `greedy.py`) that each embed a `DependencyDAG` into a
 concrete `GraphRepr` differently, and `GraphRepr` is in turn lowered toward a machinery
-representation via `mqc3.machinery`. `DependencyDAG` itself is QPU-agnostic — it only encodes
+representation via `claveles.machinery`. `DependencyDAG` itself is QPU-agnostic — it only encodes
 per-mode operation dependencies and feedforward edges, not anything hardware-specific — so it is
-the natural, stable interface for cvzx to hand off to mqc3's own machinery. `cvzx.lowering.lowering`
+the natural, stable interface for cvzx to hand off to claveles' own machinery. `cvzx.lowering.lowering`
 provides the analogous plugin point for the one step still missing, `Diagram -> DependencyDAG`:
 a `LoweringBackend` is any strategy for performing that step, backends register themselves under
 a name via `register_backend`, and adding support for a QPU that needs a different lowering
 means writing and registering one more `LoweringBackend` subclass — `get_backend`/
-`graph_to_dependency_dag` and every existing backend are untouched. The bundled `"mqc3"` backend
-is deliberately the simplest correct implementation, built on mqc3's own, already-tested
+`graph_to_dependency_dag` and every existing backend are untouched. The bundled `"claveles"` backend
+is deliberately the simplest correct implementation, built on claveles' own, already-tested
 `_DependencyBuilder.from_circuit()` rather than reimplementing any dependency-graph logic.
 
 ### How `extract_dependency_dag` discovers execution order
 
 `cvzx.lowering.dag.extract_dependency_dag` (the engine behind the `"cvzx-direct"` backend)
-builds the exact same kind of `DependencyDAG` the `"mqc3"` backend does, but via a single
+builds the exact same kind of `DependencyDAG` the `"claveles"` backend does, but via a single
 deterministic forward sweep over the `CVZXGraph`'s own node/edge structure instead of first
 canonicalizing into `normalize_diagram`'s alternating stages — so it tolerates diagram shapes
 that form isn't required to (e.g. an explicit `Swap`, or a `ContractedDiagram`
@@ -324,7 +335,7 @@ that form isn't required to (e.g. an explicit `Swap`, or a `ContractedDiagram`
 1. `complete_boundaries()` (unless `complete=False`) closes every open input/output port first,
    so every wire is bounded by a real `input_states`/`measurement_nodes` node.
 2. Every `input_states` node starts a fresh mode (a monotonically increasing integer, exactly as
-   `cvzx.lowering.bridges.mqc3`'s own `_ModeCounter` assigns them).
+   `cvzx.lowering.bridges.claveles`'s own `_ModeCounter` assigns them).
 3. A node is visited once both of its dependencies are satisfied: every input port has a mode
    threaded into it from an already-visited node (the "wire-ready" condition, propagated forward
    along `"composition"`/`"contracted_internal"` edges port-for-port), and every measurement id
@@ -338,10 +349,10 @@ that form isn't required to (e.g. an explicit `Swap`, or a `ContractedDiagram`
    leaves are visited.
 
 The resulting mode-ordered leaf sequence is fed through the same per-leaf translators
-`cvzx.lowering.bridges.mqc3` already uses (`_apply_1mode_leaf`/`_apply_2mode_leaf`, including
+`cvzx.lowering.bridges.claveles` already uses (`_apply_1mode_leaf`/`_apply_2mode_leaf`, including
 their existing `FeedForward` support) to build a `CircuitRepr`, which is then handed to
 `DependencyDAG` — no cvzx-specific dependency-graph logic is reimplemented for the actual op
-translation, only the traversal order. `mqc3.graph.embed.dep_dag.DependencyDAG` is not itself
+translation, only the traversal order. `claveles.graph.embed.dep_dag.DependencyDAG` is not itself
 backend-specific (its `.dag` is always a plain `networkx.DiGraph`, and its constructor only
 accepts a `CircuitRepr`/`GraphRepr`) — there is no rustworkx-backed variant of it to build
 instead. What *is* backend-aware is the traversal: `extract_dependency_dag()` walks whichever

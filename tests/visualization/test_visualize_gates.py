@@ -595,7 +595,7 @@ def conjugate_gates_test():
     # MeasurementGate is an effect (1-in-0-out), not a unitary gate: its
     # conjugate is a state (0-in-1-out) rather than another MeasurementGate,
     # so it does not fit the "same type after double conjugate" pattern
-    # above and is checked separately in mqc3_gates_numeric_verification_test.
+    # above and is checked separately in claveles_gates_numeric_verification_test.
     print()
     meas = MeasurementGate(theta=0.7)
     meas_conj = meas.conjugate()
@@ -688,7 +688,7 @@ def _apply_1mode_cvzx(diagram: Diagram, x: float, p: float) -> tuple[float, floa
     The diagram is built from QSpider/PSpider (quadratic phase),
     CompositionDiagram, and the 1-mode compact gates defined in this
     module. Returns (x, p) in cvzx's own convention (i.e. following
-    each spider's matrix directly, with no mqc3 sign correction).
+    each spider's matrix directly, with no claveles sign correction).
     """
     if isinstance(diagram, QSpider):
         c = _spider_quadratic_coef(diagram)
@@ -704,12 +704,12 @@ def _apply_1mode_cvzx(diagram: Diagram, x: float, p: float) -> tuple[float, floa
     return _apply_1mode_cvzx(diagram.expand(), x, p)
 
 
-def _apply_1mode_mqc3(diagram: Diagram, x: float, p: float) -> tuple[float, float]:  # ruff: ignore[too-many-return-statements]
-    """Like `_apply_1mode_cvzx`, but in mqc3's own rotation convention.
+def _apply_1mode_claveles(diagram: Diagram, x: float, p: float) -> tuple[float, float]:  # ruff: ignore[too-many-return-statements]
+    """Like `_apply_1mode_cvzx`, but in claveles' own rotation convention.
 
     Interprets `PhaseRotationGate`, `Fourier`, and `FourierInv` nodes
-    using mqc3's OWN rotation convention (`cos/sin` matrix), for
-    directly checking what an expanded gate does to mqc3-convention
+    using claveles' OWN rotation convention (`cos/sin` matrix), for
+    directly checking what an expanded gate does to claveles-convention
     (x, p).
     """
     if isinstance(diagram, QSpider):
@@ -720,29 +720,29 @@ def _apply_1mode_mqc3(diagram: Diagram, x: float, p: float) -> tuple[float, floa
         return x + 2 * c * p, p
     if isinstance(diagram, CompositionDiagram):
         for d in diagram.diagrams:
-            x, p = _apply_1mode_mqc3(d, x, p)
+            x, p = _apply_1mode_claveles(d, x, p)
         return x, p
     if isinstance(diagram, PhaseRotationGate):
-        phi = -diagram.theta  # cvzx PhaseRotationGate(theta) == mqc3 R(-theta)
+        phi = -diagram.theta  # cvzx PhaseRotationGate(theta) == claveles R(-theta)
         return np.cos(phi) * x - np.sin(phi) * p, np.sin(phi) * x + np.cos(phi) * p
     if isinstance(diagram, Fourier):
-        return -p, x  # mqc3 R(pi/2)
+        return -p, x  # claveles R(pi/2)
     if isinstance(diagram, FourierInv):
-        return p, -x  # mqc3 R(-pi/2)
+        return p, -x  # claveles R(-pi/2)
     assert isinstance(diagram, CompactDiagram)
-    return _apply_1mode_mqc3(diagram.expand(), x, p)
+    return _apply_1mode_claveles(diagram.expand(), x, p)
 
 
-def mqc3_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-structure, too-many-locals, too-many-statements]
-    """Numerically verify each mqc3-derived gate's `expand()` against mqc3's own matrix definitions.
+def claveles_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-structure, too-many-locals, too-many-statements]
+    """Numerically verify each claveles-derived gate's `expand()` against claveles' own matrix definitions.
 
     Checks each gate's `expand()` against the exact Heisenberg matrix
-    mqc3's own docstrings define for it. Unlike the rest of this file,
+    claveles' own docstrings define for it. Unlike the rest of this file,
     this uses real `assert`s rather than printed checkmarks, since it
     is checking mathematical correctness rather than just "did this
     render."
     """
-    print("Testing mqc3-derived gates against mqc3's own matrix definitions...")
+    print("Testing claveles-derived gates against claveles' own matrix definitions...")
     rng = random.Random(12345)
 
     def rand() -> float:
@@ -751,10 +751,10 @@ def mqc3_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-stru
     def rand_angle() -> float:
         return rng.uniform(-1.4, 1.4)  # stay clear of PhaseRotationGate's pi/2 exclusion
 
-    def mqc3_r(phi: float, x: float, p: float) -> tuple[float, float]:
+    def claveles_r(phi: float, x: float, p: float) -> tuple[float, float]:
         return np.cos(phi) * x - np.sin(phi) * p, np.sin(phi) * x + np.cos(phi) * p
 
-    def mqc3_s(lam: float, x: float, p: float) -> tuple[float, float]:
+    def claveles_s(lam: float, x: float, p: float) -> tuple[float, float]:
         return np.exp(lam) * x, np.exp(-lam) * p
 
     # ShearXInvariant(kappa): x invariant, p -> p + 2*kappa*x
@@ -777,10 +777,10 @@ def mqc3_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-stru
     for _ in range(20):
         alpha, beta, lam = rand_angle(), rand_angle(), rand()
         xv, pv = rand(), rand()
-        xo, po = _apply_1mode_mqc3(ArbitraryGate(alpha, beta, lam).expand(), xv, pv)
-        xe, pe = mqc3_r(beta, xv, pv)
-        xe, pe = mqc3_s(lam, xe, pe)
-        xe, pe = mqc3_r(alpha, xe, pe)
+        xo, po = _apply_1mode_claveles(ArbitraryGate(alpha, beta, lam).expand(), xv, pv)
+        xe, pe = claveles_r(beta, xv, pv)
+        xe, pe = claveles_s(lam, xe, pe)
+        xe, pe = claveles_r(alpha, xe, pe)
         assert abs(xo - xe) < 1e-7
         assert abs(po - pe) < 1e-7
 
@@ -788,11 +788,11 @@ def mqc3_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-stru
     for _ in range(20):
         theta = rng.uniform(0.2, 1.3)
         xv, pv = rand(), rand()
-        xo, po = _apply_1mode_mqc3(Squeezing45Gate(theta).expand(), xv, pv)
+        xo, po = _apply_1mode_claveles(Squeezing45Gate(theta).expand(), xv, pv)
         c = 1 / np.tan(theta)
-        xe, pe = mqc3_r(np.pi / 4, xv, pv)
+        xe, pe = claveles_r(np.pi / 4, xv, pv)
         xe, pe = xe / c, c * pe
-        xe, pe = mqc3_r(-np.pi / 4, xe, pe)
+        xe, pe = claveles_r(-np.pi / 4, xe, pe)
         assert abs(xo - xe) < 1e-7
         assert abs(po - pe) < 1e-7
 
@@ -823,7 +823,7 @@ def mqc3_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-stru
         assert effect.num_inputs == 1
         assert effect.num_outputs == 0
         xv, pv = rand(), rand()
-        x_after, _p_after = _apply_1mode_mqc3(rot, xv, pv)
+        x_after, _p_after = _apply_1mode_claveles(rot, xv, pv)
         expected = np.sin(theta) * xv + np.cos(theta) * pv
         assert abs(x_after - expected) < 1e-7, (theta, x_after, expected)
 
@@ -834,7 +834,7 @@ def mqc3_gates_numeric_verification_test() -> None:  # ruff: ignore[complex-stru
         assert conj.num_inputs == 0
         assert conj.num_outputs == 1
 
-    print("✅ All mqc3-derived gates verified against mqc3's own matrix definitions")
+    print("✅ All claveles-derived gates verified against claveles' own matrix definitions")
 
 
 def feedforward_params_all_gates_test():
@@ -924,7 +924,7 @@ def nx_graph_roundtrip_test():
     graph representation routinely. This caught a real pre-existing
     gap (`CubicPhaseGate` was entirely unhandled by
     `_reconstruct_proper_node` and would raise) as well as the
-    mqc3-derived gates needing the same wiring.
+    claveles-derived gates needing the same wiring.
     """
     print("Testing nx_graph.py to_graph()/to_diagram() round-trip for all gates...")
     m = symbols("m", real=True)
@@ -968,7 +968,7 @@ def run_all_tests():
     conjugate_gates_test()
     create_compact_diagram_test()
     feedforward_test()
-    mqc3_gates_numeric_verification_test()
+    claveles_gates_numeric_verification_test()
     feedforward_params_all_gates_test()
     nx_graph_roundtrip_test()
 

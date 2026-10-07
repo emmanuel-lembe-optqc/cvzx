@@ -1,7 +1,7 @@
 # CVZX Compiler
 
 A graph-based compiler for continuous-variable quantum circuits and CV-ZX diagrams, with a
-full rewrite/optimization pipeline, round-trip conversion to/from mqc3 circuits, and a dual
+full rewrite/optimization pipeline, round-trip conversion to/from claveles circuits, and a dual
 `networkx`/`rustworkx` graph backend.
 
 ## Overview
@@ -20,13 +20,13 @@ The current implementation covers:
 - The full set of CV-ZX rewrite rules (identity, fusion, chain reduction, Fourier
   normalization, terminal absorption, and the copy rule), applied to a fixed point by
   `cvzx.passes.optimize.optimize`.
-- Round-trip conversion between an mqc3 `CircuitRepr` and a canonical `cvzx.ir.base.Diagram`
-  (`cvzx.lowering.bridges.mqc3`), and boundary completion for open diagrams
+- Round-trip conversion between a claveles `CircuitRepr` and a canonical `cvzx.ir.base.Diagram`
+  (`cvzx.lowering.bridges.claveles`), and boundary completion for open diagrams
   (`cvzx.passes.completion`).
-- A pluggable lowering step from a `Diagram` to a concrete mqc3 `DependencyDAG`
-  (`cvzx.lowering.lowering`), with a bundled `"mqc3"` reference backend and a `"cvzx-direct"`
+- A pluggable lowering step from a `Diagram` to a concrete claveles `DependencyDAG`
+  (`cvzx.lowering.lowering`), with a bundled `"claveles"` reference backend and a `"cvzx-direct"`
   backend that skips the `CircuitRepr` round trip, so a different QPU backend can be added
-  without touching the rest of the pipeline. From there, mqc3's own `GraphEmbedder`/
+  without touching the rest of the pipeline. From there, claveles' own `GraphEmbedder`/
   `GraphRepr`/`MachineryRepr` chain is outside this project's scope.
 - Visualization of CV-ZX diagrams (`cvzx.visualization`), and optimization-quality metrics
   measuring how much `optimize()` shrinks a diagram (`cvzx.utils.metrics`).
@@ -76,9 +76,9 @@ cvzx/
 │       │   ├── optimize.py        # optimize(): runs the rules to a fixed point
 │       │   └── completion.py      # Closing a Diagram's open input/output ports
 │       ├── lowering/
-│       │   ├── bridges/mqc3.py    # mqc3 CircuitRepr <-> cvzx Diagram
+│       │   ├── bridges/claveles.py    # claveles CircuitRepr <-> cvzx Diagram
 │       │   ├── dag.py             # Direct CVZXGraph -> DependencyDAG extraction
-│       │   └── lowering.py        # Diagram -> mqc3 DependencyDAG (pluggable backends)
+│       │   └── lowering.py        # Diagram -> claveles DependencyDAG (pluggable backends)
 │       ├── utils/
 │       │   ├── helpers.py         # Rewrite-engine-adjacent utilities
 │       │   └── metrics.py         # Optimization-quality metrics (compute_metrics, ...)
@@ -98,10 +98,11 @@ python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-For development (tests, mqc3 integration, docs, notebooks):
+For development (tests, claveles integration, docs, notebooks):
 
 ```bash
 python -m pip install -e ".[dev]"
+python -m pip install -e ".[claveles]"   # only the claveles bridge (claveles-core from sdk-optqc)
 ```
 
 Just the documentation build:
@@ -125,7 +126,7 @@ A guided introduction is available in
 to the graph representation, and simplifying it by hand and via `optimize()`. See
 [`examples/measurement_induced_squeezer.ipynb`](examples/measurement_induced_squeezer.ipynb)
 for a deeper, physically-motivated worked example. The Sphinx docs' user guide also has
-task-oriented pages for building/rewriting/optimizing diagrams, converting to and from mqc3
+task-oriented pages for building/rewriting/optimizing diagrams, converting to and from claveles
 circuits, and visualization — see [Documentation](#documentation).
 
 Start Jupyter from the repository root:
@@ -166,8 +167,8 @@ comp = CompositionDiagram([
 result = optimize(comp)  # the three rotations fuse into one; result.diagram, result.graph
 ```
 
-See the user guide's "Converting to and from mqc3 circuits" page for a walkthrough that covers
-converting to/from an mqc3 `CircuitRepr` and lowering to a `DependencyDAG`.
+See the user guide's "Converting to and from claveles circuits" page for a walkthrough that covers
+converting to/from a claveles `CircuitRepr` and lowering to a `DependencyDAG`.
 
 ## Debugging
 
@@ -205,8 +206,8 @@ This project builds on the continuous-variable ZX formalism introduced in:
 > processes,” *Physical Review Research* **7**, 033141 (2025).
 > [arXiv:2405.07246](https://arxiv.org/abs/2405.07246)
 
-The gate set and naming conventions follow MQC3's `graph`/`circuit` operations, and
-`cvzx.lowering.bridges.mqc3`/`cvzx.lowering.lowering` convert to/from and lower onto that
+The gate set and naming conventions follow claveles's `graph`/`circuit` operations, and
+`cvzx.lowering.bridges.claveles`/`cvzx.lowering.lowering` convert to/from and lower onto that
 machinery directly.
 
 ## License

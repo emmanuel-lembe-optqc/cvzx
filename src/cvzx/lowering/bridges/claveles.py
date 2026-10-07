@@ -1,6 +1,6 @@
-"""Bidirectional bridge between mqc3 `CircuitRepr` and cvzx `Diagram`.
+"""Bidirectional bridge between claveles `CircuitRepr` and cvzx `Diagram`.
 
-`from_circuit_repr` converts an mqc3 `CircuitRepr` into a canonical cvzx `Diagram`;
+`from_circuit_repr` converts a claveles `CircuitRepr` into a canonical cvzx `Diagram`;
 `to_circuit_repr` is the reverse direction. The two are algebraic inverses of each
 other throughout. See :doc:`../user_guide/circuit_conversion` for the exact
 per-gate/per-leaf formulas, feedforward handling, and the full
@@ -10,7 +10,7 @@ not-yet-supported list -- only the key steps are kept here.
 ---------------------------
 `from_circuit_repr` implements a "naive translate, then normalize" architecture:
 
-1. `_naive_translate` walks the mqc3 `CircuitRepr` in time order (via
+1. `_naive_translate` walks the claveles `CircuitRepr` in time order (via
    `CircuitRepr.__iter__`, after `convert_std_ops_to_intrinsic()` has
    lowered every `std.*` operation down to `intrinsic.*` ones) and builds
    *some* compact-form cvzx `Diagram` that is semantically equivalent to
@@ -36,7 +36,7 @@ algebraic inverse of `to_circuit_repr`'s own feedforward resolution below.
 ---------------------------
 `to_circuit_repr` is the reverse direction: it walks an already-canonical
 (or canonicalizable) `Diagram` -- the alternating type-1/type-2 stages
-`normalize_diagram` produces -- and emits the equivalent sequence of mqc3
+`normalize_diagram` produces -- and emits the equivalent sequence of claveles
 intrinsic operations, translating each primitive leaf independently rather
 than pattern-matching compositions back into a single composite op (e.g. a
 round-tripped `BeamSplitter` is not necessarily *op-for-op* identical to the
@@ -49,12 +49,12 @@ polynomial may no longer match any primitive shape this module recognizes.
 A measurement-effect leaf with the feedforward shape above becomes a plain
 `intrinsic.Measurement` and is tracked against its symbol for the rest of
 the walk; any later leaf whose parameter is affine in a tracked symbol is
-re-emitted as an mqc3 `FeedForward[MeasuredVariable]` instead of a plain
+re-emitted as a claveles `FeedForward[MeasuredVariable]` instead of a plain
 float -- the algebraic inverse of `from_circuit_repr`'s reconstruction above.
 
 Not (yet) supported -- raises `NotImplementedError`
 -----------------------------------------------------
-- `CubicPhaseGate`: a genuinely non-Gaussian gate; mqc3's intrinsic set
+- `CubicPhaseGate`: a genuinely non-Gaussian gate; claveles' intrinsic set
   is Gaussian-only.
 - Any state/effect leaf with a nonzero phase polynomial, other than the
   single measurement-effect shape described above.
@@ -62,7 +62,7 @@ Not (yet) supported -- raises `NotImplementedError`
   tracked feedforward symbol as described above (a genuinely free,
   measurement-unrelated symbol; more than one symbol at once; a
   nonlinear function of one symbol).
-- A `Diagram` with `num_inputs != 0`: mqc3 `CircuitRepr` has no concept
+- A `Diagram` with `num_inputs != 0`: claveles `CircuitRepr` has no concept
   of an externally supplied input mode -- every mode must originate
   from a state leaf.
 - `ContractedDiagram` anywhere in `diagram` (same limitation
@@ -114,11 +114,11 @@ from cvzx.passes.normalize import normalize_diagram
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from mqc3.circuit import CircuitRepr
-    from mqc3.circuit.ops._base import MeasuredVariable, Operation
-    from mqc3.circuit.program import CircOpParam
-    from mqc3.circuit.state import InitialState
-    from mqc3.feedforward import FeedForward
+    from claveles.circuit import CircuitRepr
+    from claveles.circuit.ops._base import MeasuredVariable, Operation
+    from claveles.circuit.program import CircOpParam
+    from claveles.circuit.state import InitialState
+    from claveles.feedforward import FeedForward
 
 __all__ = ["from_circuit_repr", "to_circuit_repr"]
 
@@ -183,13 +183,13 @@ def _phase_rotation(theta: float | Expr, measurement_leaf_ids: dict[Symbol, int]
     `PhaseRotationGate` refuses any angle that is an odd multiple of
     `pi/2` (it asks callers to use `Fourier`/`FourierInv` instead). Every
     translator in this module that builds a `PhaseRotationGate` from an
-    mqc3 angle can land on exactly such an angle (e.g. `intrinsic.
+    claveles angle can land on exactly such an angle (e.g. `intrinsic.
     Squeezing`'s fixed `pi/2` factor, or `intrinsic.PhaseRotation(pi/2)`
     itself), so this helper folds `theta` into `(-pi, pi]` and
     substitutes the equivalent `Fourier`/`FourierInv` proper diagram at
     the two problem angles -- the exact same routing already used by
     `MeasurementGate._rotation_diagram` in `cvzx.ir.gates` (see its
-    docstring for the `Fourier() = mqc3 R(pi/2)`, `FourierInv() = mqc3
+    docstring for the `Fourier() = claveles R(pi/2)`, `FourierInv() = claveles
     R(-pi/2)` derivation this relies on).
 
     A symbolic (feedforward-derived) `theta` skips the fold entirely --
@@ -229,10 +229,10 @@ def _rotated_ideal_state(phi: float) -> Diagram:
     `phi = 0` is the bare x-eigenstate spider `QSpider(0, 1, 0)`; any other
     angle applies `PhaseRotationGate(-phi)` afterward (`state` is a ket,
     not a Heisenberg-conjugated operator, so the diagram's own
-    `PhaseRotationGate(theta) = mqc3 R(-theta)` convention rotates the
-    state's phase-space picture by mqc3's `R(-theta)` acting directly on
+    `PhaseRotationGate(theta) = claveles R(-theta)` convention rotates the
+    state's phase-space picture by claveles' `R(-theta)` acting directly on
     the ket, i.e. by `-theta`; to rotate the state to angle `phi` we
-    therefore need mqc3's `R(phi)`, i.e. `PhaseRotationGate(-phi)`).
+    therefore need claveles' `R(phi)`, i.e. `PhaseRotationGate(-phi)`).
 
     Returns
     -------
@@ -275,8 +275,36 @@ def _phi_from_gaussian_cov(cov: npt.ArrayLike) -> float:
     return float(np.arctan2(squeezed_axis[1], squeezed_axis[0]))
 
 
+def placed_operations(circuit: CircuitRepr) -> list[tuple[Operation, list[int]]]:
+    """Every operation of ``circuit`` in time order with the modes it acts on, state preparations left out.
+
+    claveles keeps an operation's modes on its placement (``CircuitRepr.placements``) rather than on the operation, and
+    lists placed input states as ``StatePreparation`` operations in the same sequence.
+
+    Returns
+    -------
+    list[tuple[Operation, list[int]]]
+        ``(operation, modes)`` for every non-state operation, in placement order.
+    """
+    return [(pl.op, list(pl.modes)) for pl in circuit.placements if not pl.op.is_state_preparation()]
+
+
+def _initial_state(circuit: CircuitRepr, mode_index: int) -> InitialState:
+    """The state placed on ``mode_index``; an open mode is claveles' default input, the hardware's x-squeezed state.
+
+    Returns
+    -------
+    InitialState
+        The placed state, or ``HardwareConstrainedSqueezedState(phi=0)`` for an open mode.
+    """
+    from claveles.circuit.state import HardwareConstrainedSqueezedState  # ruff: ignore[import-outside-top-level]
+
+    state = circuit.placed_states.get(mode_index)
+    return HardwareConstrainedSqueezedState(phi=0.0) if state is None else state
+
+
 def _translate_initial_state(state: InitialState, mode_index: int) -> Diagram:
-    """Translate one mqc3 `InitialState` into a cvzx state leaf.
+    """Translate one claveles `InitialState` into a cvzx state leaf.
 
     Returns
     -------
@@ -290,7 +318,7 @@ def _translate_initial_state(state: InitialState, mode_index: int) -> Diagram:
         docstring's "Initial states" section).
     """
     # ruff: ignore[import-outside-top-level]
-    from mqc3.circuit.state import BosonicState, HardwareConstrainedSqueezedState
+    from claveles.circuit.state import BosonicState, HardwareConstrainedSqueezedState
 
     if isinstance(state, HardwareConstrainedSqueezedState):
         return _rotated_ideal_state(state.phi)
@@ -334,7 +362,7 @@ def _as_float(value: CircOpParam, op_name: str, param_index: int) -> float:
         If `value` is a `FeedForward`.
     """
     # ruff: ignore[import-outside-top-level]
-    from mqc3.feedforward import FeedForward
+    from claveles.feedforward import FeedForward
 
     if isinstance(value, FeedForward):
         msg = f"Cannot convert `{op_name}`: feedforward on parameter #{param_index} is not a plain float."
@@ -351,7 +379,7 @@ def _resolve_param(
     referencing a measurement operation that `_measurements_needing_symbols`
     assigned a symbol to resolves to that affine relationship (the
     `FeedForwardFunction`'s slope/intercept are recovered by evaluating it
-    numerically at `0.0` and `1.0`, mirroring `cvzx.lowering.bridges.mqc3`'s
+    numerically at `0.0` and `1.0`, mirroring `cvzx.lowering.bridges.claveles`'s
     own `_resolve_scalar` in reverse); the resulting `Expr` is meant to be
     threaded into `param_measurement_map={symbol: {measurement_leaf.id}}`
     on the cvzx gate that ends up carrying it (see `_naive_translate`).
@@ -370,7 +398,7 @@ def _resolve_param(
         same circuit up front).
     """
     # ruff: ignore[import-outside-top-level]
-    from mqc3.feedforward import FeedForward
+    from claveles.feedforward import FeedForward
 
     if not isinstance(value, FeedForward):
         return _as_float(value, op_name, param_index)
@@ -398,9 +426,9 @@ def _resolve_param(
 # --------------------------------------------------------------------------
 # Each translator takes the operation's already-float-coerced parameters
 # (in the exact order `Operation.parameters()` returns them -- see
-# `mqc3.circuit.ops.intrinsic`) and returns the compact-form cvzx `Diagram`
+# `claveles.circuit.ops.intrinsic`) and returns the compact-form cvzx `Diagram`
 # for that operation alone (a 1-mode or 2-mode gate/effect, in the same
-# mode order as `Operation.opnd().get_ids()`).
+# mode order as the operation's placement, `placed_operations`).
 
 
 def _translate_measurement(params: list[float], symbol: Symbol | None = None) -> Diagram:
@@ -474,7 +502,11 @@ def _translate_squeezing45(params: list[float | Expr], measurement_leaf_ids: dic
 
 
 def _translate_arbitrary(params: list[float | Expr], measurement_leaf_ids: dict[Symbol, int]) -> Diagram:
+    # claveles prints Arbitrary as R(alpha) S(lam) R(beta) with the docstring's S, but its compiler (and the machine)
+    # squeeze the other way, S(lam) = diag(e^-lam, e^lam), like std.Squeezing; cvzx's ArbitraryGate follows the printed
+    # form, so lam changes sign at the bridge (verified on the emulated MoQuren, moquren-emu).
     alpha, beta, lam = params
+    lam = -lam
     parametric = _is_symbolic(alpha) or _is_symbolic(beta) or _is_symbolic(lam)
     pmm = _pmm_for(alpha, beta, lam, measurement_leaf_ids=measurement_leaf_ids)
     return ArbitraryGate(alpha, beta, lam, parametric=parametric, param_measurement_map=pmm)
@@ -542,7 +574,7 @@ def _measurements_needing_symbols(circuit: CircuitRepr) -> dict[int, Symbol]:
     """Find every `intrinsic.measurement` operation some later operation feeds forward from.
 
     A fresh `Symbol` is assigned to each such measurement's `id(operation)`
-    (identity, not equality -- mqc3 `Operation` objects aren't meaningfully
+    (identity, not equality -- claveles `Operation` objects aren't meaningfully
     comparable by value) -- see `_translate_measurement`, which uses it to
     reconstruct the measurement as a `QSpider`/`PSpider(1, 0,
     ZxPoly({1: -symbol}))` leaf instead of a plain `MeasurementGate`.
@@ -552,16 +584,16 @@ def _measurements_needing_symbols(circuit: CircuitRepr) -> dict[int, Symbol]:
     dict[int, Symbol]
     """
     # ruff: ignore[import-outside-top-level]
-    from mqc3.feedforward import FeedForward
+    from claveles.feedforward import FeedForward
 
     referenced_ids: set[int] = set()
-    for op in circuit:
+    for op, _ in placed_operations(circuit):
         for param in op.parameters():
             if isinstance(param, FeedForward):
                 referenced_ids.add(id(param.variable.get_from_operation()))
 
     symbols: dict[int, Symbol] = {}
-    for op in circuit:
+    for op, _ in placed_operations(circuit):
         if op.name() == "intrinsic.measurement" and id(op) in referenced_ids:
             symbols[id(op)] = Symbol(f"m_{next(_symbol_counter)}", real=True)
     return symbols
@@ -602,7 +634,7 @@ def _translate_operation(
     return translator(params, measurement_leaf_ids)
 
 
-def _naive_translate(circuit: CircuitRepr) -> Diagram:  # ruff: ignore[too-many-locals]
+def _naive_translate(circuit: CircuitRepr) -> Diagram:
     """Build *some* compact-form `Diagram` semantically equal to `circuit`.
 
     See the module docstring for the overall strategy. `circuit` is not
@@ -626,17 +658,16 @@ def _naive_translate(circuit: CircuitRepr) -> Diagram:  # ruff: ignore[too-many-
         msg = "Cannot convert an empty CircuitRepr (no modes)."
         raise ValueError(msg)
 
-    state_leaves = [_translate_initial_state(circuit.get_initial_state(i), i) for i in range(n_modes)]
+    state_leaves = [_translate_initial_state(_initial_state(circuit, i), i) for i in range(n_modes)]
     diagrams: list[Diagram] = [TensorDiagram(state_leaves) if n_modes > 1 else state_leaves[0]]
     connectivity: dict[int, dict[int, int]] = {}
     open_modes: list[int] = list(range(n_modes))
     measurement_symbols = _measurements_needing_symbols(circuit)
     measurement_leaf_ids: dict[Symbol, int] = {}
 
-    for op in circuit:
+    for op, touched in placed_operations(circuit):
         gate_diagram = _translate_operation(op, measurement_symbols, measurement_leaf_ids)
         _record_measurement_leaf_id(op, gate_diagram, measurement_symbols, measurement_leaf_ids)
-        touched = list(op.opnd().get_ids())
         other = [m for m in open_modes if m not in touched]
         new_row_order = [*touched, *other]
 
@@ -660,7 +691,7 @@ def _naive_translate(circuit: CircuitRepr) -> Diagram:  # ruff: ignore[too-many-
 
 
 def from_circuit_repr(circuit: CircuitRepr, *, normalize: bool = True) -> Diagram:
-    """Translate an mqc3 `CircuitRepr` into a cvzx `Diagram`.
+    """Translate a claveles `CircuitRepr` into a cvzx `Diagram`.
 
     Naively translates every operation and initial state (see
     :doc:`../user_guide/circuit_conversion` for the exact per-gate/per-state
@@ -671,7 +702,7 @@ def from_circuit_repr(circuit: CircuitRepr, *, normalize: bool = True) -> Diagra
     Parameters
     ----------
     circuit : CircuitRepr
-        The mqc3 circuit to convert. Not mutated (a deep copy is used
+        The claveles circuit to convert. Not mutated (a deep copy is used
         internally for the `std.* -> intrinsic.*` lowering step).
     normalize : bool
         If True (default), canonicalize the result via
@@ -696,7 +727,7 @@ def from_circuit_repr(circuit: CircuitRepr, *, normalize: bool = True) -> Diagra
     return diagram
 
 
-MeasurementOps = dict[Symbol, "Operation"]
+MeasurementOps = dict[Symbol, "MeasuredVariable"]
 
 
 # --------------------------------------------------------------------------
@@ -774,14 +805,14 @@ def _affine_coeffs(expr: Expr, symbol: Symbol) -> tuple[float, float] | None:
 def _resolve_scalar(
     value: float | Expr, leaf_name: str, measurement_ops: MeasurementOps
 ) -> float | FeedForward[MeasuredVariable]:
-    """Coerce a gate parameter to `float`, or to an mqc3 `FeedForward` if measurement-dependent.
+    """Coerce a gate parameter to `float`, or to a claveles `FeedForward` if measurement-dependent.
 
     A plain numeric value (or a symbol-free `Expr`) is coerced exactly as
     `_as_real` does. A value that's affine in exactly one symbol bound in
     `measurement_ops` (see `MeasurementOps`) becomes
     `FeedForward(MeasuredVariable(op))`, scaled/shifted via
-    `mqc3.feedforward.ff_to_mul_constant`/`ff_to_add_constant` to match
-    that affine relationship -- mqc3 has no arithmetic operators on
+    `claveles.feedforward.ff_to_mul_constant`/`ff_to_add_constant` to match
+    that affine relationship -- claveles has no arithmetic operators on
     `FeedForward` itself, so the scaling has to be baked in this way
     rather than applied to the returned value afterward.
 
@@ -827,10 +858,9 @@ def _resolve_scalar(
         raise NotImplementedError(msg)
     slope, intercept = affine
 
-    from mqc3.circuit.ops._base import MeasuredVariable  # ruff: ignore[import-outside-top-level, import-private-name]
-    from mqc3.feedforward import ff_to_add_constant, ff_to_mul_constant  # ruff: ignore[import-outside-top-level]
+    from claveles.feedforward import ff_to_add_constant, ff_to_mul_constant  # ruff: ignore[import-outside-top-level]
 
-    result = ff_to_mul_constant(slope)(MeasuredVariable(measurement_ops[symbol]))
+    result = ff_to_mul_constant(slope)(measurement_ops[symbol])
     if intercept != 0:
         result = ff_to_add_constant(intercept)(result)
     return result
@@ -904,7 +934,7 @@ def _measurement_symbol(elt: Diagram) -> Symbol | None:
 
 
 def _open_mode_state(elt: Diagram, mode_index: int) -> InitialState:
-    """Translate a 0-in-1-out state leaf into an mqc3 `InitialState`.
+    """Translate a 0-in-1-out state leaf into a claveles `InitialState`.
 
     Returns
     -------
@@ -916,7 +946,7 @@ def _open_mode_state(elt: Diagram, mode_index: int) -> InitialState:
     NotImplementedError
         If `elt` is not the idealized zero-phase Q/P-spider state.
     """
-    from mqc3.circuit.state import HardwareConstrainedSqueezedState  # ruff: ignore[import-outside-top-level]
+    from claveles.circuit.state import HardwareConstrainedSqueezedState  # ruff: ignore[import-outside-top-level]
 
     if _is_zero_phase_leaf(elt, 0, 1):
         phi = 0.0 if isinstance(elt, QSpider) else np.pi / 2
@@ -935,7 +965,7 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
     elt: Diagram,
     measurement_ops: MeasurementOps,
 ) -> bool:
-    """Apply the mqc3 op for one already-open mode's 1-in leaf.
+    """Apply the claveles op for one already-open mode's 1-in leaf.
 
     `measurement_ops` is updated in place whenever `elt` is a
     `_measurement_symbol()`-shaped effect (see `MeasurementOps`), so any
@@ -949,7 +979,7 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
         an identity wire); False if the leaf consumes it (an effect).
     """
     # ruff: ignore[import-outside-top-level]
-    from mqc3.circuit.ops import intrinsic
+    from claveles.circuit.ops import intrinsic
 
     if _is_identity(elt):
         return True
@@ -971,9 +1001,8 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
     symbol = _measurement_symbol(elt)
     if symbol is not None:
         theta = np.pi / 2 if isinstance(elt, QSpider) else 0.0
-        op = intrinsic.Measurement(theta)
-        circuit.Q(mode_id) | op
-        measurement_ops[symbol] = op
+        # placing a measurement returns the value it will read: the feedforward source claveles expects
+        measurement_ops[symbol] = circuit.Q(mode_id) | intrinsic.Measurement(theta)
         return False
 
     if isinstance(elt, PhaseRotationGate):
@@ -1000,13 +1029,14 @@ def _apply_1mode_leaf(  # ruff: ignore[complex-structure, too-many-branches, too
         return True
     if isinstance(elt, SqueezingGate):
         tau = _as_real(elt.tau, "SqueezingGate")
-        circuit.Q(mode_id) | intrinsic.Arbitrary(0.0, 0.0, float(np.log(tau)))
+        circuit.Q(mode_id) | intrinsic.Arbitrary(0.0, 0.0, -float(np.log(tau)))  # sign: see _translate_arbitrary
         return True
     if isinstance(elt, ArbitraryGate):
+        lam = _resolve_scalar(elt.lam, "ArbitraryGate", measurement_ops)
         circuit.Q(mode_id) | intrinsic.Arbitrary(
             _resolve_scalar(elt.alpha, "ArbitraryGate", measurement_ops),
             _resolve_scalar(elt.beta, "ArbitraryGate", measurement_ops),
-            _resolve_scalar(elt.lam, "ArbitraryGate", measurement_ops),
+            -lam if isinstance(lam, float) else _negate_feedforward(lam),  # sign: see _translate_arbitrary
         )
         return True
     if isinstance(elt, Squeezing45Gate):
@@ -1032,7 +1062,7 @@ def _negate_feedforward(value: FeedForward[MeasuredVariable]) -> FeedForward[Mea
     -------
     FeedForward[MeasuredVariable]
     """
-    from mqc3.feedforward import ff_to_mul_constant  # ruff: ignore[import-outside-top-level]
+    from claveles.feedforward import ff_to_mul_constant  # ruff: ignore[import-outside-top-level]
 
     return cast("FeedForward[MeasuredVariable]", ff_to_mul_constant(-1.0)(value))
 
@@ -1040,9 +1070,9 @@ def _negate_feedforward(value: FeedForward[MeasuredVariable]) -> FeedForward[Mea
 def _apply_2mode_leaf(
     circuit: CircuitRepr, mode_a: int, mode_b: int, elt: Diagram, measurement_ops: MeasurementOps
 ) -> None:
-    """Apply the mqc3 op for a wide (2-mode) leaf touching `mode_a`, `mode_b`."""
+    """Apply the claveles op for a wide (2-mode) leaf touching `mode_a`, `mode_b`."""
     # ruff: ignore[import-outside-top-level]
-    from mqc3.circuit.ops import intrinsic
+    from claveles.circuit.ops import intrinsic
 
     if isinstance(elt, ControlledZGate):
         gain = _resolve_scalar(elt.gain, "ControlledZGate", measurement_ops)
@@ -1050,7 +1080,7 @@ def _apply_2mode_leaf(
         circuit.Q(mode_a, mode_b) | intrinsic.ControlledZ(gain)
         return
     if isinstance(elt, ControlledSumGate):
-        # No direct mqc3 primitive: conjugating ControlledZ by a Fourier
+        # No direct claveles primitive: conjugating ControlledZ by a Fourier
         # rotation on the target mode converts CZ's q-q coupling into
         # CSUM's q-p coupling -- see :doc:`../user_guide/circuit_conversion`
         # for the derivation and its Heisenberg-picture verification.
@@ -1062,8 +1092,21 @@ def _apply_2mode_leaf(
         circuit.Q(target_mode) | intrinsic.PhaseRotation(np.pi / 2)
         return
     if isinstance(elt, BeamsplitterGate):
+        # cvzx BS(theta) = exp(-i theta (q1 p2 - p1 q2)) mixes x1 with x2; claveles' BeamSplitter(cos eta, 0) mixes x1
+        # with p2, so it is conjugated by a quarter turn on the second mode (inverse of `_translate_beam_splitter`).
+        # claveles needs sqrt(R) = cos(eta) in [0, 1]: eta is folded into [0, pi/2]; a negative angle is a positive
+        # one conjugated by R(pi) on the second mode, and BS(pi) = -I = R(pi) on both modes.
         theta = _as_real(elt.theta, "BeamsplitterGate")
-        circuit.Q(mode_a, mode_b) | intrinsic.BeamSplitter(float(np.cos(theta)), 0.0)
+        eta = (theta + np.pi) % (2 * np.pi) - np.pi
+        flip_both = abs(eta) > np.pi / 2
+        if flip_both:
+            eta -= np.copysign(np.pi, eta)
+        turn = np.pi if eta < 0 else 0.0
+        circuit.Q(mode_b) | intrinsic.PhaseRotation(-np.pi / 2 + turn)
+        circuit.Q(mode_a, mode_b) | intrinsic.BeamSplitter(float(np.cos(abs(eta))), 0.0)
+        circuit.Q(mode_b) | intrinsic.PhaseRotation(np.pi / 2 + turn + (np.pi if flip_both else 0.0))
+        if flip_both:
+            circuit.Q(mode_a) | intrinsic.PhaseRotation(np.pi)
         return
     if isinstance(elt, TwoModeShearGate):
         circuit.Q(mode_a, mode_b) | intrinsic.TwoModeShear(
@@ -1082,7 +1125,7 @@ def _apply_2mode_leaf(
 
 
 class _ModeCounter:
-    """Hands out fresh, strictly increasing mqc3 mode ids."""
+    """Hands out fresh, strictly increasing claveles mode ids."""
 
     def __init__(self) -> None:
         self._next = 0
@@ -1132,8 +1175,7 @@ def _walk_row(
             mode_id = None
         elif elt.num_inputs == 0:
             mode_id = mode_counter.fresh()
-            circuit.Q(mode_id)
-            circuit.set_initial_state(mode_id, _open_mode_state(elt, mode_id))
+            circuit.Q(mode_id) | _open_mode_state(elt, mode_id)
         else:
             # A row's non-first element always has an input port -- only
             # the first element of a chain can be a 0-in state leaf -- so
@@ -1148,7 +1190,7 @@ def _walk_row(
 
 
 def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr:
-    """Translate a cvzx `Diagram` into an mqc3 `CircuitRepr`.
+    """Translate a cvzx `Diagram` into a claveles `CircuitRepr`.
 
     `diagram` is canonicalized via `normalize_diagram` first (a no-op if
     it already is canonical), then walked stage by stage -- each stage's
@@ -1177,11 +1219,11 @@ def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr
     Raises
     ------
     ValueError
-        If `diagram` has any external inputs (`num_inputs != 0`): mqc3
+        If `diagram` has any external inputs (`num_inputs != 0`): claveles
         circuits have no notion of an externally supplied mode.
     """
     # ruff: ignore[import-outside-top-level]
-    from mqc3.circuit import CircuitRepr
+    from claveles.circuit import CircuitRepr
 
     def _reject_contracted(d: Diagram) -> None:
         if isinstance(d, ContractedDiagram):
@@ -1199,7 +1241,7 @@ def to_circuit_repr(diagram: Diagram, *, name: str = "converted") -> CircuitRepr
     if diagram.num_inputs != 0:
         msg = (
             f"Cannot convert a Diagram with external inputs (num_inputs={diagram.num_inputs}) "
-            "to a CircuitRepr: mqc3 circuits have no concept of an externally supplied "
+            "to a CircuitRepr: claveles circuits have no concept of an externally supplied "
             "input mode -- every mode must originate from a state leaf (an ancilla/InitialState)."
         )
         raise ValueError(msg)

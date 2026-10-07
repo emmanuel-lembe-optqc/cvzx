@@ -7,18 +7,18 @@ of q-/p-spiders and gate leaves, converts it to a graph (`networkx` or `rustwork
 graph-rewrite rules (fusion, chain reduction, terminal absorption, Fourier normalization, the
 copy rule, ...) until nothing more matches.
 
-The gate set and naming conventions follow MQC3's `graph`/`circuit` operations, so a `cvzx`
+The gate set and naming conventions follow claveles's `graph`/`circuit` operations, so a `cvzx`
 diagram optimized with `cvzx.passes.optimize.optimize` is meant to compile down cleanly onto
-that machinery's measurement-angle model. `cvzx.lowering.bridges.mqc3` converts to and from an
-actual mqc3 `CircuitRepr`, and `cvzx.lowering.lowering` carries a closed diagram the rest of
-the way to a concrete mqc3 `DependencyDAG` via a pluggable per-QPU backend.
+that machinery's measurement-angle model. `cvzx.lowering.bridges.claveles` converts to and from an
+actual claveles `CircuitRepr`, and `cvzx.lowering.lowering` carries a closed diagram the rest of
+the way to a concrete claveles `DependencyDAG` via a pluggable per-QPU backend.
 
 This documentation has three parts:
 
 - **{doc}`theory`** — the CV ZX calculus background this library implements, and a
   translation table between the paper's notation and `cvzx`'s classes/functions.
 - **{doc}`user_guide/index`** — task-oriented guides for building, rewriting, optimizing,
-  converting to/from mqc3 circuits, and visualizing diagrams, with runnable examples drawn
+  converting to/from claveles circuits, and visualizing diagrams, with runnable examples drawn
   from the test suite.
 - **{doc}`dev_guide/index`** — the architectural decisions behind the codebase: why the
   rewrite engine operates on graphs rather than the `Diagram` tree directly, how the

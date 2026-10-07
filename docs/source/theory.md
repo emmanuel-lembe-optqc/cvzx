@@ -73,7 +73,7 @@ but are not named directly in the paper's Table I — `ShearXInvariantGate`/`She
 from), `Squeezing45Gate` (squeezing at a $45°$ angle, Eq. (67)'s balanced-beamsplitter
 building block), `ArbitraryGate` ($R(\alpha)S(\lambda)R(\beta)$, the general one-mode
 Gaussian form of Theorem 2 / Table III), `TwoModeShearGate`, and `MeasurementGate` (a
-homodyne effect — see its docstring for the derivation). Their naming mirrors MQC3's
+homodyne effect — see its docstring for the derivation). Their naming mirrors claveles's
 `graph.ops`/`circuit.ops` module, since a `cvzx` diagram is meant to
 compile onto that machinery.
 

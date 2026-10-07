@@ -1,15 +1,15 @@
-"""Plugin registry for lowering a cvzx `Diagram` into an mqc3 `DependencyDAG`.
+"""Plugin registry for lowering a cvzx `Diagram` into a claveles `DependencyDAG`.
 
 A `LoweringBackend` is any strategy for performing the `Diagram ->
 DependencyDAG` step; backends register themselves under a name via the
 `register_backend` class decorator, and `graph_to_dependency_dag(diagram,
-backend=...)` dispatches to whichever one is requested (`"mqc3"`, the
-bundled reference backend built on `cvzx.lowering.bridges.mqc3.to_circuit_repr`,
+backend=...)` dispatches to whichever one is requested (`"claveles"`, the
+bundled reference backend built on `cvzx.lowering.bridges.claveles.to_circuit_repr`,
 by default). Adding support for a QPU that needs a different lowering
 means writing and registering one more `LoweringBackend` subclass --
 `get_backend`/`graph_to_dependency_dag` and every existing backend stay
 untouched. See :doc:`../user_guide/circuit_conversion` for why this
-plugin point exists and how it mirrors mqc3's own `GraphEmbedder` one
+plugin point exists and how it mirrors claveles' own `GraphEmbedder` one
 downstream of `DependencyDAG`.
 """
 
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from mqc3.graph.embed.dep_dag import DependencyDAG
+    from claveles.graph.embed.dep_dag import DependencyDAG
 
     from cvzx.ir.base import Diagram
 
@@ -37,7 +37,7 @@ __all__ = [
 
 
 class LoweringBackend(ABC):
-    """A strategy for lowering a cvzx `Diagram` into an mqc3 `DependencyDAG`.
+    """A strategy for lowering a cvzx `Diagram` into a claveles `DependencyDAG`.
 
     Subclasses must be constructible with no arguments (`register_backend`
     instantiates them immediately at registration time).
@@ -45,7 +45,7 @@ class LoweringBackend(ABC):
 
     @abstractmethod
     def to_dependency_dag(self, diagram: Diagram) -> DependencyDAG:
-        """Lower `diagram` into an mqc3 `DependencyDAG`.
+        """Lower `diagram` into a claveles `DependencyDAG`.
 
         Parameters
         ----------
@@ -57,7 +57,7 @@ class LoweringBackend(ABC):
         Returns
         -------
         DependencyDAG
-            The resulting dependency DAG, ready for mqc3's own
+            The resulting dependency DAG, ready for claveles' own
             `GraphEmbedder` machinery to embed into a concrete
             `GraphRepr`.
         """
@@ -127,8 +127,8 @@ def list_backends() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def graph_to_dependency_dag(diagram: Diagram, backend: str = "mqc3") -> DependencyDAG:
-    """Lower a cvzx `Diagram` into an mqc3 `DependencyDAG` via a named backend.
+def graph_to_dependency_dag(diagram: Diagram, backend: str = "claveles") -> DependencyDAG:
+    """Lower a cvzx `Diagram` into a claveles `DependencyDAG` via a named backend.
 
     Parameters
     ----------
@@ -136,7 +136,7 @@ def graph_to_dependency_dag(diagram: Diagram, backend: str = "mqc3") -> Dependen
         The cvzx diagram to lower.
     backend : str
         Name of the registered `LoweringBackend` to use. Defaults to
-        `"mqc3"`, the bundled reference backend (see this module's
+        `"claveles"`, the bundled reference backend (see this module's
         docstring). Must name a backend `list_backends()` lists, or
         `get_backend` raises `KeyError`.
 
@@ -148,30 +148,30 @@ def graph_to_dependency_dag(diagram: Diagram, backend: str = "mqc3") -> Dependen
     return get_backend(backend).to_dependency_dag(diagram)
 
 
-@register_backend("mqc3")
+@register_backend("claveles")
 class Mqc3ReferenceBackend(LoweringBackend):
     """Reference lowering backend: `Diagram` -> `CircuitRepr` -> `DependencyDAG`.
 
-    Converts via `cvzx.lowering.bridges.mqc3.to_circuit_repr` and then builds the
-    `DependencyDAG` using mqc3's own `_DependencyBuilder.from_circuit()`
+    Converts via `cvzx.lowering.bridges.claveles.to_circuit_repr` and then builds the
+    `DependencyDAG` using claveles' own `_DependencyBuilder.from_circuit()`
     (through `DependencyDAG`'s own constructor) -- no cvzx-specific
     dependency-graph logic is reimplemented here. See
-    `cvzx.lowering.bridges.mqc3` for the exact per-gate translation performed
+    `cvzx.lowering.bridges.claveles` for the exact per-gate translation performed
     and its documented limitations, which apply transitively to this
     backend.
     """
 
     def to_dependency_dag(self, diagram: Diagram) -> DependencyDAG:
-        """Lower `diagram` via `to_circuit_repr` then mqc3's own `DependencyDAG`.
+        """Lower `diagram` via `to_circuit_repr` then claveles' own `DependencyDAG`.
 
         Returns
         -------
         DependencyDAG
             The resulting dependency DAG.
         """
-        from mqc3.graph.embed.dep_dag import DependencyDAG  # ruff: ignore[import-outside-top-level]
+        from claveles.graph.embed.dep_dag import DependencyDAG  # ruff: ignore[import-outside-top-level]
 
-        from cvzx.lowering.bridges.mqc3 import to_circuit_repr  # ruff: ignore[import-outside-top-level]
+        from cvzx.lowering.bridges.claveles import to_circuit_repr  # ruff: ignore[import-outside-top-level]
 
         circuit = to_circuit_repr(diagram)
         return DependencyDAG(circuit)
@@ -187,7 +187,7 @@ class CvzxDirectBackend(LoweringBackend):
     and dual-backend (uses whichever of `networkx`/`rustworkx` is
     selected, or the default -- see `cvzx.config.Backend`). See
     `cvzx.lowering.dag` for the full algorithm; per-leaf op translation
-    is still delegated to `cvzx.lowering.bridges.mqc3`'s own translators (no
+    is still delegated to `cvzx.lowering.bridges.claveles`'s own translators (no
     duplicated translation logic), so the same `FeedForward` support and
     documented per-gate limitations apply. Automatically closes any open
     input/output ports first via `cvzx.passes.completion.complete_boundaries()`.

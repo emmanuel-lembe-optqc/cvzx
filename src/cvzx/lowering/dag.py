@@ -1,4 +1,4 @@
-"""Extract an mqc3 `DependencyDAG` directly from a `CVZXGraph`.
+"""Extract a claveles `DependencyDAG` directly from a `CVZXGraph`.
 
 An alternative to `cvzx.lowering.Mqc3ReferenceBackend` (which canonicalizes
 into `normalize_diagram`'s alternating stages first): `extract_dependency_dag()`
@@ -8,7 +8,7 @@ sweep over the `CVZXGraph`'s own node/edge structure, anchored at
 `"contracted_internal"` wire edges until each mode reaches a
 `GateRegister.measurement_nodes` node -- without requiring canonical form
 first. The resulting mode-ordered leaf sequence is fed through
-`cvzx.lowering.bridges.mqc3`'s own per-leaf translators to build a
+`cvzx.lowering.bridges.claveles`'s own per-leaf translators to build a
 `CircuitRepr`, which is handed to `DependencyDAG`. See
 :doc:`../user_guide/circuit_conversion` for the full step-by-step
 algorithm and design rationale -- only the key steps are kept here.
@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING
 from cvzx.backend import get_backend_modules
 from cvzx.config import Backend
 from cvzx.ir.base import Diagram, VoidDiagram
-from cvzx.lowering.bridges.mqc3 import MeasurementOps, _apply_1mode_leaf, _apply_2mode_leaf, _open_mode_state
+from cvzx.lowering.bridges.claveles import MeasurementOps, _apply_1mode_leaf, _apply_2mode_leaf, _open_mode_state
 from cvzx.passes.completion import complete_boundaries
 
 if TYPE_CHECKING:
-    from mqc3.circuit import CircuitRepr
-    from mqc3.graph.embed.dep_dag import DependencyDAG
+    from claveles.circuit import CircuitRepr
+    from claveles.graph.embed.dep_dag import DependencyDAG
 
     from cvzx.backends.nx.graph import CVZXGraph as NxCVZXGraph
     from cvzx.backends.rx.graph import CVZXGraph as RxCVZXGraph
@@ -214,13 +214,13 @@ def _mode_ordered_leaves(  # ruff: ignore[complex-structure, too-many-branches, 
 
 
 def _build_circuit_repr(diagram_name: str, access: _GraphAccess, graph_mod: object) -> "CircuitRepr":
-    """Build the mqc3 `CircuitRepr` for `access`'s graph via a direct forward sweep.
+    """Build the claveles `CircuitRepr` for `access`'s graph via a direct forward sweep.
 
     Returns
     -------
     CircuitRepr
     """
-    from mqc3.circuit import CircuitRepr  # ruff: ignore[import-outside-top-level]
+    from claveles.circuit import CircuitRepr  # ruff: ignore[import-outside-top-level]
 
     circuit = CircuitRepr(diagram_name)
     measurement_ops: MeasurementOps = {}
@@ -232,8 +232,7 @@ def _build_circuit_repr(diagram_name: str, access: _GraphAccess, graph_mod: obje
             if isinstance(leaf, VoidDiagram):
                 continue
             (mode_id,) = modes
-            circuit.Q(mode_id)
-            circuit.set_initial_state(mode_id, _open_mode_state(leaf, mode_id))
+            circuit.Q(mode_id) | _open_mode_state(leaf, mode_id)
             continue
 
         if len(modes) == 2:  # ruff: ignore[magic-value-comparison]
@@ -254,7 +253,7 @@ def extract_dependency_dag(
     input_basis: str | list[str] = "Q",
     output_basis: str | list[str] = "Q",
 ) -> "DependencyDAG":
-    """Extract an mqc3 `DependencyDAG` directly from `diagram`'s `CVZXGraph`.
+    """Extract a claveles `DependencyDAG` directly from `diagram`'s `CVZXGraph`.
 
     Registered as `"cvzx-direct"` in `cvzx.lowering.lowering`'s backend
     registry. Discovers execution order from the graph's own wire/classical
@@ -280,7 +279,7 @@ def extract_dependency_dag(
     Returns
     -------
     DependencyDAG
-        The resulting dependency DAG, ready for mqc3's own
+        The resulting dependency DAG, ready for claveles' own
         `GraphEmbedder` machinery to embed into a concrete `GraphRepr`.
 
     Raises
@@ -288,7 +287,7 @@ def extract_dependency_dag(
     ValueError
         If `complete=False` and `diagram` still has open ports.
     """
-    from mqc3.graph.embed.dep_dag import DependencyDAG  # ruff: ignore[import-outside-top-level]
+    from claveles.graph.embed.dep_dag import DependencyDAG  # ruff: ignore[import-outside-top-level]
 
     if complete:
         result = complete_boundaries(diagram, backend=backend, input_basis=input_basis, output_basis=output_basis)

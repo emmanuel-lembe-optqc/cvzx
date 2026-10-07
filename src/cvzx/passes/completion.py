@@ -1,7 +1,7 @@
 """Close a diagram's open output boundary with symbolic measurement effects.
 
 `optimize()`'s rewrite rules deliberately never terminate a wire on their
-own, so a diagram destined for `cvzx.lowering.bridges.mqc3.to_circuit_repr`
+own, so a diagram destined for `cvzx.lowering.bridges.claveles.to_circuit_repr`
 generally still has open output ports. `complete_diagram()` closes each
 one with a fresh, symbolically-labeled `(1, 0)` `QSpider`/`PSpider`
 measurement effect (`ZxPoly({1: -m})` for a fresh symbol `m`);

@@ -1,10 +1,10 @@
-"""Tests for `cvzx.lowering.bridges.mqc3` (cvzx `Diagram` -> mqc3 `CircuitRepr`).
+"""Tests for `cvzx.lowering.bridges.claveles` (cvzx `Diagram` -> claveles `CircuitRepr`).
 
 Since cvzx has no numeric (Wigner/Gaussian) simulation backend, these
 tests check what can actually be checked without one: that a `Diagram`
-produced by `cvzx.lowering.bridges.mqc3.from_circuit_repr` round-trips back into
+produced by `cvzx.lowering.bridges.claveles.from_circuit_repr` round-trips back into
 a well-formed `CircuitRepr` (right survivor count, and constructs a real
-mqc3 `DependencyDAG` without error -- the actual downstream consumer of
+claveles `DependencyDAG` without error -- the actual downstream consumer of
 a `CircuitRepr`), that `ControlledSumGate` emits the exact Fourier-conjugated
 `ControlledZ` sequence it's documented to, and that every remaining
 documented unsupported case (`CubicPhaseGate`, a nonzero-phase state/effect
@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import numpy as np
 import sympy
-from mqc3.circuit import CircuitRepr
-from mqc3.circuit.ops import intrinsic
-from mqc3.graph.embed.dep_dag import DependencyDAG
+from claveles.circuit import CircuitRepr
+from claveles.circuit.ops import intrinsic
+from claveles.graph.embed.dep_dag import DependencyDAG
 
 from cvzx.ir.base import CompositionDiagram, ContractedDiagram, QSpider, TensorDiagram, ZxPoly
-from cvzx.lowering.bridges.mqc3 import from_circuit_repr
-from cvzx.lowering.bridges.mqc3 import to_circuit_repr
+from cvzx.lowering.bridges.claveles import from_circuit_repr
+from cvzx.lowering.bridges.claveles import placed_operations, to_circuit_repr
 from cvzx.exceptions import UnboundMeasurementError
 from cvzx.ir.gates import ControlledSumGate, CubicPhaseGate, PhaseRotationGate
 
@@ -66,7 +66,7 @@ def test_round_trip_produces_well_formed_circuit_repr():
 def test_round_trip_dependency_dag_constructs():
     """The actual point of this module.
 
-    `DependencyDAG` (mqc3's own, already-correct machinery) must accept
+    `DependencyDAG` (claveles' own, already-correct machinery) must accept
     the round-tripped circuit.
     """
     circuit = _all_gates_circuit()
@@ -95,31 +95,31 @@ def _csum_diagram(gain: float, control: int, target: int) -> CompositionDiagram:
 
 
 def test_controlled_sum_gate_emits_fourier_conjugated_controlled_z():
-    """`ControlledSumGate` has no bare mqc3 primitive -- it's emitted as
+    """`ControlledSumGate` has no bare claveles primitive -- it's emitted as
     `ControlledZ` conjugated by a Fourier rotation on the target mode (see
-    the user guide's "Converting to and from mqc3 circuits" page for the
+    the user guide's "Converting to and from claveles circuits" page for the
     Heisenberg-picture derivation: `CSUM(g) = (I ⊗ F_t) CZ(g) (I ⊗ F_t†)`).
 
     Checks the exact three-op emission (angles, gain sign, and which
     mode gets the Fourier pair) for both `target=1` and `target=2`, and
-    that mqc3's own `DependencyDAG` accepts the result.
+    that claveles' own `DependencyDAG` accepts the result.
     """
     circuit = to_circuit_repr(_csum_diagram(0.7, control=1, target=2))
-    ops = list(circuit)
-    assert len(ops) == 3
+    placed = placed_operations(circuit)
+    assert len(placed) == 3
 
-    rot1, cz, rot2 = ops
+    (rot1, rot1_modes), (cz, cz_modes), (rot2, rot2_modes) = placed
     assert type(rot1).__name__ == "PhaseRotation"
     assert type(cz).__name__ == "ControlledZ"
     assert type(rot2).__name__ == "PhaseRotation"
 
-    target_mode = rot1.opnd().get_ids()[0]
-    assert rot2.opnd().get_ids()[0] == target_mode
-    assert rot1.parameters() == [-np.pi / 2]
-    assert rot2.parameters() == [np.pi / 2]
-    assert cz.parameters() == [-0.7]
+    target_mode = rot1_modes[0]
+    assert rot2_modes[0] == target_mode
+    assert list(rot1.parameters()) == [-np.pi / 2]
+    assert list(rot2.parameters()) == [np.pi / 2]
+    assert list(cz.parameters()) == [-0.7]
 
-    control_target_modes = set(cz.opnd().get_ids())
+    control_target_modes = set(cz_modes)
     assert target_mode in control_target_modes
     assert len(control_target_modes) == 2  # noqa: PLR2004
 
@@ -132,11 +132,11 @@ def test_controlled_sum_gate_target_mode_selection():
     circuit_a = to_circuit_repr(_csum_diagram(0.5, control=1, target=2))
     circuit_b = to_circuit_repr(_csum_diagram(0.5, control=2, target=1))
 
-    rot_a = list(circuit_a)[0]
-    rot_b = list(circuit_b)[0]
+    rot_a = placed_operations(circuit_a)[0][1]
+    rot_b = placed_operations(circuit_b)[0][1]
     # Different physical mode gets the Fourier pair depending on which
     # gate-local mode is the target.
-    assert rot_a.opnd().get_ids()[0] != rot_b.opnd().get_ids()[0]
+    assert rot_a[0] != rot_b[0]
 
     DependencyDAG(circuit_a)
     DependencyDAG(circuit_b)
@@ -145,7 +145,7 @@ def test_controlled_sum_gate_target_mode_selection():
 def test_cubic_phase_gate_raises():
     """Reject `CubicPhaseGate` rather than silently mistranslating it.
 
-    It is a genuinely non-Gaussian gate; mqc3's intrinsic set is
+    It is a genuinely non-Gaussian gate; claveles' intrinsic set is
     Gaussian-only, so it has no translation.
 
     Raises
@@ -208,7 +208,7 @@ def test_symbolic_parameter_raises():
 def test_external_inputs_raise_value_error():
     """Reject a `Diagram` with external inputs rather than silently mistranslating it.
 
-    mqc3 circuits have no concept of an externally supplied input mode
+    claveles circuits have no concept of an externally supplied input mode
     -- every mode must originate from a state leaf.
 
     Raises

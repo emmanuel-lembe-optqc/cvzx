@@ -50,7 +50,7 @@ mid-circuit via a width-changing sub-`CompositionDiagram` nested inside one row 
 `TensorDiagram`) can show up in any number of container shapes, every diagram normalizes to
 the same alternating type-1/type-2 form, with the same micro-layer ordering and the same
 `connectivity`-dict convention between stages — one shape every rule, present and future, can
-assume rather than re-derive, and the same shape `cvzx.lowering.bridges.mqc3.to_circuit_repr`
+assume rather than re-derive, and the same shape `cvzx.lowering.bridges.claveles.to_circuit_repr`
 relies on for its own stage-by-stage walk (see {doc}`circuit_conversion
 <../user_guide/circuit_conversion>`). This is also why `cvzx.passes.optimize.optimize` calls
 `normalize_diagram` at the start of *every* round, not just once at the start of the whole

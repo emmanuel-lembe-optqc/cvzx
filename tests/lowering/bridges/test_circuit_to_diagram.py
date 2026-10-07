@@ -1,4 +1,4 @@
-"""Tests for `cvzx.lowering.bridges.mqc3` (mqc3 `CircuitRepr` -> cvzx `Diagram`).
+"""Tests for `cvzx.lowering.bridges.claveles` (claveles `CircuitRepr` -> cvzx `Diagram`).
 
 Since cvzx has no numeric (Wigner/Gaussian) simulation backend, these
 tests check what can actually be checked without one: that translation
@@ -19,17 +19,17 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from mqc3.circuit import CircuitRepr
-from mqc3.circuit.ops import intrinsic, std
-from mqc3.circuit.state import BosonicState, GaussianState, HardwareConstrainedSqueezedState
-from mqc3.feedforward import FeedForward
+from claveles.circuit import CircuitRepr
+from claveles.circuit.ops import intrinsic, std
+from claveles.circuit.state import BosonicState, GaussianState, HardwareConstrainedSqueezedState
+from claveles.feedforward import FeedForward
 
-from cvzx.lowering.bridges.mqc3 import from_circuit_repr
+from cvzx.lowering.bridges.claveles import from_circuit_repr
 from cvzx.backends.nx.graph import to_diagram, to_graph
 from cvzx.passes.optimize import optimize
 
 if TYPE_CHECKING:
-    from mqc3.circuit.ops._base import MeasuredVariable
+    from claveles.circuit.ops._base import MeasuredVariable
 
 
 def _all_gates_circuit() -> CircuitRepr:
@@ -116,8 +116,7 @@ def test_beam_splitter_edge_angles_do_not_raise():
 
 def test_hardware_constrained_squeezed_state_nonzero_phi():
     circuit = CircuitRepr("squeezed_init")
-    circuit.Q(0)
-    circuit.set_initial_state(0, HardwareConstrainedSqueezedState(phi=0.37))
+    circuit.Q(0) | HardwareConstrainedSqueezedState(phi=0.37)
     circuit.Q(0) | intrinsic.PhaseRotation(0.2)
     circuit.Q(0) | intrinsic.Measurement(0.5)
     diagram = from_circuit_repr(circuit)
@@ -126,8 +125,7 @@ def test_hardware_constrained_squeezed_state_nonzero_phi():
 
 def test_bosonic_state_single_peak_squeezed_is_supported():
     circuit = CircuitRepr("bosonic_squeezed")
-    circuit.Q(0)
-    circuit.set_initial_state(0, BosonicState.squeezed(r=0.4, phi=0.6))
+    circuit.Q(0) | BosonicState.squeezed(r=0.4, phi=0.6)
     circuit.Q(0) | intrinsic.Measurement(0.0)
     diagram = from_circuit_repr(circuit)
     assert diagram.num_outputs == 0
@@ -135,11 +133,8 @@ def test_bosonic_state_single_peak_squeezed_is_supported():
 
 def test_bosonic_state_multi_peak_raises():
     circuit = CircuitRepr("bosonic_multi_peak")
+    circuit.Q(0) | BosonicState(np.array([0.5, 0.5]), [GaussianState.vacuum(), GaussianState.vacuum()])
     circuit.Q(0) | intrinsic.PhaseRotation(0.1)
-    circuit.set_initial_state(
-        0,
-        BosonicState(np.array([0.5, 0.5]), [GaussianState.vacuum(), GaussianState.vacuum()]),
-    )
     with pytest.raises(NotImplementedError, match="multi-peak"):
         from_circuit_repr(circuit)
 

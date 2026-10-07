@@ -2,8 +2,8 @@
 
 Checks the registry mechanics (a fresh backend can be registered and
 looked up, an unknown name raises with a helpful message, dispatch
-actually calls the requested backend) and that the bundled `"mqc3"`
-reference backend produces a real, well-formed mqc3 `DependencyDAG`
+actually calls the requested backend) and that the bundled `"claveles"`
+reference backend produces a real, well-formed claveles `DependencyDAG`
 end to end from a cvzx `Diagram`.
 """
 
@@ -12,11 +12,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from mqc3.circuit import CircuitRepr
-from mqc3.circuit.ops import intrinsic
-from mqc3.graph.embed.dep_dag import DependencyDAG
+from claveles.circuit import CircuitRepr
+from claveles.circuit.ops import intrinsic
+from claveles.graph.embed.dep_dag import DependencyDAG
 
-from cvzx.lowering.bridges.mqc3 import from_circuit_repr
+from cvzx.lowering.bridges.claveles import from_circuit_repr
 from cvzx.lowering.lowering import (
     LoweringBackend,
     Mqc3ReferenceBackend,
@@ -37,9 +37,9 @@ def _simple_diagram() -> Diagram:
     return from_circuit_repr(circuit)
 
 
-def test_mqc3_backend_is_registered_by_default():
-    assert "mqc3" in list_backends()
-    assert isinstance(get_backend("mqc3"), Mqc3ReferenceBackend)
+def test_claveles_backend_is_registered_by_default():
+    assert "claveles" in list_backends()
+    assert isinstance(get_backend("claveles"), Mqc3ReferenceBackend)
 
 
 def test_graph_to_dependency_dag_default_backend_constructs_real_dag():
@@ -49,16 +49,16 @@ def test_graph_to_dependency_dag_default_backend_constructs_real_dag():
     assert dag.dag.number_of_nodes() > 0
 
 
-def test_graph_to_dependency_dag_explicit_mqc3_backend_matches_default():
+def test_graph_to_dependency_dag_explicit_claveles_backend_matches_default():
     diagram = _simple_diagram()
     default_dag = graph_to_dependency_dag(diagram)
-    explicit_dag = graph_to_dependency_dag(diagram, backend="mqc3")
+    explicit_dag = graph_to_dependency_dag(diagram, backend="claveles")
     assert default_dag.dag.number_of_nodes() == explicit_dag.dag.number_of_nodes()
     assert default_dag.dag.number_of_edges() == explicit_dag.dag.number_of_edges()
 
 
 def test_unknown_backend_raises_key_error_listing_available_backends():
-    with pytest.raises(KeyError, match="mqc3"):
+    with pytest.raises(KeyError, match="claveles"):
         graph_to_dependency_dag(_simple_diagram(), backend="nonexistent_qpu")
 
 

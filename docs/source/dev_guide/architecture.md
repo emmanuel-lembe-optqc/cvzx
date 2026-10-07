@@ -23,12 +23,12 @@ canonicalize into, and nx was it first); `optimize()` bridges that by converting
 whichever backend module `to_graph`/`to_diagram` it was given.
 
 Three more modules sit downstream of `passes/normalize.py`, not pictured above:
-`cvzx.lowering.bridges.mqc3` (both `from_circuit_repr` and `to_circuit_repr` — the two
-directions of the mqc3 bridge live in one module, see below) depends on `ir/base.py` +
+`cvzx.lowering.bridges.claveles` (both `from_circuit_repr` and `to_circuit_repr` — the two
+directions of the claveles bridge live in one module, see below) depends on `ir/base.py` +
 `ir/gates.py` + `passes/normalize.py` (nothing from `backends/nx/rules.py` or
 `passes/optimize.py`); `cvzx.passes.completion` (boundary closing) depends only on
 `cvzx.backend`/`ir/base.py`; and `cvzx.lowering.dag` + `cvzx.lowering.lowering` sit downstream
-of both `lowering/bridges/mqc3.py` and `passes/completion.py` in turn. See the pipeline
+of both `lowering/bridges/claveles.py` and `passes/completion.py` in turn. See the pipeline
 diagram below for where they fit, and {doc}`../user_guide/circuit_conversion` for how to use
 them.
 
@@ -175,9 +175,9 @@ compositions) but left in place there.
 
 ## The full pipeline: `CircuitRepr` to `DependencyDAG`
 
-The end-to-end path from a user-authored mqc3 `CircuitRepr`, through `cvzx`'s own
-canonicalization/optimization/boundary-completion, to an mqc3 `DependencyDAG` (every box below
-is the actual function call that performs that step; the greyed-out tail is mqc3's own
+The end-to-end path from a user-authored claveles `CircuitRepr`, through `cvzx`'s own
+canonicalization/optimization/boundary-completion, to a claveles `DependencyDAG` (every box below
+is the actual function call that performs that step; the greyed-out tail is claveles' own
 downstream embedding/machinery pipeline, which `cvzx` hands off to but does not implement):
 
 ```{image} ../_static/pipeline_overview.png
@@ -185,26 +185,26 @@ downstream embedding/machinery pipeline, which `cvzx` hands off to but does not 
 :width: 100%
 ```
 
-`cvzx.lowering.bridges.mqc3.from_circuit_repr` and `cvzx.lowering.bridges.mqc3.to_circuit_repr` are
+`cvzx.lowering.bridges.claveles.from_circuit_repr` and `cvzx.lowering.bridges.claveles.to_circuit_repr` are
 the two halves of the round trip at the `Diagram` boundary. `cvzx.passes.completion.complete_boundaries`
 closes an optimized diagram's open input/output ports (fresh ideal states in, fresh symbolic
-measurement effects out) — the precondition both lowering backends below rely on: an mqc3
+measurement effects out) — the precondition both lowering backends below rely on: a claveles
 `CircuitRepr`/`DependencyDAG` has no concept of an externally-supplied mode, so every wire must
 terminate at a real state/measurement node first. `cvzx.lowering.lowering.graph_to_dependency_dag`
-is the pluggable dispatch point that turns that closed diagram into an mqc3 `DependencyDAG`.
+is the pluggable dispatch point that turns that closed diagram into a claveles `DependencyDAG`.
 
 `cvzx.lowering.lowering` exists as a plugin point (rather than hardcoding one fixed
 `Diagram -> DependencyDAG` path) because a `DependencyDAG` can be built more than one way: the
-bundled `"mqc3"` backend (`Mqc3ReferenceBackend`) is the simplest correct implementation —
-`to_circuit_repr` then mqc3's own `DependencyDAG(circuit)` constructor — while `"cvzx-direct"`
+bundled `"claveles"` backend (`Mqc3ReferenceBackend`) is the simplest correct implementation —
+`to_circuit_repr` then claveles' own `DependencyDAG(circuit)` constructor — while `"cvzx-direct"`
 (`CvzxDirectBackend`) skips the `CircuitRepr` round-trip entirely and discovers execution order
 directly from the diagram's own `CVZXGraph` structure (dual-backend, via `cvzx.lowering.dag`),
-reusing `cvzx.lowering.bridges.mqc3`'s per-leaf translators rather than duplicating them. Both are
+reusing `cvzx.lowering.bridges.claveles`'s per-leaf translators rather than duplicating them. Both are
 verified to produce an isomorphic `DependencyDAG` for the same input. A QPU wanting a different
 construction strategy registers its own `LoweringBackend` without touching `get_backend` or any
-other registered backend. From there, `DependencyDAG` is QPU-agnostic and ready for mqc3's own
+other registered backend. From there, `DependencyDAG` is QPU-agnostic and ready for claveles' own
 `GraphEmbedder` (`beamsearch.py`/`greedy.py`) to embed into a `GraphRepr`, and ultimately
-`mqc3.machinery` to lower into a `MachineryRepr` — see {doc}`../user_guide/circuit_conversion`
+`claveles.machinery` to lower into a `MachineryRepr` — see {doc}`../user_guide/circuit_conversion`
 for a worked example and how to register an alternative `LoweringBackend`.
 
 ### The `optimize()` step in more detail

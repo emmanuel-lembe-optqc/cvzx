@@ -36,15 +36,15 @@ dependencies = [
   "matplotlib >= 3.7",
   "Pillow >= 9.0",
 
-  "grpcio ~= 1.71",
-  "protobuf ~= 5.29",
-  "requests >= 2.31, < 3",
 ]
 
 # [project.urls]
 
 [project.optional-dependencies]
 all = []
+claveles = [
+  "claveles-core @ git+ssh://git@github.com/OptQC-Corp/sdk-optqc.git",
+]
 docs = [
   "sphinx",
   "sphinx_copybutton",
@@ -60,8 +60,7 @@ dev = [
   "pytest-cov",
   "pathos",
 
-  # Once in production use optqc-sdk repo
-  "mqc3 @ git+https://github.com/HidehiroYonezawa/mqc3.git",
+    "claveles-core @ git+ssh://git@github.com/OptQC-Corp/sdk-optqc.git",
 
   # Document
   "cvzx[docs]",

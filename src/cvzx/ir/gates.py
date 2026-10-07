@@ -1425,7 +1425,7 @@ class CubicPhaseGate(CompactDiagram):
 
 @dataclass
 class ShearXInvariantGate(CompactDiagram):
-    r"""X-invariant shear gate P(kappa) (mqc3 `intrinsic.ShearXInvariant`).
+    r"""X-invariant shear gate P(kappa) (claveles `intrinsic.ShearXInvariant`).
 
     Leaves x-hat invariant and shifts p-hat by `2*kappa*x-hat` (see the
     gate catalog table for the full Heisenberg action). A quadratic-phase
@@ -1452,7 +1452,7 @@ class ShearXInvariantGate(CompactDiagram):
 
     References
     ----------
-    mqc3 `intrinsic.ShearXInvariant`; a quadratic-phase q-spider implements
+    claveles `intrinsic.ShearXInvariant`; a quadratic-phase q-spider implements
     this shear directly, the same pattern used by `PhaseRotationGate` and
     `SqueezingGate` for [1] Eq. (58)-(59).
     """
@@ -1533,7 +1533,7 @@ class ShearXInvariantGate(CompactDiagram):
 
 @dataclass
 class ShearPInvariantGate(CompactDiagram):
-    r"""P-invariant shear gate Q(eta) (mqc3 `intrinsic.ShearPInvariant`).
+    r"""P-invariant shear gate Q(eta) (claveles `intrinsic.ShearPInvariant`).
 
     Leaves p-hat invariant and shifts x-hat by `2*eta*p-hat` (see the gate
     catalog table for the full Heisenberg action). A quadratic-phase
@@ -1558,7 +1558,7 @@ class ShearPInvariantGate(CompactDiagram):
 
     References
     ----------
-    mqc3 `intrinsic.ShearPInvariant`; a quadratic-phase p-spider implements
+    claveles `intrinsic.ShearPInvariant`; a quadratic-phase p-spider implements
     this shear directly, the same pattern used by `PhaseRotationGate` and
     `SqueezingGate` for [1] Eq. (58)-(59).
     """
@@ -1639,16 +1639,19 @@ class ShearPInvariantGate(CompactDiagram):
 
 @dataclass
 class ArbitraryGate(CompactDiagram):
-    r"""Arbitrary single-mode Gaussian gate R(alpha) S(lam) R(beta) (mqc3 `intrinsic.Arbitrary`).
+    r"""Arbitrary single-mode Gaussian gate R(alpha) S(lam) R(beta) (claveles `intrinsic.Arbitrary`).
 
-    mqc3 defines this as the operator product `R(alpha) . S(lam) . R(beta)`
+    Note: claveles compiles (and the machine runs) `intrinsic.Arbitrary(alpha, beta, lam)` with the opposite squeezing
+    sign to its printed docstring; this gate follows the printed form and the claveles bridge flips `lam`.
+
+    claveles defines this as the operator product `R(alpha) . S(lam) . R(beta)`
     (rightmost applied first: the mode meets `R(beta)`, then `S(lam)`, then
     `R(alpha)`). `expand()` composes it, in signal-flow order, as::
 
         PhaseRotationGate(-beta) . SqueezingGate(e^lam) . PhaseRotationGate(-alpha)
 
     -- the sign flip on the rotations corrects for `PhaseRotationGate`'s own
-    convention (it implements mqc3's `R(-theta)`, not `R(theta)`); see
+    convention (it implements claveles' `R(-theta)`, not `R(theta)`); see
     :doc:`../user_guide/gates` for the full derivation and the
     `conjugate()` formula's justification.
 
@@ -1659,7 +1662,7 @@ class ArbitraryGate(CompactDiagram):
     beta : float | int | Expr
         Initial rotation angle.
     lam : float | int | Expr
-        Squeezing strength (natural-log convention, matching mqc3's `S(lam)`).
+        Squeezing strength (natural-log convention, matching claveles' `S(lam)`).
     parametric : bool
         If True, treat alpha, beta, lam as symbolic parameters. Default False.
     label : str
@@ -1675,7 +1678,7 @@ class ArbitraryGate(CompactDiagram):
 
     References
     ----------
-    mqc3 `intrinsic.Arbitrary`; decomposed here via cvzx's existing
+    claveles `intrinsic.Arbitrary`; decomposed here via cvzx's existing
     `PhaseRotationGate` and `SqueezingGate` ([1] Eq. (58)-(59)) with the
     sign correction noted above.
     """
@@ -1795,21 +1798,21 @@ class ArbitraryGate(CompactDiagram):
 
 @dataclass
 class Squeezing45Gate(CompactDiagram):
-    r"""45-degree squeezing gate (mqc3 `intrinsic.Squeezing45`).
+    r"""45-degree squeezing gate (claveles `intrinsic.Squeezing45`).
 
-    Defined by mqc3 as `R(-pi/4) S_V(cot theta) R(pi/4)` -- a special case
+    Defined by claveles as `R(-pi/4) S_V(cot theta) R(pi/4)` -- a special case
     of `ArbitraryGate` (`alpha=-pi/4`, `beta=pi/4`). `expand()` composes it
     directly, in signal-flow order, as::
 
         PhaseRotationGate(-pi/4) . SqueezingGate(tan theta) . PhaseRotationGate(pi/4)
 
-    See :doc:`../user_guide/gates` for how `tan(theta)` follows from mqc3's
+    See :doc:`../user_guide/gates` for how `tan(theta)` follows from claveles'
     `S_V(cot theta)` convention.
 
     Attributes
     ----------
     theta : float | int | Expr
-        Squeezing angle parameter (mqc3 convention).
+        Squeezing angle parameter (claveles convention).
     parametric : bool
         If True, treat theta as symbolic parameter. Default False.
     label : str
@@ -1825,7 +1828,7 @@ class Squeezing45Gate(CompactDiagram):
 
     References
     ----------
-    mqc3 `intrinsic.Squeezing45`; a special case of `ArbitraryGate`.
+    claveles `intrinsic.Squeezing45`; a special case of `ArbitraryGate`.
     """
 
     theta: float | int | Expr
@@ -1920,7 +1923,7 @@ class Squeezing45Gate(CompactDiagram):
 
 @dataclass
 class TwoModeShearGate(CompactDiagram):
-    r"""Two-mode shear gate P2(a, b) (mqc3 `intrinsic.TwoModeShear`).
+    r"""Two-mode shear gate P2(a, b) (claveles `intrinsic.TwoModeShear`).
 
     Shifts each mode's p-hat by `2a` times its own x-hat plus `b` times the
     other mode's x-hat, leaving both x-hats invariant (see the gate catalog
@@ -1950,7 +1953,7 @@ class TwoModeShearGate(CompactDiagram):
 
     References
     ----------
-    mqc3 `intrinsic.TwoModeShear`; decomposed here as a diagonal shear on
+    claveles `intrinsic.TwoModeShear`; decomposed here as a diagonal shear on
     each mode (see `ShearXInvariantGate`) composed with `ControlledZGate`.
     """
 
@@ -2045,7 +2048,7 @@ class TwoModeShearGate(CompactDiagram):
 
 @dataclass
 class MeasurementGate(CompactDiagram):
-    r"""Homodyne measurement effect (mqc3 `intrinsic.Measurement`).
+    r"""Homodyne measurement effect (claveles `intrinsic.Measurement`).
 
     Measures the quadrature `x-hat sin(theta) + p-hat cos(theta)`. This is
     not a unitary gate but an *effect* -- a diagram leaf with an output
@@ -2082,7 +2085,7 @@ class MeasurementGate(CompactDiagram):
 
     References
     ----------
-    mqc3 `intrinsic.Measurement`.
+    claveles `intrinsic.Measurement`.
     """
 
     theta: float | int | Expr
