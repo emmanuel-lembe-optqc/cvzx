@@ -23,6 +23,8 @@ from cvzx.passes.normalize import normalize_diagram
 from cvzx.utils.helpers import expand_two_mode_gates
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from cvzx.backends.nx.graph import CVZXGraph as NxCVZXGraph
     from cvzx.backends.nx.rules import RewriteRule as NxRewriteRule
     from cvzx.backends.rx.graph import CVZXGraph as RxCVZXGraph
@@ -202,12 +204,14 @@ def _simplify_to_fixed_point(
         changed = True
 
 
-def optimize(
+def optimize(  # ruff: ignore[too-many-arguments]
     diagram: Diagram,
     *,
     backend: Backend | str | None = None,
     assume_infinite_squeezing: bool = False,
     max_rounds: int = _DEFAULT_MAX_ROUNDS,
+    prune_epsilon: "float | Mapping[str, float] | None" = None,
+    prune_keep: "Callable[[Diagram], bool] | None" = None,
 ) -> OptimizeResult:
     """Simplify a diagram by repeatedly applying the CV ZX rewrite rules.
 
@@ -237,6 +241,12 @@ def optimize(
         Safety cap on the number of expand/simplify rounds, in case a
         diagram never reaches a fixed point. Defaults to
         `_DEFAULT_MAX_ROUNDS`.
+    prune_epsilon : float | Mapping[str, float] | None
+        If given, first replace near-identity Gaussian gates by identity wires with
+        `cvzx.passes.pruning.prune_small_gaussian_gates` (one threshold, or one per gate type), so the rules
+        then fuse them away. None (default) prunes nothing.
+    prune_keep : Callable[[Diagram], bool] | None
+        Passed to the pruning pass as ``keep``: a cost model's veto on each candidate gate.
 
     Returns
     -------
@@ -252,6 +262,11 @@ def optimize(
     if not isinstance(diagram, Diagram):
         msg = f"optimize() expects a Diagram, got {type(diagram).__name__}."
         raise TypeError(msg)
+
+    if prune_epsilon is not None:
+        from cvzx.passes.pruning import prune_small_gaussian_gates  # ruff: ignore[import-outside-top-level]
+
+        diagram = prune_small_gaussian_gates(diagram, prune_epsilon, keep=prune_keep).diagram
 
     _, graph_mod, rules_mod = get_backend_modules(backend)
     rules = _build_rules(rules_mod, assume_infinite_squeezing=assume_infinite_squeezing)

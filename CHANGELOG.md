@@ -7,6 +7,14 @@ development on `main` to date, grouped by area rather than by commit.
 
 ## [Unreleased]
 
+### Added
+
+- **Pruning of near-identity Gaussian gates** (`cvzx.passes.pruning.prune_small_gaussian_gates`, and
+  `optimize(..., prune_epsilon=, prune_keep=)`): per-type distances from identity, thresholds per gate type,
+  a `keep` callback for outside cost models, feedforward targets and symbolic gates protected. Pruned gates become
+  identity wires that are dropped from compositions with their wiring maps composed. User guide page
+  `user_guide/pruning.md`.
+
 ### Changed
 
 - **claveles replaces mqc3** as the circuit SDK: `cvzx.lowering.bridges.claveles` (`from_circuit_repr`,

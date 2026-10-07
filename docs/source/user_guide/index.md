@@ -11,6 +11,7 @@ quickstart
 gates
 rewrite_rules
 optimization
+pruning
 circuit_conversion
 visualization
 ```

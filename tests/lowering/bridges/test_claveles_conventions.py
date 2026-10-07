@@ -32,8 +32,12 @@ def _xxpp_to_xpxp(m: np.ndarray) -> np.ndarray:
 def _beam_splitter(alpha: float, beta: float) -> np.ndarray:
     s, d = alpha + beta, alpha - beta
     cs, ss, cd, sd = math.cos(s), math.sin(s), math.cos(d), math.sin(d)
-    return np.array([[cs * cd, ss * sd, -ss * cd, sd * cs], [ss * sd, cs * cd, sd * cs, -ss * cd],
-                     [ss * cd, -sd * cs, cs * cd, ss * sd], [-sd * cs, ss * cd, ss * sd, cs * cd]])
+    return np.array([
+        [cs * cd, ss * sd, -ss * cd, sd * cs],
+        [ss * sd, cs * cd, sd * cs, -ss * cd],
+        [ss * cd, -sd * cs, cs * cd, ss * sd],
+        [-sd * cs, ss * cd, ss * sd, cs * cd],
+    ])
 
 
 def _matrix(op) -> np.ndarray:  # noqa: ANN001
@@ -199,8 +203,8 @@ def test_controlled_sum_export_matches_cvzx_semantics(gain, control, target):
     circuit = to_circuit_repr(CompositionDiagram([state, ControlledSumGate(gain, control=control, target=target)]))
     c, t = control - 1, target - 1
     expected = np.eye(4)
-    expected[2 * t, 2 * c] = gain              # x_t += g x_c
-    expected[2 * c + 1, 2 * t + 1] = -gain     # p_c -= g p_t
+    expected[2 * t, 2 * c] = gain  # x_t += g x_c
+    expected[2 * c + 1, 2 * t + 1] = -gain  # p_c -= g p_t
     np.testing.assert_allclose(_unitary_matrix(circuit), expected, atol=1e-12)
 
 
@@ -230,3 +234,28 @@ def test_feedforward_survives_the_round_trip():
     assert sources, "the feedforward was lost"
     assert all(any(p is pl for pl in r.placements) for p in sources)
     DependencyDAG(r)
+
+
+def test_pruned_circuit_stays_valid_and_close():
+    """Import, prune a near-identity beam splitter and a tiny rotation, export: moments move by O(epsilon) only."""
+    from claveles.graph.embed.dep_dag import DependencyDAG
+
+    from cvzx.passes.pruning import prune_small_gaussian_gates
+
+    c = CircuitRepr("prune")
+    c.Q(0) | HardwareConstrainedSqueezedState(phi=0.0)
+    c.Q(1) | HardwareConstrainedSqueezedState(phi=0.4)
+    c.Q(0, 1) | intrinsic.ControlledZ(0.8)
+    c.Q(0, 1) | intrinsic.BeamSplitter(math.cos(1e-4), 0.0)
+    c.Q(1) | intrinsic.PhaseRotation(2e-4)
+    c.Q(0) | intrinsic.Measurement(0.3)
+    c.Q(1) | intrinsic.Measurement(1.0)
+    res = prune_small_gaussian_gates(from_circuit_repr(c), 1e-3)
+    assert {p.kind for p in res.pruned} >= {"beam_splitter"}
+    pruned = to_circuit_repr(res.diagram)
+    DependencyDAG(pruned)
+    assert len(placed_operations(pruned)) < len(placed_operations(_round_trip(c)))
+    mean, cov = _outcome_moments(c)
+    mean2, cov2 = _outcome_moments(pruned)
+    np.testing.assert_allclose(mean2, mean, atol=1e-3)
+    np.testing.assert_allclose(cov2, cov, atol=5e-3)
