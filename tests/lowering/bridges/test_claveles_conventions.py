@@ -259,3 +259,58 @@ def test_pruned_circuit_stays_valid_and_close():
     mean2, cov2 = _outcome_moments(pruned)
     np.testing.assert_allclose(mean2, mean, atol=1e-3)
     np.testing.assert_allclose(cov2, cov, atol=5e-3)
+
+
+def _random_circuit(n_modes: int, n_gates: int, seed: int) -> CircuitRepr:
+    rng = np.random.default_rng(seed)
+    c = CircuitRepr(f"random{seed}")
+    for m in range(n_modes):
+        c.Q(m) | HardwareConstrainedSqueezedState(phi=float(rng.uniform(0, math.pi)))
+    for _ in range(n_gates):
+        kind = rng.integers(5)
+        if kind == 0:
+            c.Q(int(rng.integers(n_modes))) | intrinsic.PhaseRotation(float(rng.uniform(-3, 3)))
+        elif kind == 1:
+            c.Q(int(rng.integers(n_modes))) | intrinsic.Displacement(*(float(v) for v in rng.normal(size=2)))
+        else:
+            a, b = (int(v) for v in rng.choice(n_modes, 2, replace=False))
+            op = (
+                intrinsic.ControlledZ(float(rng.normal()))
+                if kind == 2
+                else intrinsic.BeamSplitter(float(rng.uniform(0.1, 0.9)), float(rng.uniform(-2, 2)))
+                if kind == 3
+                else intrinsic.TwoModeShear(*(float(v) for v in rng.normal(size=2)))
+            )
+            c.Q(a, b) | op
+    for m in range(n_modes):
+        c.Q(m) | intrinsic.Measurement(float(rng.uniform(0, math.pi)))
+    return c
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_random_multi_mode_circuits_round_trip(seed):
+    """Gates on arbitrary modes of 3-5 mode circuits: the wiring between layers must survive the round trip."""
+    circuit = _random_circuit(3 + seed % 3, 10, seed)
+    back = to_circuit_repr(from_circuit_repr(circuit, normalize=False))
+    assert _same_up_to_relabelling(_outcome_moments(circuit), _outcome_moments(back))
+
+
+@pytest.mark.xfail(
+    reason="normalize_diagram rewires multi-mode circuits with two-mode gates on non-adjacent modes "
+    "(32 of 40 random 3-5 mode circuits change); known bug, independent of the bridge",
+    strict=False,
+)
+def test_normalize_diagram_keeps_multi_mode_semantics():
+    circuit = _random_circuit(3, 10, 2)
+    assert _same_up_to_relabelling(_outcome_moments(circuit), _outcome_moments(_round_trip(circuit)))
+
+
+def _same_up_to_relabelling(a, b, atol: float = 1e-9) -> bool:
+    """Equal outcome moments after some permutation of the measured modes (the exporter numbers modes afresh)."""
+    from itertools import permutations
+
+    (m1, c1), (m2, c2) = a, b
+    return any(
+        np.allclose(m2[list(p)], m1, atol=atol) and np.allclose(c2[np.ix_(p, p)], c1, atol=atol)
+        for p in permutations(range(len(m1)))
+    )

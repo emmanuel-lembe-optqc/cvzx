@@ -675,7 +675,9 @@ def _naive_translate(circuit: CircuitRepr) -> Diagram:
         layer = TensorDiagram(rows) if len(rows) > 1 else rows[0]
 
         prev_position = {m: idx for idx, m in enumerate(open_modes)}
-        connectivity[len(diagrams) - 1] = {idx: prev_position[m] for idx, m in enumerate(new_row_order)}
+        # connectivity[i] maps an output port of diagram i to an input port of diagram i + 1 (as to_graph and
+        # normalize_diagram read it): mode m leaves the previous layer at prev_position[m] and enters this one at idx
+        connectivity[len(diagrams) - 1] = {prev_position[m]: idx for idx, m in enumerate(new_row_order)}
         diagrams.append(layer)
 
         open_modes = other if op.name() == "intrinsic.measurement" else new_row_order
